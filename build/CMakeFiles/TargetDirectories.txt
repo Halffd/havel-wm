@@ -1,0 +1,7 @@
+/home/half-arch/repos/havel/src/wm/build/CMakeFiles/wayland-compositor.dir
+/home/half-arch/repos/havel/src/wm/build/CMakeFiles/edit_cache.dir
+/home/half-arch/repos/havel/src/wm/build/CMakeFiles/rebuild_cache.dir
+/home/half-arch/repos/havel/src/wm/build/CMakeFiles/list_install_components.dir
+/home/half-arch/repos/havel/src/wm/build/CMakeFiles/install.dir
+/home/half-arch/repos/havel/src/wm/build/CMakeFiles/install/local.dir
+/home/half-arch/repos/havel/src/wm/build/CMakeFiles/install/strip.dir

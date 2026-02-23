@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/half-arch/repos/havel/src/wm/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
