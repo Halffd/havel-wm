@@ -203,11 +203,6 @@ static void process_cursor_motion(struct havel_wlr_server *server, uint32_t time
         return;
     }
 
-    struct havel_xdg_view *view = xdg_view_from_surface(surface);
-    if (view) {
-        focus_xdg_view(server, view, surface);
-    }
-
     wlr_seat_pointer_notify_enter(server->seat, surface, sx, sy);
     wlr_seat_pointer_notify_motion(server->seat, time_msec, sx, sy);
 }
