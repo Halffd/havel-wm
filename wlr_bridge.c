@@ -74,6 +74,8 @@ struct havel_wlr_server {
 
     struct wl_list xdg_views_ws[HAVEL_WORKSPACE_COUNT]; // havel_xdg_view::ws_link
 
+    bool workspace_tiling_enabled[HAVEL_WORKSPACE_COUNT];
+
     uint32_t active_workspace;
     struct wl_list outputs; // havel_output::link
 
@@ -127,6 +129,12 @@ struct havel_xdg_view {
     int x;
     int y;
 
+    int float_x;
+    int float_y;
+    int float_w;
+    int float_h;
+    bool have_float_geom;
+
     struct wl_listener map;
     struct wl_listener unmap;
     struct wl_listener destroy;
@@ -141,6 +149,12 @@ struct havel_xwayland_view {
     uint32_t workspace_id;
     int x;
     int y;
+
+    int float_x;
+    int float_y;
+    int float_w;
+    int float_h;
+    bool have_float_geom;
 };
 
 static void focus_xdg_view(struct havel_wlr_server *server, struct havel_xdg_view *view, struct wlr_surface *surface);
@@ -152,6 +166,8 @@ static struct havel_xdg_view *workspace_first_view(struct havel_wlr_server *serv
 static struct havel_xdg_view *workspace_next_view(struct havel_wlr_server *server, struct havel_xdg_view *cur, uint32_t workspace_id);
 static void workspace_swap_with_next(struct havel_wlr_server *server, bool backwards);
 
+static void workspace_toggle_tiling(struct havel_wlr_server *server);
+
 static void view_reparent_to_workspace(struct havel_xdg_view *view);
 static void workspace_set_active(struct havel_wlr_server *server, uint32_t workspace_id);
 static void workspace_step(struct havel_wlr_server *server, bool backwards);
@@ -159,11 +175,108 @@ static void workspace_step(struct havel_wlr_server *server, bool backwards);
 static void xdg_view_set_position(struct havel_xdg_view *view, int x, int y);
 static void xwayland_view_set_position(struct havel_xwayland_view *view, int x, int y);
 
+static struct havel_output *primary_output(struct havel_wlr_server *server);
+static void output_get_box(struct havel_output *out, struct wlr_box *box);
+
 static bool modifiers_have_alt_only(const struct wlr_keyboard_modifiers *mods) {
     if (!mods) {
         return false;
     }
+
     return (mods->depressed & WLR_MODIFIER_ALT) != 0;
+}
+
+static struct havel_output *output_at_cursor(struct havel_wlr_server *server) {
+    if (!server) {
+        return NULL;
+    }
+
+    struct wlr_output *wlr_out = wlr_output_layout_output_at(server->output_layout, server->cursor->x, server->cursor->y);
+    if (!wlr_out) {
+        return primary_output(server);
+    }
+
+    struct havel_output *out = NULL;
+    wl_list_for_each(out, &server->outputs, link) {
+        if (out->output == wlr_out) {
+            return out;
+        }
+    }
+    return primary_output(server);
+}
+
+static void view_apply_default_floating_geom_xdg(struct havel_wlr_server *server, struct havel_xdg_view *view) {
+    if (!server || !view || !view->xdg_surface || !view->xdg_surface->toplevel) {
+        return;
+    }
+
+    if (view->have_float_geom) {
+        xdg_view_set_position(view, view->float_x, view->float_y);
+        if (view->float_w > 0 && view->float_h > 0) {
+            wlr_xdg_toplevel_set_size(view->xdg_surface->toplevel, view->float_w, view->float_h);
+        }
+        return;
+    }
+
+    struct havel_output *out = output_at_cursor(server);
+    if (!out) {
+        return;
+    }
+    struct wlr_box obox = {0};
+    output_get_box(out, &obox);
+    if (obox.width <= 0 || obox.height <= 0) {
+        return;
+    }
+
+    int w = (obox.width * 60) / 100;
+    int h = (obox.height * 60) / 100;
+    int x = obox.x + (obox.width - w) / 2;
+    int y = obox.y + (obox.height - h) / 2;
+    if (w < 1) {
+        w = 1;
+    }
+    if (h < 1) {
+        h = 1;
+    }
+
+    xdg_view_set_position(view, x, y);
+    wlr_xdg_toplevel_set_size(view->xdg_surface->toplevel, w, h);
+}
+
+static void view_apply_default_floating_geom_xwayland(struct havel_wlr_server *server, struct havel_xwayland_view *view) {
+    if (!server || !view || !view->xsurface) {
+        return;
+    }
+
+    if (view->have_float_geom) {
+        wlr_xwayland_surface_configure(view->xsurface, view->float_x, view->float_y, view->float_w, view->float_h);
+        xwayland_view_set_position(view, view->float_x, view->float_y);
+        return;
+    }
+
+    struct havel_output *out = output_at_cursor(server);
+    if (!out) {
+        return;
+    }
+    struct wlr_box obox = {0};
+    output_get_box(out, &obox);
+    if (obox.width <= 0 || obox.height <= 0) {
+        return;
+    }
+
+    int w = (obox.width * 60) / 100;
+    int h = (obox.height * 60) / 100;
+    int x = obox.x + (obox.width - w) / 2;
+    int y = obox.y + (obox.height - h) / 2;
+    if (w < 1) {
+        w = 1;
+    }
+    if (h < 1) {
+        h = 1;
+    }
+
+    wlr_xwayland_surface_configure(view->xsurface, x, y, w, h);
+    xwayland_view_set_position(view, x, y);
 }
 
 static bool modifiers_have_alt_pressed(struct havel_wlr_server *server) {
@@ -382,6 +495,41 @@ static void arrange_active_workspace(struct havel_wlr_server *server) {
     }
 
     arrange_workspace(server, server->active_workspace);
+}
+
+static void workspace_toggle_tiling(struct havel_wlr_server *server) {
+    if (!server) {
+        return;
+    }
+
+    uint32_t ws = server->active_workspace;
+    if (ws >= HAVEL_WORKSPACE_COUNT) {
+        return;
+    }
+
+    server->workspace_tiling_enabled[ws] = !server->workspace_tiling_enabled[ws];
+
+    if (server->workspace_tiling_enabled[ws]) {
+        arrange_workspace(server, ws);
+        return;
+    }
+
+    struct havel_xdg_view *v = NULL;
+    wl_list_for_each(v, &server->xdg_views_ws[ws], ws_link) {
+        if (!v->mapped) {
+            continue;
+        }
+        if (!v->have_float_geom) {
+            continue;
+        }
+        if (!v->xdg_surface || !v->xdg_surface->toplevel) {
+            continue;
+        }
+        xdg_view_set_position(v, v->float_x, v->float_y);
+        if (v->float_w > 0 && v->float_h > 0) {
+            wlr_xdg_toplevel_set_size(v->xdg_surface->toplevel, v->float_w, v->float_h);
+        }
+    }
 }
 
 static struct havel_xdg_view *workspace_first_view(struct havel_wlr_server *server, uint32_t workspace_id) {
@@ -623,6 +771,14 @@ static void server_cursor_motion(struct wl_listener *listener, void *data) {
             xdg_view_set_position(server->grabbed_xdg,
                 server->grab_view_x + (int)dx,
                 server->grab_view_y + (int)dy);
+
+            if (!server->workspace_tiling_enabled[server->grabbed_xdg->workspace_id]) {
+                server->grabbed_xdg->float_x = server->grabbed_xdg->x;
+                server->grabbed_xdg->float_y = server->grabbed_xdg->y;
+                server->grabbed_xdg->float_w = server->grab_view_w;
+                server->grabbed_xdg->float_h = server->grab_view_h;
+                server->grabbed_xdg->have_float_geom = true;
+            }
             return;
         }
 
@@ -639,6 +795,14 @@ static void server_cursor_motion(struct wl_listener *listener, void *data) {
             if (server->grabbed_xdg->xdg_surface && server->grabbed_xdg->xdg_surface->toplevel) {
                 wlr_xdg_toplevel_set_size(server->grabbed_xdg->xdg_surface->toplevel, w, h);
             }
+
+            if (!server->workspace_tiling_enabled[server->grabbed_xdg->workspace_id]) {
+                server->grabbed_xdg->float_x = server->grabbed_xdg->x;
+                server->grabbed_xdg->float_y = server->grabbed_xdg->y;
+                server->grabbed_xdg->float_w = w;
+                server->grabbed_xdg->float_h = h;
+                server->grabbed_xdg->have_float_geom = true;
+            }
             return;
         }
     }
@@ -653,6 +817,12 @@ static void server_cursor_motion(struct wl_listener *listener, void *data) {
             wlr_xwayland_surface_configure(server->grabbed_xwayland->xsurface,
                 x, y, server->grab_view_w, server->grab_view_h);
             xwayland_view_set_position(server->grabbed_xwayland, x, y);
+
+            server->grabbed_xwayland->float_x = x;
+            server->grabbed_xwayland->float_y = y;
+            server->grabbed_xwayland->float_w = server->grab_view_w;
+            server->grabbed_xwayland->float_h = server->grab_view_h;
+            server->grabbed_xwayland->have_float_geom = true;
             return;
         }
 
@@ -668,6 +838,12 @@ static void server_cursor_motion(struct wl_listener *listener, void *data) {
 
             wlr_xwayland_surface_configure(server->grabbed_xwayland->xsurface,
                 server->grab_view_x, server->grab_view_y, w, h);
+
+            server->grabbed_xwayland->float_x = server->grab_view_x;
+            server->grabbed_xwayland->float_y = server->grab_view_y;
+            server->grabbed_xwayland->float_w = w;
+            server->grabbed_xwayland->float_h = h;
+            server->grabbed_xwayland->have_float_geom = true;
             return;
         }
     }
@@ -715,6 +891,14 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
             server->grab_view_y = view->y;
             server->grab_view_w = view->xdg_surface->current.geometry.width;
             server->grab_view_h = view->xdg_surface->current.geometry.height;
+
+            if (!server->workspace_tiling_enabled[view->workspace_id]) {
+                view->float_x = view->x;
+                view->float_y = view->y;
+                view->float_w = server->grab_view_w;
+                view->float_h = server->grab_view_h;
+                view->have_float_geom = true;
+            }
             return;
         }
 
@@ -735,6 +919,12 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
                     server->grab_view_y = xview->y;
                     server->grab_view_w = xs->width;
                     server->grab_view_h = xs->height;
+
+                    xview->float_x = xview->x;
+                    xview->float_y = xview->y;
+                    xview->float_w = server->grab_view_w;
+                    xview->float_h = server->grab_view_h;
+                    xview->have_float_geom = true;
                     return;
                 }
             }
@@ -785,6 +975,11 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
                     workspace_step(server, shift);
                     return;
                 }
+            }
+
+            if (meta && (syms[i] == XKB_KEY_y || syms[i] == XKB_KEY_Y)) {
+                workspace_toggle_tiling(server);
+                return;
             }
 
             if (!alt) {
@@ -1008,14 +1203,20 @@ static void xdg_view_handle_map(struct wl_listener *listener, void *data) {
     (void)data;
     view->mapped = true;
     focus_xdg_view(view->server, view, view->xdg_surface->surface);
-    arrange_workspace(view->server, view->workspace_id);
+    if (view->server->workspace_tiling_enabled[view->workspace_id]) {
+        arrange_workspace(view->server, view->workspace_id);
+    } else {
+        view_apply_default_floating_geom_xdg(view->server, view);
+    }
 }
 
 static void xdg_view_handle_unmap(struct wl_listener *listener, void *data) {
     struct havel_xdg_view *view = wl_container_of(listener, view, unmap);
     (void)data;
     view->mapped = false;
-    arrange_workspace(view->server, view->workspace_id);
+    if (view->server->workspace_tiling_enabled[view->workspace_id]) {
+        arrange_workspace(view->server, view->workspace_id);
+    }
 }
 
 static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
@@ -1058,6 +1259,12 @@ static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
     wl_list_init(&view->ws_link);
     view->mapped = false;
     view->workspace_id = server->active_workspace;
+
+    view->have_float_geom = false;
+    view->float_x = 0;
+    view->float_y = 0;
+    view->float_w = 0;
+    view->float_h = 0;
 
     if (view->workspace_id < HAVEL_WORKSPACE_COUNT) {
         wl_list_insert(&server->xdg_views_ws[view->workspace_id], &view->ws_link);
@@ -1105,6 +1312,12 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
     view->xsurface = xsurface;
     xsurface->data = view;
 
+    view->have_float_geom = false;
+    view->float_x = 0;
+    view->float_y = 0;
+    view->float_w = 0;
+    view->float_h = 0;
+
     view->workspace_id = server->active_workspace;
 
     struct havel_output *out = NULL;
@@ -1121,6 +1334,16 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
 
     xwayland_view_set_position(view, xsurface->x, xsurface->y);
 
+    if (xsurface->width > 0 && xsurface->height > 0) {
+        view->float_x = xsurface->x;
+        view->float_y = xsurface->y;
+        view->float_w = xsurface->width;
+        view->float_h = xsurface->height;
+        view->have_float_geom = true;
+    }
+
+    view_apply_default_floating_geom_xwayland(server, view);
+
     view->destroy.notify = xwayland_view_handle_destroy;
     wl_signal_add(&xsurface->events.destroy, &view->destroy);
 }
@@ -1133,6 +1356,7 @@ havel_wlr_server_t* havel_wlr_create(void) {
     wl_list_init(&server->outputs);
     for (uint32_t i = 0; i < HAVEL_WORKSPACE_COUNT; ++i) {
         wl_list_init(&server->xdg_views_ws[i]);
+        server->workspace_tiling_enabled[i] = false;
     }
     server->active_workspace = 0;
     server->display = wl_display_create();
