@@ -76,6 +76,7 @@ struct havel_wlr_server {
     struct wl_list outputs; // havel_output::link
 
     struct havel_xdg_view *grabbed_xdg;
+    struct havel_xwayland_view *grabbed_xwayland;
     uint32_t grab_button;
     double grab_cursor_x;
     double grab_cursor_y;
@@ -130,6 +131,10 @@ struct havel_xwayland_view {
     struct wlr_scene_tree *scene_tree;
 
     struct wl_listener destroy;
+
+    uint32_t workspace_id;
+    int x;
+    int y;
 };
 
 static void focus_xdg_view(struct havel_wlr_server *server, struct havel_xdg_view *view, struct wlr_surface *surface);
@@ -140,6 +145,7 @@ static void workspace_set_active(struct havel_wlr_server *server, uint32_t works
 static void workspace_step(struct havel_wlr_server *server, bool backwards);
 
 static void xdg_view_set_position(struct havel_xdg_view *view, int x, int y);
+static void xwayland_view_set_position(struct havel_xwayland_view *view, int x, int y);
 
 static bool modifiers_have_alt_only(const struct wlr_keyboard_modifiers *mods) {
     if (!mods) {
@@ -157,7 +163,26 @@ static bool modifiers_have_alt_pressed(struct havel_wlr_server *server) {
     return (keyboard->modifiers.depressed & WLR_MODIFIER_ALT) != 0;
 }
 
+static bool modifiers_have_meta_pressed(struct havel_wlr_server *server) {
+    struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
+    if (!keyboard) {
+        return false;
+    }
+
+    return (keyboard->modifiers.depressed & WLR_MODIFIER_LOGO) != 0;
+}
+
 static void xdg_view_set_position(struct havel_xdg_view *view, int x, int y) {
+    if (!view || !view->scene_tree) {
+        return;
+    }
+
+    view->x = x;
+    view->y = y;
+    wlr_scene_node_set_position(&view->scene_tree->node, x, y);
+}
+
+static void xwayland_view_set_position(struct havel_xwayland_view *view, int x, int y) {
     if (!view || !view->scene_tree) {
         return;
     }
@@ -421,6 +446,35 @@ static void server_cursor_motion(struct wl_listener *listener, void *data) {
         }
     }
 
+    if (server->grabbed_xwayland && modifiers_have_meta_pressed(server)) {
+        double dx = server->cursor->x - server->grab_cursor_x;
+        double dy = server->cursor->y - server->grab_cursor_y;
+
+        if (server->grab_button == BTN_LEFT) {
+            int x = server->grab_view_x + (int)dx;
+            int y = server->grab_view_y + (int)dy;
+            wlr_xwayland_surface_configure(server->grabbed_xwayland->xsurface,
+                x, y, server->grab_view_w, server->grab_view_h);
+            xwayland_view_set_position(server->grabbed_xwayland, x, y);
+            return;
+        }
+
+        if (server->grab_button == BTN_RIGHT) {
+            int w = server->grab_view_w + (int)dx;
+            int h = server->grab_view_h + (int)dy;
+            if (w < 1) {
+                w = 1;
+            }
+            if (h < 1) {
+                h = 1;
+            }
+
+            wlr_xwayland_surface_configure(server->grabbed_xwayland->xsurface,
+                server->grab_view_x, server->grab_view_y, w, h);
+            return;
+        }
+    }
+
     process_cursor_motion(server, event->time_msec);
 }
 
@@ -437,8 +491,9 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
 
     wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
 
-    if (event->state == WL_POINTER_BUTTON_STATE_RELEASED && server->grabbed_xdg && server->grab_button == event->button) {
+    if (event->state == WL_POINTER_BUTTON_STATE_RELEASED && server->grab_button == event->button) {
         server->grabbed_xdg = NULL;
+        server->grabbed_xwayland = NULL;
         server->grab_button = 0;
         return;
     }
@@ -455,6 +510,7 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
 
         if (view && modifiers_have_alt_pressed(server) && (event->button == BTN_LEFT || event->button == BTN_RIGHT)) {
             server->grabbed_xdg = view;
+            server->grabbed_xwayland = NULL;
             server->grab_button = event->button;
             server->grab_cursor_x = server->cursor->x;
             server->grab_cursor_y = server->cursor->y;
@@ -463,6 +519,28 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
             server->grab_view_w = view->xdg_surface->current.geometry.width;
             server->grab_view_h = view->xdg_surface->current.geometry.height;
             return;
+        }
+
+        if (server->xwayland) {
+            struct wlr_xwayland_surface *xs = wlr_xwayland_surface_try_from_wlr_surface(surface);
+            if (xs && xs->data && !xs->override_redirect) {
+                struct havel_xwayland_view *xview = xs->data;
+                wlr_scene_node_raise_to_top(&xview->scene_tree->node);
+                wlr_xwayland_surface_activate(xs, true);
+
+                if (modifiers_have_meta_pressed(server) && (event->button == BTN_LEFT || event->button == BTN_RIGHT)) {
+                    server->grabbed_xdg = NULL;
+                    server->grabbed_xwayland = xview;
+                    server->grab_button = event->button;
+                    server->grab_cursor_x = server->cursor->x;
+                    server->grab_cursor_y = server->cursor->y;
+                    server->grab_view_x = xview->x;
+                    server->grab_view_y = xview->y;
+                    server->grab_view_w = xs->width;
+                    server->grab_view_h = xs->height;
+                    return;
+                }
+            }
         }
     }
 }
@@ -748,7 +826,7 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
     struct havel_wlr_server *server = wl_container_of(listener, server, new_xwayland_surface);
     struct wlr_xwayland_surface *xsurface = data;
 
-    if (!xsurface->surface) {
+    if (xsurface->override_redirect) {
         return;
     }
 
@@ -756,8 +834,21 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
     view->xsurface = xsurface;
     xsurface->data = view;
 
-    view->scene_tree = wlr_scene_tree_create(&server->scene->tree);
+    view->workspace_id = server->active_workspace;
+
+    struct havel_output *out = NULL;
+    struct wlr_scene_tree *parent = &server->scene->tree;
+    wl_list_for_each(out, &server->outputs, link) {
+        if (out->is_primary && view->workspace_id < HAVEL_WORKSPACE_COUNT) {
+            parent = out->workspaces[view->workspace_id];
+        }
+        break;
+    }
+
+    view->scene_tree = wlr_scene_tree_create(parent);
     wlr_scene_surface_create(view->scene_tree, xsurface->surface);
+
+    xwayland_view_set_position(view, xsurface->x, xsurface->y);
 
     view->destroy.notify = xwayland_view_handle_destroy;
     wl_signal_add(&xsurface->events.destroy, &view->destroy);
