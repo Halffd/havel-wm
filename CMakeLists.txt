@@ -47,7 +47,7 @@ set(PROTOCOL_SOURCES
 
 # Add executable
 add_executable(${PROJECT_NAME} 
-    server.cpp
+    src/main.cpp
     wlr_bridge.c
     ${PROTOCOL_SOURCES}
 )
@@ -60,6 +60,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 # Set include directories
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${PROTOCOL_HEADERS_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${WAYLAND_SERVER_INCLUDE_DIRS}
     ${WLROOTS_INCLUDE_DIRS}
     ${XKB_INCLUDE_DIRS}
@@ -88,7 +89,6 @@ target_compile_options(${PROJECT_NAME} PRIVATE
     ${WLROOTS_CFLAGS_OTHER}
     ${XKB_CFLAGS_OTHER}
     ${PIXMAN_CFLAGS_OTHER}
-    -std=gnu++17
     -Wall
     -Wextra
     -Wno-unused-parameter

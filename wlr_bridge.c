@@ -23,6 +23,8 @@
 #include <wlr/types/wlr_pointer.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_seat.h>
+#include <wlr/types/wlr_shm.h>
+#include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/util/log.h>
@@ -422,6 +424,13 @@ havel_wlr_server_t* havel_wlr_create(void) {
 
     server->allocator = wlr_allocator_autocreate(server->backend, server->renderer);
     server->compositor = wlr_compositor_create(server->display, 5, server->renderer);
+    struct wlr_subcompositor *sub = wlr_subcompositor_create(server->display);
+    fprintf(stderr, "subcompositor_create: %p\n", (void *)sub);
+    if (!sub) {
+        fprintf(stderr, "subcompositor_create failed\n");
+        abort();
+    }
+    wlr_shm_create_with_renderer(server->display, 1, server->renderer);
     wlr_data_device_manager_create(server->display);
 
     server->output_layout = wlr_output_layout_create(server->display);
