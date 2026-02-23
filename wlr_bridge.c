@@ -6,6 +6,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include <linux/input-event-codes.h>
+
 #include <wayland-server-core.h>
 
 #define WLR_USE_UNSTABLE
@@ -72,6 +74,15 @@ struct havel_wlr_server {
 
     uint32_t active_workspace;
     struct wl_list outputs; // havel_output::link
+
+    struct havel_xdg_view *grabbed_xdg;
+    uint32_t grab_button;
+    double grab_cursor_x;
+    double grab_cursor_y;
+    int grab_view_x;
+    int grab_view_y;
+    int grab_view_w;
+    int grab_view_h;
 };
 
 struct havel_output {
@@ -106,6 +117,9 @@ struct havel_xdg_view {
 
     uint32_t workspace_id;
 
+    int x;
+    int y;
+
     struct wl_listener map;
     struct wl_listener unmap;
     struct wl_listener destroy;
@@ -125,12 +139,32 @@ static void view_reparent_to_workspace(struct havel_xdg_view *view);
 static void workspace_set_active(struct havel_wlr_server *server, uint32_t workspace_id);
 static void workspace_step(struct havel_wlr_server *server, bool backwards);
 
+static void xdg_view_set_position(struct havel_xdg_view *view, int x, int y);
+
 static bool modifiers_have_alt_only(const struct wlr_keyboard_modifiers *mods) {
     if (!mods) {
         return false;
     }
-
     return (mods->depressed & WLR_MODIFIER_ALT) != 0;
+}
+
+static bool modifiers_have_alt_pressed(struct havel_wlr_server *server) {
+    struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
+    if (!keyboard) {
+        return false;
+    }
+
+    return (keyboard->modifiers.depressed & WLR_MODIFIER_ALT) != 0;
+}
+
+static void xdg_view_set_position(struct havel_xdg_view *view, int x, int y) {
+    if (!view || !view->scene_tree) {
+        return;
+    }
+
+    view->x = x;
+    view->y = y;
+    wlr_scene_node_set_position(&view->scene_tree->node, x, y);
 }
 
 static void view_reparent_to_workspace(struct havel_xdg_view *view) {
@@ -358,6 +392,35 @@ static void server_cursor_motion(struct wl_listener *listener, void *data) {
     struct havel_wlr_server *server = wl_container_of(listener, server, cursor_motion);
     struct wlr_pointer_motion_event *event = data;
     wlr_cursor_move(server->cursor, &event->pointer->base, event->delta_x, event->delta_y);
+
+    if (server->grabbed_xdg && modifiers_have_alt_pressed(server)) {
+        double dx = server->cursor->x - server->grab_cursor_x;
+        double dy = server->cursor->y - server->grab_cursor_y;
+
+        if (server->grab_button == BTN_LEFT) {
+            xdg_view_set_position(server->grabbed_xdg,
+                server->grab_view_x + (int)dx,
+                server->grab_view_y + (int)dy);
+            return;
+        }
+
+        if (server->grab_button == BTN_RIGHT) {
+            int w = server->grab_view_w + (int)dx;
+            int h = server->grab_view_h + (int)dy;
+            if (w < 1) {
+                w = 1;
+            }
+            if (h < 1) {
+                h = 1;
+            }
+
+            if (server->grabbed_xdg->xdg_surface && server->grabbed_xdg->xdg_surface->toplevel) {
+                wlr_xdg_toplevel_set_size(server->grabbed_xdg->xdg_surface->toplevel, w, h);
+            }
+            return;
+        }
+    }
+
     process_cursor_motion(server, event->time_msec);
 }
 
@@ -374,6 +437,12 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
 
     wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
 
+    if (event->state == WL_POINTER_BUTTON_STATE_RELEASED && server->grabbed_xdg && server->grab_button == event->button) {
+        server->grabbed_xdg = NULL;
+        server->grab_button = 0;
+        return;
+    }
+
     if (event->state != WL_POINTER_BUTTON_STATE_PRESSED) {
         return;
     }
@@ -383,6 +452,18 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
     if (surface) {
         struct havel_xdg_view *view = xdg_view_from_surface(surface);
         focus_xdg_view(server, view, surface);
+
+        if (view && modifiers_have_alt_pressed(server) && (event->button == BTN_LEFT || event->button == BTN_RIGHT)) {
+            server->grabbed_xdg = view;
+            server->grab_button = event->button;
+            server->grab_cursor_x = server->cursor->x;
+            server->grab_cursor_y = server->cursor->y;
+            server->grab_view_x = view->x;
+            server->grab_view_y = view->y;
+            server->grab_view_w = view->xdg_surface->current.geometry.width;
+            server->grab_view_h = view->xdg_surface->current.geometry.height;
+            return;
+        }
     }
 }
 
@@ -644,6 +725,8 @@ static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
 
     view->scene_tree = wlr_scene_tree_create(parent);
     wlr_scene_xdg_surface_create(view->scene_tree, xdg_surface);
+
+    xdg_view_set_position(view, 0, 0);
 
     view->map.notify = xdg_view_handle_map;
     wl_signal_add(&xdg_surface->surface->events.map, &view->map);
