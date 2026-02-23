@@ -61,6 +61,8 @@ struct havel_wlr_server {
     struct wl_listener cursor_button;
     struct wl_listener cursor_axis;
     struct wl_listener cursor_frame;
+
+    struct havel_xdg_view *focused_xdg;
 };
 
 struct havel_output {
@@ -149,6 +151,48 @@ static struct wlr_surface *seat_surface_at(struct havel_wlr_server *server, doub
     return scene_surface->surface;
 }
 
+static struct havel_xdg_view *xdg_view_from_surface(struct wlr_surface *surface) {
+    if (!surface) {
+        return NULL;
+    }
+
+    struct wlr_xdg_surface *xdg_surface = wlr_xdg_surface_try_from_wlr_surface(surface);
+    if (!xdg_surface) {
+        return NULL;
+    }
+
+    return xdg_surface->data;
+}
+
+static void focus_xdg_view(struct havel_wlr_server *server, struct havel_xdg_view *view, struct wlr_surface *surface) {
+    if (!server || !surface) {
+        return;
+    }
+
+    if (server->focused_xdg && server->focused_xdg != view) {
+        struct wlr_xdg_toplevel *old_toplevel = server->focused_xdg->xdg_surface->toplevel;
+        if (old_toplevel) {
+            wlr_xdg_toplevel_set_activated(old_toplevel, false);
+        }
+    }
+
+    server->focused_xdg = view;
+
+    if (view && view->xdg_surface && view->xdg_surface->toplevel) {
+        wlr_xdg_toplevel_set_activated(view->xdg_surface->toplevel, true);
+    }
+
+    if (view && view->scene_tree) {
+        wlr_scene_node_raise_to_top(&view->scene_tree->node);
+    }
+
+    struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
+    if (keyboard) {
+        wlr_seat_keyboard_notify_enter(server->seat, surface,
+            keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
+    }
+}
+
 static void process_cursor_motion(struct havel_wlr_server *server, uint32_t time_msec) {
     double sx = 0.0, sy = 0.0;
     struct wlr_surface *surface = seat_surface_at(server, server->cursor->x, server->cursor->y, &sx, &sy);
@@ -157,6 +201,11 @@ static void process_cursor_motion(struct havel_wlr_server *server, uint32_t time
         wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "left_ptr");
         wlr_seat_pointer_clear_focus(server->seat);
         return;
+    }
+
+    struct havel_xdg_view *view = xdg_view_from_surface(surface);
+    if (view) {
+        focus_xdg_view(server, view, surface);
     }
 
     wlr_seat_pointer_notify_enter(server->seat, surface, sx, sy);
@@ -190,7 +239,8 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
     double sx = 0.0, sy = 0.0;
     struct wlr_surface *surface = seat_surface_at(server, server->cursor->x, server->cursor->y, &sx, &sy);
     if (surface) {
-        focus_surface(server, surface);
+        struct havel_xdg_view *view = xdg_view_from_surface(surface);
+        focus_xdg_view(server, view, surface);
     }
 }
 
