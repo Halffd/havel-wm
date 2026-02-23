@@ -191,6 +191,19 @@ static struct havel_output *output_at_cursor(struct havel_wlr_server *server) {
         return NULL;
     }
 
+    if (server->focused_xdg && server->focused_xdg->mapped) {
+        struct wlr_output *wlr_out = wlr_output_layout_output_at(server->output_layout,
+            server->focused_xdg->x, server->focused_xdg->y);
+        if (wlr_out) {
+            struct havel_output *out = NULL;
+            wl_list_for_each(out, &server->outputs, link) {
+                if (out->output == wlr_out) {
+                    return out;
+                }
+            }
+        }
+    }
+
     struct wlr_output *wlr_out = wlr_output_layout_output_at(server->output_layout, server->cursor->x, server->cursor->y);
     if (!wlr_out) {
         return primary_output(server);
