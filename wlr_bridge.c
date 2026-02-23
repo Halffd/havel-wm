@@ -63,6 +63,8 @@ struct havel_wlr_server {
     struct wl_listener cursor_frame;
 
     struct havel_xdg_view *focused_xdg;
+
+    struct wl_list xdg_views_mru; // havel_xdg_view::mru_link, front = most recent
 };
 
 struct havel_output {
@@ -88,6 +90,8 @@ struct havel_xdg_view {
     struct wlr_scene_tree *scene_tree;
     struct havel_wlr_server *server;
 
+    struct wl_list mru_link;
+
     struct wl_listener map;
     struct wl_listener unmap;
     struct wl_listener destroy;
@@ -100,12 +104,15 @@ struct havel_xwayland_view {
     struct wl_listener destroy;
 };
 
-static bool modifiers_have_alt(const struct wlr_keyboard_modifiers *mods) {
+static void focus_xdg_view(struct havel_wlr_server *server, struct havel_xdg_view *view, struct wlr_surface *surface);
+static void focus_mru_step(struct havel_wlr_server *server, bool backwards);
+
+static bool modifiers_have_alt_only(const struct wlr_keyboard_modifiers *mods) {
     if (!mods) {
         return false;
     }
 
-    return (mods->depressed & (WLR_MODIFIER_ALT | WLR_MODIFIER_LOGO)) != 0;
+    return (mods->depressed & WLR_MODIFIER_ALT) != 0;
 }
 
 static void spawn_foot(void) {
@@ -130,6 +137,40 @@ static void focus_surface(struct havel_wlr_server *server, struct wlr_surface *s
         wlr_seat_keyboard_notify_enter(server->seat, surface,
             keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
     }
+}
+
+static void focus_mru_step(struct havel_wlr_server *server, bool backwards) {
+    if (!server) {
+        return;
+    }
+
+    if (wl_list_empty(&server->xdg_views_mru)) {
+        return;
+    }
+
+    struct havel_xdg_view *target = NULL;
+
+    if (!server->focused_xdg || wl_list_empty(&server->focused_xdg->mru_link)) {
+        target = wl_container_of(server->xdg_views_mru.next, target, mru_link);
+    } else if (backwards) {
+        struct wl_list *next = server->focused_xdg->mru_link.next;
+        if (next == &server->xdg_views_mru) {
+            next = server->xdg_views_mru.next;
+        }
+        target = wl_container_of(next, target, mru_link);
+    } else {
+        struct wl_list *prev = server->focused_xdg->mru_link.prev;
+        if (prev == &server->xdg_views_mru) {
+            prev = server->xdg_views_mru.prev;
+        }
+        target = wl_container_of(prev, target, mru_link);
+    }
+
+    if (!target || !target->xdg_surface) {
+        return;
+    }
+
+    focus_xdg_view(server, target, target->xdg_surface->surface);
 }
 
 static struct wlr_surface *seat_surface_at(struct havel_wlr_server *server, double lx, double ly, double *sx, double *sy) {
@@ -164,6 +205,18 @@ static struct havel_xdg_view *xdg_view_from_surface(struct wlr_surface *surface)
     return xdg_surface->data;
 }
 
+static void xdg_view_mru_promote(struct havel_xdg_view *view) {
+    if (!view || !view->server) {
+        return;
+    }
+
+    if (!wl_list_empty(&view->mru_link)) {
+        wl_list_remove(&view->mru_link);
+    }
+
+    wl_list_insert(&view->server->xdg_views_mru, &view->mru_link);
+}
+
 static void focus_xdg_view(struct havel_wlr_server *server, struct havel_xdg_view *view, struct wlr_surface *surface) {
     if (!server || !surface) {
         return;
@@ -184,6 +237,10 @@ static void focus_xdg_view(struct havel_wlr_server *server, struct havel_xdg_vie
 
     if (view && view->scene_tree) {
         wlr_scene_node_raise_to_top(&view->scene_tree->node);
+    }
+
+    if (view) {
+        xdg_view_mru_promote(view);
     }
 
     struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
@@ -268,10 +325,16 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
         const uint32_t keycode = event->keycode + 8;
         const xkb_keysym_t *syms = NULL;
         int nsyms = xkb_state_key_get_syms(keyboard->keyboard->xkb_state, keycode, &syms);
-        bool alt = modifiers_have_alt(&keyboard->keyboard->modifiers);
+        bool alt = modifiers_have_alt_only(&keyboard->keyboard->modifiers);
+        bool shift = (keyboard->keyboard->modifiers.depressed & WLR_MODIFIER_SHIFT) != 0;
         for (int i = 0; i < nsyms; ++i) {
             if (!alt) {
                 continue;
+            }
+
+            if (syms[i] == XKB_KEY_Tab) {
+                focus_mru_step(server, shift);
+                return;
             }
 
             if (syms[i] == XKB_KEY_Return) {
@@ -417,7 +480,7 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 static void xdg_view_handle_map(struct wl_listener *listener, void *data) {
     struct havel_xdg_view *view = wl_container_of(listener, view, map);
     (void)data;
-    focus_surface(view->server, view->xdg_surface->surface);
+    focus_xdg_view(view->server, view, view->xdg_surface->surface);
 }
 
 static void xdg_view_handle_unmap(struct wl_listener *listener, void *data) {
@@ -427,9 +490,19 @@ static void xdg_view_handle_unmap(struct wl_listener *listener, void *data) {
 
 static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
     struct havel_xdg_view *view = wl_container_of(listener, view, destroy);
+    struct havel_wlr_server *server = view->server;
     wl_list_remove(&view->map.link);
     wl_list_remove(&view->unmap.link);
     wl_list_remove(&view->destroy.link);
+
+    if (server && server->focused_xdg == view) {
+        server->focused_xdg = NULL;
+    }
+
+    if (!wl_list_empty(&view->mru_link)) {
+        wl_list_remove(&view->mru_link);
+        wl_list_init(&view->mru_link);
+    }
     free(view);
 }
 
@@ -445,6 +518,8 @@ static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
     view->server = server;
     view->xdg_surface = xdg_surface;
     xdg_surface->data = view;
+
+    wl_list_init(&view->mru_link);
 
     view->scene_tree = wlr_scene_tree_create(&server->scene->tree);
     wlr_scene_xdg_surface_create(view->scene_tree, xdg_surface);
@@ -488,6 +563,7 @@ havel_wlr_server_t* havel_wlr_create(void) {
     wlr_log_init(WLR_DEBUG, NULL);
 
     struct havel_wlr_server *server = calloc(1, sizeof(*server));
+    wl_list_init(&server->xdg_views_mru);
     server->display = wl_display_create();
     if (!server->display) {
         free(server);
