@@ -33,6 +33,10 @@
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 
+#define HAVE_WORKSPACES 1
+
+#define HAVEL_WORKSPACE_COUNT 10
+
 struct havel_wlr_server {
     struct wl_display *display;
     struct wlr_backend *backend;
@@ -65,6 +69,9 @@ struct havel_wlr_server {
     struct havel_xdg_view *focused_xdg;
 
     struct wl_list xdg_views_mru; // havel_xdg_view::mru_link, front = most recent
+
+    uint32_t active_workspace;
+    struct wl_list outputs; // havel_output::link
 };
 
 struct havel_output {
@@ -74,6 +81,11 @@ struct havel_output {
     struct wl_listener destroy;
 
     struct havel_wlr_server *server;
+
+    bool is_primary;
+    struct wl_list link;
+
+    struct wlr_scene_tree *workspaces[HAVEL_WORKSPACE_COUNT];
 };
 
 struct havel_keyboard {
@@ -92,6 +104,8 @@ struct havel_xdg_view {
 
     struct wl_list mru_link;
 
+    uint32_t workspace_id;
+
     struct wl_listener map;
     struct wl_listener unmap;
     struct wl_listener destroy;
@@ -107,12 +121,87 @@ struct havel_xwayland_view {
 static void focus_xdg_view(struct havel_wlr_server *server, struct havel_xdg_view *view, struct wlr_surface *surface);
 static void focus_mru_step(struct havel_wlr_server *server, bool backwards);
 
+static void view_reparent_to_workspace(struct havel_xdg_view *view);
+static void workspace_set_active(struct havel_wlr_server *server, uint32_t workspace_id);
+static void workspace_step(struct havel_wlr_server *server, bool backwards);
+
 static bool modifiers_have_alt_only(const struct wlr_keyboard_modifiers *mods) {
     if (!mods) {
         return false;
     }
 
     return (mods->depressed & WLR_MODIFIER_ALT) != 0;
+}
+
+static void view_reparent_to_workspace(struct havel_xdg_view *view) {
+    if (!view || !view->server || !view->scene_tree) {
+        return;
+    }
+
+    struct havel_wlr_server *server = view->server;
+    struct havel_output *output = NULL;
+    wl_list_for_each(output, &server->outputs, link) {
+        struct wlr_scene_tree *dst = NULL;
+        if (output->is_primary) {
+            if (view->workspace_id < HAVEL_WORKSPACE_COUNT) {
+                dst = output->workspaces[view->workspace_id];
+            }
+        } else {
+            dst = output->workspaces[0];
+        }
+
+        if (dst) {
+            wlr_scene_node_reparent(&view->scene_tree->node, dst);
+        }
+        break;
+    }
+}
+
+static void workspace_set_active(struct havel_wlr_server *server, uint32_t workspace_id) {
+    if (!server) {
+        return;
+    }
+
+    if (workspace_id >= HAVEL_WORKSPACE_COUNT) {
+        return;
+    }
+
+    server->active_workspace = workspace_id;
+
+    struct havel_output *output = NULL;
+    wl_list_for_each(output, &server->outputs, link) {
+        if (!output->is_primary) {
+            continue;
+        }
+
+        for (uint32_t i = 0; i < HAVEL_WORKSPACE_COUNT; ++i) {
+            bool enable = (i == workspace_id);
+            wlr_scene_node_set_enabled(&output->workspaces[i]->node, enable);
+        }
+    }
+}
+
+static void workspace_step(struct havel_wlr_server *server, bool backwards) {
+    if (!server) {
+        return;
+    }
+
+    uint32_t cur = server->active_workspace;
+    uint32_t next = 0;
+    if (backwards) {
+        next = (cur + HAVEL_WORKSPACE_COUNT - 1) % HAVEL_WORKSPACE_COUNT;
+    } else {
+        next = (cur + 1) % HAVEL_WORKSPACE_COUNT;
+    }
+    workspace_set_active(server, next);
+}
+
+static bool modifiers_have_meta_only(const struct wlr_keyboard_modifiers *mods) {
+    if (!mods) {
+        return false;
+    }
+
+    return (mods->depressed & WLR_MODIFIER_LOGO) != 0;
 }
 
 static void spawn_foot(void) {
@@ -241,6 +330,7 @@ static void focus_xdg_view(struct havel_wlr_server *server, struct havel_xdg_vie
 
     if (view) {
         xdg_view_mru_promote(view);
+        view_reparent_to_workspace(view);
     }
 
     struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
@@ -326,15 +416,23 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
         const xkb_keysym_t *syms = NULL;
         int nsyms = xkb_state_key_get_syms(keyboard->keyboard->xkb_state, keycode, &syms);
         bool alt = modifiers_have_alt_only(&keyboard->keyboard->modifiers);
+        bool meta = modifiers_have_meta_only(&keyboard->keyboard->modifiers);
         bool shift = (keyboard->keyboard->modifiers.depressed & WLR_MODIFIER_SHIFT) != 0;
         for (int i = 0; i < nsyms; ++i) {
-            if (!alt) {
-                continue;
+            if (syms[i] == XKB_KEY_Tab) {
+                if (alt) {
+                    focus_mru_step(server, shift);
+                    return;
+                }
+
+                if (meta) {
+                    workspace_step(server, shift);
+                    return;
+                }
             }
 
-            if (syms[i] == XKB_KEY_Tab) {
-                focus_mru_step(server, shift);
-                return;
+            if (!alt) {
+                continue;
             }
 
             if (syms[i] == XKB_KEY_Return) {
@@ -441,6 +539,7 @@ static void output_destroy(struct wl_listener *listener, void *data) {
     struct havel_output *output = wl_container_of(listener, output, destroy);
     wl_list_remove(&output->frame.link);
     wl_list_remove(&output->destroy.link);
+    wl_list_remove(&output->link);
     free(output);
 }
 
@@ -467,6 +566,18 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     output->server = server;
     output->output = wlr_output;
     output->scene_output = wlr_scene_output_create(server->scene, wlr_output);
+
+    wl_list_insert(&server->outputs, &output->link);
+    output->is_primary = (server->outputs.next == &output->link);
+
+    for (uint32_t i = 0; i < HAVEL_WORKSPACE_COUNT; ++i) {
+        output->workspaces[i] = wlr_scene_tree_create(&server->scene->tree);
+        if (!output->is_primary) {
+            wlr_scene_node_set_enabled(&output->workspaces[i]->node, i == 0);
+        } else {
+            wlr_scene_node_set_enabled(&output->workspaces[i]->node, i == server->active_workspace);
+        }
+    }
 
     output->frame.notify = output_frame;
     wl_signal_add(&wlr_output->events.frame, &output->frame);
@@ -520,8 +631,18 @@ static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
     xdg_surface->data = view;
 
     wl_list_init(&view->mru_link);
+    view->workspace_id = server->active_workspace;
 
-    view->scene_tree = wlr_scene_tree_create(&server->scene->tree);
+    struct havel_output *out = NULL;
+    struct wlr_scene_tree *parent = &server->scene->tree;
+    wl_list_for_each(out, &server->outputs, link) {
+        if (out->is_primary && view->workspace_id < HAVEL_WORKSPACE_COUNT) {
+            parent = out->workspaces[view->workspace_id];
+        }
+        break;
+    }
+
+    view->scene_tree = wlr_scene_tree_create(parent);
     wlr_scene_xdg_surface_create(view->scene_tree, xdg_surface);
 
     view->map.notify = xdg_view_handle_map;
@@ -564,6 +685,8 @@ havel_wlr_server_t* havel_wlr_create(void) {
 
     struct havel_wlr_server *server = calloc(1, sizeof(*server));
     wl_list_init(&server->xdg_views_mru);
+    wl_list_init(&server->outputs);
+    server->active_workspace = 0;
     server->display = wl_display_create();
     if (!server->display) {
         free(server);
