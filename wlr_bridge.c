@@ -72,6 +72,8 @@ struct havel_wlr_server {
 
     struct wl_list xdg_views_mru; // havel_xdg_view::mru_link, front = most recent
 
+    struct wl_list xdg_views_ws[HAVEL_WORKSPACE_COUNT]; // havel_xdg_view::ws_link
+
     uint32_t active_workspace;
     struct wl_list outputs; // havel_output::link
 
@@ -116,6 +118,10 @@ struct havel_xdg_view {
 
     struct wl_list mru_link;
 
+    struct wl_list ws_link;
+
+    bool mapped;
+
     uint32_t workspace_id;
 
     int x;
@@ -139,6 +145,12 @@ struct havel_xwayland_view {
 
 static void focus_xdg_view(struct havel_wlr_server *server, struct havel_xdg_view *view, struct wlr_surface *surface);
 static void focus_mru_step(struct havel_wlr_server *server, bool backwards);
+
+static void arrange_workspace(struct havel_wlr_server *server, uint32_t workspace_id);
+static void arrange_active_workspace(struct havel_wlr_server *server);
+static struct havel_xdg_view *workspace_first_view(struct havel_wlr_server *server, uint32_t workspace_id);
+static struct havel_xdg_view *workspace_next_view(struct havel_wlr_server *server, struct havel_xdg_view *cur, uint32_t workspace_id);
+static void workspace_swap_with_next(struct havel_wlr_server *server, bool backwards);
 
 static void view_reparent_to_workspace(struct havel_xdg_view *view);
 static void workspace_set_active(struct havel_wlr_server *server, uint32_t workspace_id);
@@ -238,6 +250,8 @@ static void workspace_set_active(struct havel_wlr_server *server, uint32_t works
             wlr_scene_node_set_enabled(&output->workspaces[i]->node, enable);
         }
     }
+
+    arrange_active_workspace(server);
 }
 
 static void workspace_step(struct havel_wlr_server *server, bool backwards) {
@@ -253,6 +267,189 @@ static void workspace_step(struct havel_wlr_server *server, bool backwards) {
         next = (cur + 1) % HAVEL_WORKSPACE_COUNT;
     }
     workspace_set_active(server, next);
+}
+
+static struct havel_output *primary_output(struct havel_wlr_server *server) {
+    if (!server) {
+        return NULL;
+    }
+
+    struct havel_output *out = NULL;
+    wl_list_for_each(out, &server->outputs, link) {
+        if (out->is_primary) {
+            return out;
+        }
+    }
+    return NULL;
+}
+
+static void output_get_box(struct havel_output *out, struct wlr_box *box) {
+    if (!out || !out->output || !box) {
+        return;
+    }
+
+    struct wlr_box b = {0};
+    wlr_output_layout_get_box(out->server->output_layout, out->output, &b);
+    *box = b;
+}
+
+static void arrange_workspace(struct havel_wlr_server *server, uint32_t workspace_id) {
+    if (!server) {
+        return;
+    }
+    if (workspace_id >= HAVEL_WORKSPACE_COUNT) {
+        return;
+    }
+
+    struct havel_output *out = primary_output(server);
+    if (!out) {
+        return;
+    }
+
+    struct wlr_box obox = {0};
+    output_get_box(out, &obox);
+    if (obox.width <= 0 || obox.height <= 0) {
+        return;
+    }
+
+    int n = 0;
+    struct havel_xdg_view *v = NULL;
+    wl_list_for_each(v, &server->xdg_views_ws[workspace_id], ws_link) {
+        if (v->mapped) {
+            ++n;
+        }
+    }
+    if (n <= 0) {
+        return;
+    }
+
+    const int gap = 10;
+    int x = obox.x + gap;
+    int y = obox.y + gap;
+    int w = obox.width - 2 * gap;
+    int h = obox.height - 2 * gap;
+    if (w < 1) {
+        w = 1;
+    }
+    if (h < 1) {
+        h = 1;
+    }
+
+    int master_w = w;
+    int stack_w = 0;
+    if (n > 1) {
+        master_w = (w * 60) / 100;
+        stack_w = w - master_w;
+        if (master_w < 1) {
+            master_w = 1;
+        }
+        if (stack_w < 1) {
+            stack_w = 1;
+        }
+    }
+
+    int i = 0;
+    wl_list_for_each(v, &server->xdg_views_ws[workspace_id], ws_link) {
+        if (!v->mapped || !v->xdg_surface || !v->xdg_surface->toplevel) {
+            continue;
+        }
+
+        if (i == 0) {
+            xdg_view_set_position(v, x, y);
+            wlr_xdg_toplevel_set_size(v->xdg_surface->toplevel, master_w, h);
+        } else {
+            int stack_count = n - 1;
+            int slot_h = (stack_count > 0) ? (h / stack_count) : h;
+            if (slot_h < 1) {
+                slot_h = 1;
+            }
+            int vy = y + (i - 1) * slot_h;
+            int vh = (i == n - 1) ? (y + h - vy) : slot_h;
+            if (vh < 1) {
+                vh = 1;
+            }
+            xdg_view_set_position(v, x + master_w, vy);
+            wlr_xdg_toplevel_set_size(v->xdg_surface->toplevel, stack_w, vh);
+        }
+
+        ++i;
+    }
+}
+
+static void arrange_active_workspace(struct havel_wlr_server *server) {
+    if (!server) {
+        return;
+    }
+
+    arrange_workspace(server, server->active_workspace);
+}
+
+static struct havel_xdg_view *workspace_first_view(struct havel_wlr_server *server, uint32_t workspace_id) {
+    if (!server) {
+        return NULL;
+    }
+    if (workspace_id >= HAVEL_WORKSPACE_COUNT) {
+        return NULL;
+    }
+    if (wl_list_empty(&server->xdg_views_ws[workspace_id])) {
+        return NULL;
+    }
+    struct havel_xdg_view *v = wl_container_of(server->xdg_views_ws[workspace_id].next, v, ws_link);
+    if (!v->mapped) {
+        return NULL;
+    }
+    return v;
+}
+
+static struct havel_xdg_view *workspace_next_view(struct havel_wlr_server *server, struct havel_xdg_view *cur, uint32_t workspace_id) {
+    if (!server || !cur) {
+        return NULL;
+    }
+    if (workspace_id >= HAVEL_WORKSPACE_COUNT) {
+        return NULL;
+    }
+
+    struct wl_list *n = cur->ws_link.next;
+    if (n == &server->xdg_views_ws[workspace_id]) {
+        n = server->xdg_views_ws[workspace_id].next;
+    }
+    if (n == &server->xdg_views_ws[workspace_id]) {
+        return NULL;
+    }
+    struct havel_xdg_view *v = wl_container_of(n, v, ws_link);
+    if (!v->mapped) {
+        return NULL;
+    }
+    return v;
+}
+
+static void workspace_swap_with_next(struct havel_wlr_server *server, bool backwards) {
+    if (!server || !server->focused_xdg) {
+        return;
+    }
+
+    struct havel_xdg_view *cur = server->focused_xdg;
+    uint32_t ws = cur->workspace_id;
+    if (ws >= HAVEL_WORKSPACE_COUNT) {
+        return;
+    }
+
+    struct wl_list *other_link = backwards ? cur->ws_link.prev : cur->ws_link.next;
+    if (other_link == &server->xdg_views_ws[ws]) {
+        other_link = backwards ? server->xdg_views_ws[ws].prev : server->xdg_views_ws[ws].next;
+    }
+    if (other_link == &server->xdg_views_ws[ws]) {
+        return;
+    }
+
+    wl_list_remove(&cur->ws_link);
+    if (backwards) {
+        wl_list_insert(other_link, &cur->ws_link);
+    } else {
+        wl_list_insert(other_link->prev, &cur->ws_link);
+    }
+
+    arrange_workspace(server, ws);
 }
 
 static bool modifiers_have_meta_only(const struct wlr_keyboard_modifiers *mods) {
@@ -594,6 +791,65 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
                 continue;
             }
 
+            if (syms[i] == XKB_KEY_space) {
+                if (server->focused_xdg && server->focused_xdg->workspace_id < HAVEL_WORKSPACE_COUNT) {
+                    wl_list_remove(&server->focused_xdg->ws_link);
+                    wl_list_insert(&server->xdg_views_ws[server->focused_xdg->workspace_id], &server->focused_xdg->ws_link);
+                    arrange_workspace(server, server->focused_xdg->workspace_id);
+                }
+                return;
+            }
+
+            if (syms[i] == XKB_KEY_j) {
+                if (shift) {
+                    workspace_swap_with_next(server, false);
+                    return;
+                }
+                if (server->focused_xdg) {
+                    struct havel_xdg_view *next = workspace_next_view(server, server->focused_xdg, server->focused_xdg->workspace_id);
+                    if (next && next->xdg_surface) {
+                        focus_xdg_view(server, next, next->xdg_surface->surface);
+                    }
+                }
+                return;
+            }
+
+            if (syms[i] == XKB_KEY_k) {
+                if (shift) {
+                    workspace_swap_with_next(server, true);
+                    return;
+                }
+                if (server->focused_xdg) {
+                    struct havel_xdg_view *prev = workspace_next_view(server, server->focused_xdg, server->focused_xdg->workspace_id);
+                    if (prev && prev->xdg_surface) {
+                        focus_xdg_view(server, prev, prev->xdg_surface->surface);
+                    }
+                }
+                return;
+            }
+
+            if (syms[i] == XKB_KEY_h || syms[i] == XKB_KEY_l) {
+                if (!server->focused_xdg) {
+                    struct havel_xdg_view *first = workspace_first_view(server, server->active_workspace);
+                    if (first && first->xdg_surface) {
+                        focus_xdg_view(server, first, first->xdg_surface->surface);
+                    }
+                } else {
+                    if (syms[i] == XKB_KEY_h) {
+                        struct havel_xdg_view *first = workspace_first_view(server, server->focused_xdg->workspace_id);
+                        if (first && first->xdg_surface) {
+                            focus_xdg_view(server, first, first->xdg_surface->surface);
+                        }
+                    } else {
+                        struct havel_xdg_view *first = workspace_first_view(server, server->focused_xdg->workspace_id);
+                        if (first && first->xdg_surface) {
+                            focus_xdg_view(server, first, first->xdg_surface->surface);
+                        }
+                    }
+                }
+                return;
+            }
+
             if (syms[i] == XKB_KEY_Return) {
                 spawn_foot();
                 return;
@@ -750,12 +1006,16 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 static void xdg_view_handle_map(struct wl_listener *listener, void *data) {
     struct havel_xdg_view *view = wl_container_of(listener, view, map);
     (void)data;
+    view->mapped = true;
     focus_xdg_view(view->server, view, view->xdg_surface->surface);
+    arrange_workspace(view->server, view->workspace_id);
 }
 
 static void xdg_view_handle_unmap(struct wl_listener *listener, void *data) {
-    (void)listener;
+    struct havel_xdg_view *view = wl_container_of(listener, view, unmap);
     (void)data;
+    view->mapped = false;
+    arrange_workspace(view->server, view->workspace_id);
 }
 
 static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
@@ -772,6 +1032,11 @@ static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
     if (!wl_list_empty(&view->mru_link)) {
         wl_list_remove(&view->mru_link);
         wl_list_init(&view->mru_link);
+    }
+
+    if (!wl_list_empty(&view->ws_link)) {
+        wl_list_remove(&view->ws_link);
+        wl_list_init(&view->ws_link);
     }
     free(view);
 }
@@ -790,7 +1055,13 @@ static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
     xdg_surface->data = view;
 
     wl_list_init(&view->mru_link);
+    wl_list_init(&view->ws_link);
+    view->mapped = false;
     view->workspace_id = server->active_workspace;
+
+    if (view->workspace_id < HAVEL_WORKSPACE_COUNT) {
+        wl_list_insert(&server->xdg_views_ws[view->workspace_id], &view->ws_link);
+    }
 
     struct havel_output *out = NULL;
     struct wlr_scene_tree *parent = &server->scene->tree;
@@ -860,6 +1131,9 @@ havel_wlr_server_t* havel_wlr_create(void) {
     struct havel_wlr_server *server = calloc(1, sizeof(*server));
     wl_list_init(&server->xdg_views_mru);
     wl_list_init(&server->outputs);
+    for (uint32_t i = 0; i < HAVEL_WORKSPACE_COUNT; ++i) {
+        wl_list_init(&server->xdg_views_ws[i]);
+    }
     server->active_workspace = 0;
     server->display = wl_display_create();
     if (!server->display) {
