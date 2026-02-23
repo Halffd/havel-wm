@@ -1,4 +1,4 @@
-#include "wlr_bridge.h"
+#include <wm/wlr_bridge.h>
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -31,6 +31,7 @@
 #include <wlr/xwayland.h>
 
 #include <xkbcommon/xkbcommon.h>
+#include <xkbcommon/xkbcommon-keysyms.h>
 
 struct havel_wlr_server {
     struct wl_display *display;
@@ -96,6 +97,26 @@ struct havel_xwayland_view {
 
     struct wl_listener destroy;
 };
+
+static bool modifiers_have_alt(const struct wlr_keyboard_modifiers *mods) {
+    if (!mods) {
+        return false;
+    }
+
+    return (mods->depressed & (WLR_MODIFIER_ALT | WLR_MODIFIER_LOGO)) != 0;
+}
+
+static void spawn_foot(void) {
+    pid_t pid = fork();
+    if (pid < 0) {
+        return;
+    }
+
+    if (pid == 0) {
+        execlp("foot", "foot", (char *)NULL);
+        _exit(127);
+    }
+}
 
 static void focus_surface(struct havel_wlr_server *server, struct wlr_surface *surface) {
     if (!server || !surface) {
@@ -197,6 +218,29 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
     struct wlr_keyboard_key_event *event = data;
 
     wlr_seat_set_keyboard(server->seat, keyboard->keyboard);
+
+    if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+        const uint32_t keycode = event->keycode + 8;
+        const xkb_keysym_t *syms = NULL;
+        int nsyms = xkb_state_key_get_syms(keyboard->keyboard->xkb_state, keycode, &syms);
+        bool alt = modifiers_have_alt(&keyboard->keyboard->modifiers);
+        for (int i = 0; i < nsyms; ++i) {
+            if (!alt) {
+                continue;
+            }
+
+            if (syms[i] == XKB_KEY_Return) {
+                spawn_foot();
+                return;
+            }
+
+            if (syms[i] == XKB_KEY_q || syms[i] == XKB_KEY_Q) {
+                wl_display_terminate(server->display);
+                return;
+            }
+        }
+    }
+
     wlr_seat_keyboard_notify_key(server->seat, event->time_msec, event->keycode, event->state);
 }
 
