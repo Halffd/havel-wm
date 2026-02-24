@@ -43,6 +43,9 @@ void havel_cpp_on_pointer_motion(struct havel_cpp_server* server, double x, doub
 void havel_cpp_set_output_geometry(struct havel_cpp_server* server, uint32_t workspace_id, int x, int y, int w, int h);
 void havel_cpp_set_active_workspace(struct havel_cpp_server* server, uint32_t workspace_id);
 
+// Animation updates (called from C frame handler)
+void havel_cpp_update_animations(struct havel_cpp_server* server);
+
 // Callback registration (called from C during initialization)
 void havel_cpp_register_view_callbacks(
     cpp_view_set_position_fn set_position,

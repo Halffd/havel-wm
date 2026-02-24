@@ -422,6 +422,10 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
 
 static void output_frame(struct wl_listener *listener, void *data) {
     struct havel_output *output = wl_container_of(listener, output, frame);
+    struct havel_wlr_server *server = output->server;
+
+    // Update animations before rendering
+    havel_cpp_update_animations(server->cpp_server);
 
     const struct wlr_scene_output_state_options options = {
         .timer = NULL,

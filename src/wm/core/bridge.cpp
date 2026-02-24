@@ -82,4 +82,9 @@ void havel_cpp_set_active_workspace(struct havel_cpp_server* server, uint32_t wo
     // Workspace switching is handled by Server::setActiveWorkspace
 }
 
+void havel_cpp_update_animations(struct havel_cpp_server* server) {
+    if (!server) return;
+    server->server->updateAnimations();
+}
+
 } // extern "C"
