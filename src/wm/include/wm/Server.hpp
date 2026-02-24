@@ -28,6 +28,7 @@ public:
     Workspace* activeWorkspace() const;
     void setActiveWorkspace(uint32_t id);
     void workspaceStep(bool backwards);
+    void workspaceStepTo(uint32_t target);
     void workspaceToggleTiling();
 
     // View lifecycle (called from C bridge)
@@ -93,6 +94,15 @@ private:
 
     // Helper methods
     void spawnTerminal();
+    void spawnRofi();
+    void spawnBrowser();
+    void spawnFileManager();
+    void closeFocusedWindow();
+    void toggleMaximize();
+    void toggleFloating();
+    void focusFirstLastView(bool first);
+    void moveViewToWorkspace(uint32_t ws);
+    void moveViewToWorkspaceRelative(bool next);
     void quit();
 
     // View manipulation through C callbacks (with optional animation)
