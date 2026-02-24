@@ -521,10 +521,13 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
     if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
         const uint32_t keycode = event->keycode + 8;
         uint32_t modifiers = keyboard->keyboard->modifiers.depressed;
-        
+
+        fprintf(stderr, "[KEY] keycode=%u modifiers=%u\n", keycode, modifiers);
+        fflush(stderr);
+
         // Forward to C++ layer for policy decisions
         havel_cpp_on_key(server->cpp_server, keycode, true, modifiers);
-        
+
         // Let wlroots handle the key event for clients
         wlr_seat_keyboard_notify_key(server->seat, event->time_msec, event->keycode, event->state);
         return;
@@ -567,6 +570,9 @@ static void server_new_keyboard(struct havel_wlr_server *server, struct wlr_inpu
     wl_signal_add(&device->events.destroy, &keyboard->destroy);
 
     wlr_seat_set_keyboard(server->seat, wlr_keyboard);
+    
+    fprintf(stderr, "[INPUT] Keyboard added to seat\n");
+    fflush(stderr);
 }
 
 static void server_new_pointer(struct havel_wlr_server *server, struct wlr_input_device *device) {
@@ -651,21 +657,21 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
     struct wlr_pointer_button_event *event = data;
 
     wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
-    
+
     if (event->state != WL_POINTER_BUTTON_STATE_PRESSED) {
         havel_cpp_on_pointer_button(server->cpp_server, event->button, false, server->cursor->x, server->cursor->y);
         return;
     }
-    
+
     // Hit test for surface under cursor
     double sx = 0, sy = 0;
     struct wlr_surface *surface = seat_surface_at(server, server->cursor->x, server->cursor->y, &sx, &sy);
-    
+
     if (surface) {
         // Get the view from the surface
         struct wlr_xdg_surface *xdg_surface = wlr_xdg_surface_try_from_wlr_surface(surface);
         struct havel_xdg_view *xdg_view = xdg_surface ? (struct havel_xdg_view*)xdg_surface->data : NULL;
-        
+
         if (xdg_view) {
             // Focus the view
             if (xdg_view->xdg_surface && xdg_view->xdg_surface->toplevel) {
@@ -674,8 +680,16 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
             if (xdg_view->scene_tree) {
                 wlr_scene_node_raise_to_top(&xdg_view->scene_tree->node);
             }
+            // CRITICAL: Give keyboard focus
+            struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
+            if (keyboard) {
+                wlr_seat_keyboard_notify_enter(server->seat, surface,
+                    keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
+            }
+            fprintf(stderr, "[FOCUS] XDG surface focused\n");
+            fflush(stderr);
         }
-        
+
         // Also check XWayland
         if (!xdg_view && server->xwayland) {
             struct wlr_xwayland_surface *xsurface = wlr_xwayland_surface_try_from_wlr_surface(surface);
@@ -683,10 +697,18 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
                 struct havel_xwayland_view *xwayland_view = (struct havel_xwayland_view*)xsurface->data;
                 wlr_xwayland_surface_activate(xsurface, true);
                 wlr_scene_node_raise_to_top(&xwayland_view->scene_tree->node);
+                // CRITICAL: Give keyboard focus
+                struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
+                if (keyboard) {
+                    wlr_seat_keyboard_notify_enter(server->seat, surface,
+                        keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
+                }
+                fprintf(stderr, "[FOCUS] XWayland surface focused\n");
+                fflush(stderr);
             }
         }
     }
-    
+
     havel_cpp_on_pointer_button(server->cpp_server, event->button, true, server->cursor->x, server->cursor->y);
 }
 
