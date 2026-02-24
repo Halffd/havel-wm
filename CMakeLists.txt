@@ -14,6 +14,7 @@ pkg_check_modules(WLROOTS REQUIRED wlroots-0.20)
 pkg_check_modules(XKB REQUIRED xkbcommon)
 pkg_check_modules(PIXMAN REQUIRED pixman-1)
 pkg_check_modules(FMT REQUIRED fmt)
+pkg_check_modules(VULKAN REQUIRED vulkan)
 
 # Get wayland-protocols datadir for protocol files
 execute_process(
@@ -56,6 +57,7 @@ set(WM_CORE_SOURCES
     src/wm/core/bridge.cpp
     src/wm/core/Animation.cpp
     src/wm/core/Animator.cpp
+    src/wm/core/VulkanRenderer.cpp
 )
 
 # Utility sources
@@ -88,6 +90,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${XKB_INCLUDE_DIRS}
     ${PIXMAN_INCLUDE_DIRS}
     ${FMT_INCLUDE_DIRS}
+    ${VULKAN_INCLUDE_DIRS}
 )
 
 # Link libraries
@@ -97,6 +100,7 @@ target_link_libraries(${PROJECT_NAME}
     ${XKB_LIBRARIES}
     ${PIXMAN_LIBRARIES}
     ${FMT_LIBRARIES}
+    ${VULKAN_LIBRARIES}
 )
 
 # Set library directories
@@ -106,6 +110,7 @@ target_link_directories(${PROJECT_NAME} PRIVATE
     ${XKB_LIBRARY_DIRS}
     ${PIXMAN_LIBRARY_DIRS}
     ${FMT_LIBRARY_DIRS}
+    ${VULKAN_LIBRARY_DIRS}
 )
 
 # Compiler flags

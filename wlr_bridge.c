@@ -811,6 +811,14 @@ havel_wlr_server_t* havel_wlr_create(void) {
 
     wlr_renderer_init_wl_display(server->renderer, server->display);
 
+    // Check for Vulkan renderer environment variable
+    const char* use_vulkan = getenv("HAVEL_USE_VULKAN");
+    if (use_vulkan && strcmp(use_vulkan, "1") == 0) {
+        LOG_INFO("Vulkan renderer requested via HAVEL_USE_VULKAN=1");
+        // Vulkan renderer would be initialized here for advanced features
+        // Full wlroots Vulkan integration requires wlroots 0.18+ with VK_KHR_external_memory
+    }
+
     server->allocator = wlr_allocator_autocreate(server->backend, server->renderer);
     server->compositor = wlr_compositor_create(server->display, 5, server->renderer);
     struct wlr_subcompositor *sub = wlr_subcompositor_create(server->display);
