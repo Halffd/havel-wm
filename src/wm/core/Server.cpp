@@ -338,16 +338,89 @@ void Server::quit() {
     }
 }
 
-// View manipulation through C callbacks
+// ============================================================================
+// Animation Control
+// ============================================================================
 
-void Server::setViewPosition(View* view, int x, int y) {
-    if (!view || !g_view_set_position) return;
-    g_view_set_position(view->nativeHandle(), x, y);
+void Server::setAnimationsEnabled(bool enabled) {
+    m_animator.setEnabled(enabled);
 }
 
-void Server::setViewSize(View* view, int w, int h) {
-    if (!view || !g_view_set_size) return;
-    g_view_set_size(view->nativeHandle(), w, h);
+void Server::updateAnimations() {
+    m_animator.update();
+    m_animator.cleanup();
+}
+
+// ============================================================================
+// View Manipulation with Animation
+// ============================================================================
+
+void Server::setViewPosition(View* view, int x, int y, bool animate) {
+    if (!view) return;
+    
+    // Initialize animation state if needed
+    auto& state = m_viewAnimState[view];
+    
+    if (animate && m_animator.isEnabled()) {
+        // Check if we have a valid starting position
+        if (state.currentX == 0 && state.currentY == 0 && 
+            view->nativeHandle() != nullptr) {
+            // Get current position from C layer
+            Rect geo = getViewGeometry(view);
+            state.currentX = geo.x;
+            state.currentY = geo.y;
+        }
+        
+        int fromX = state.currentX;
+        int fromY = state.currentY;
+        
+        // Only animate if position actually changed
+        if (fromX != x || fromY != y) {
+            animateViewMove(view, fromX, fromY, x, y);
+        } else {
+            // Just update state
+            state.currentX = x;
+            state.currentY = y;
+        }
+    } else {
+        state.currentX = x;
+        state.currentY = y;
+        if (g_view_set_position) {
+            g_view_set_position(view->nativeHandle(), x, y);
+        }
+    }
+}
+
+void Server::setViewSize(View* view, int w, int h, bool animate) {
+    if (!view) return;
+    
+    auto& state = m_viewAnimState[view];
+    
+    if (animate && m_animator.isEnabled()) {
+        // Initialize from current if needed
+        if (state.currentW == 0 && state.currentH == 0 && 
+            view->nativeHandle() != nullptr) {
+            Rect geo = getViewGeometry(view);
+            state.currentW = geo.w;
+            state.currentH = geo.h;
+        }
+        
+        int fromW = state.currentW;
+        int fromH = state.currentH;
+        
+        if (fromW != w || fromH != h) {
+            animateViewResize(view, fromW, fromH, w, h);
+        } else {
+            state.currentW = w;
+            state.currentH = h;
+        }
+    } else {
+        state.currentW = w;
+        state.currentH = h;
+        if (g_view_set_size) {
+            g_view_set_size(view->nativeHandle(), w, h);
+        }
+    }
 }
 
 void Server::focusViewNative(View* view) {
@@ -366,6 +439,56 @@ Rect Server::getViewGeometry(View* view) {
         g_view_get_geometry(view->nativeHandle(), &result.x, &result.y, &result.w, &result.h);
     }
     return result;
+}
+
+// ============================================================================
+// Animation Helpers
+// ============================================================================
+
+void Server::animateViewFade(View* view, float from, float to) {
+    // Fade animation would control opacity
+    // For now, wlroots doesn't have built-in opacity support
+    // This is a placeholder for future compositor-level opacity
+    (void)view;
+    (void)from;
+    (void)to;
+}
+
+void Server::animateViewMove(View* view, int fromX, int fromY, int toX, int toY) {
+    auto& state = m_viewAnimState[view];
+    
+    m_animator.move(fromX, fromY, toX, toY, 
+        [this, view, &state](int x, int y) {
+            state.currentX = x;
+            state.currentY = y;
+            if (g_view_set_position) {
+                g_view_set_position(view->nativeHandle(), x, y);
+            }
+        });
+}
+
+void Server::animateViewResize(View* view, int fromW, int fromH, int toW, int toH) {
+    auto& state = m_viewAnimState[view];
+    
+    m_animator.resize(fromW, fromH, toW, toH,
+        [this, view, &state](int w, int h) {
+            state.currentW = w;
+            state.currentH = h;
+            if (g_view_set_size) {
+                g_view_set_size(view->nativeHandle(), w, h);
+            }
+        });
+}
+
+void Server::animateViewScale(View* view, float from, float to) {
+    auto& state = m_viewAnimState[view];
+    
+    m_animator.scale(from, to,
+        [this, view, &state](float scale) {
+            state.currentScale = scale;
+            // Scale would be applied via surface transformation
+            // Placeholder for future implementation
+        });
 }
 
 } // namespace havel

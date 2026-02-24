@@ -3,6 +3,7 @@
 #include <wm/Types.hpp>
 #include <wm/Workspace.hpp>
 #include <wm/Focus.hpp>
+#include <wm/Animator.hpp>
 #include <wm/bridge.h>
 #include <memory>
 #include <array>
@@ -56,12 +57,18 @@ public:
     void setNativeHandle(void* handle) { m_nativeHandle = handle; }
     void* nativeHandle() const { return m_nativeHandle; }
 
+    // Animation control
+    void setAnimationsEnabled(bool enabled);
+    bool animationsEnabled() const { return m_animator.isEnabled(); }
+    void updateAnimations();
+
 private:
     std::array<std::unique_ptr<Workspace>, WORKSPACE_COUNT> m_workspaces;
     uint32_t m_activeWorkspace = 0;
     FocusManager m_focusManager;
     void* m_nativeHandle = nullptr;
     std::unordered_map<uint32_t, Rect> m_outputGeoms;
+    Animator m_animator;
 
     // Grab state for mouse operations
     struct GrabState {
@@ -75,16 +82,31 @@ private:
         int startViewH = 0;
     } m_grab;
 
+    // Animation state for views
+    struct ViewAnimationState {
+        int currentX = 0, currentY = 0;
+        int currentW = 0, currentH = 0;
+        float currentAlpha = 1.0f;
+        float currentScale = 1.0f;
+    };
+    std::unordered_map<View*, ViewAnimationState> m_viewAnimState;
+
     // Helper methods
     void spawnTerminal();
     void quit();
 
-    // View manipulation through C callbacks
-    void setViewPosition(View* view, int x, int y);
-    void setViewSize(View* view, int w, int h);
+    // View manipulation through C callbacks (with optional animation)
+    void setViewPosition(View* view, int x, int y, bool animate = true);
+    void setViewSize(View* view, int w, int h, bool animate = true);
     void focusViewNative(View* view);
     void raiseView(View* view);
     Rect getViewGeometry(View* view);
+
+    // Animation helpers
+    void animateViewFade(View* view, float from, float to);
+    void animateViewMove(View* view, int fromX, int fromY, int toX, int toY);
+    void animateViewResize(View* view, int fromW, int fromH, int toW, int toH);
+    void animateViewScale(View* view, float from, float to);
 };
 
 } // namespace havel
