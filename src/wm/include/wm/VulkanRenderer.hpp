@@ -45,6 +45,7 @@ public:
     void beginFrame();
     void endFrame();
     void submit();
+    void drawQuad(float x0, float y0, float x1, float y1, uint64_t textureId);
 
     // Device access
     VkDevice getDevice() const { return m_device; }
