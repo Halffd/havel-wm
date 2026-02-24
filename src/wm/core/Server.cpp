@@ -287,6 +287,27 @@ void Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
             toggleFloating();
             return;
         }
+        
+        // Meta+Insert: Minimize window
+        if (keycode == 118) {  // Insert
+            LOG_INFO("Minimize window (Meta+Insert)");
+            minimizeWindow();
+            return;
+        }
+        
+        // Meta+F: Toggle fullscreen
+        if (keycode == 33) {  // F
+            LOG_INFO("Toggle fullscreen (Meta+F)");
+            toggleFullscreen();
+            return;
+        }
+        
+        // Meta+A: Toggle always-on-top
+        if (keycode == 30) {  // A
+            LOG_INFO("Toggle always-on-top (Meta+A)");
+            toggleAlwaysOnTop();
+            return;
+        }
     }
 
     // ========================================================================
@@ -317,6 +338,13 @@ void Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
         if (keycode == 28) {  // Return
             LOG_INFO("Spawn terminal (Alt+Return)");
             spawnTerminal();
+            return;
+        }
+        
+        // Alt+F4: Close window (standard WM binding)
+        if (keycode == 111) {  // F4
+            LOG_INFO("Close window (Alt+F4)");
+            closeFocusedWindow();
             return;
         }
     }
@@ -539,6 +567,45 @@ void Server::toggleFloating() {
             Rect geom = getViewGeometry(view);
             view->setFloatGeom(geom);
         }
+    }
+}
+
+void Server::minimizeWindow() {
+    auto* ws = activeWorkspace();
+    if (ws && ws->activeView()) {
+        View* view = ws->activeView();
+        LOG_INFO("Minimize window");
+        // Unmap the view to minimize
+        onViewUnmapped(view);
+        // Focus next available view
+        focusNextMru(false);
+    }
+}
+
+void Server::toggleFullscreen() {
+    auto* ws = activeWorkspace();
+    if (ws && ws->activeView()) {
+        View* view = ws->activeView();
+        LOG_INFO("Toggle fullscreen");
+        // Toggle fullscreen state - would need wlroots callback
+        // For now, maximize the window to fill the output
+        Rect outputGeom = outputGeometry(m_activeWorkspace);
+        if (outputGeom.isValid()) {
+            setViewPosition(view, outputGeom.x, outputGeom.y, false);
+            setViewSize(view, outputGeom.w, outputGeom.h, false);
+        }
+    }
+}
+
+void Server::toggleAlwaysOnTop() {
+    auto* ws = activeWorkspace();
+    if (ws && ws->activeView()) {
+        View* view = ws->activeView();
+        LOG_INFO("Toggle always-on-top");
+        // Raise the view to top
+        raiseView(view);
+        // In a full implementation, this would set a persistent "on top" flag
+        // and ensure the view stays on top even when other windows are focused
     }
 }
 

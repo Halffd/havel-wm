@@ -100,6 +100,9 @@ private:
     void closeFocusedWindow();
     void toggleMaximize();
     void toggleFloating();
+    void minimizeWindow();
+    void toggleFullscreen();
+    void toggleAlwaysOnTop();
     void focusFirstLastView(bool first);
     void moveViewToWorkspace(uint32_t ws);
     void moveViewToWorkspaceRelative(bool next);
