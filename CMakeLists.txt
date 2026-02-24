@@ -29,7 +29,7 @@ file(MAKE_DIRECTORY ${PROTOCOL_HEADERS_DIR})
 
 # Generate xdg-shell protocol
 execute_process(
-    COMMAND ${WAYLAND_SCANNER} server-header 
+    COMMAND ${WAYLAND_SCANNER} server-header
     ${WAYLAND_PROTOCOLS_DIR}/stable/xdg-shell/xdg-shell.xml
     ${PROTOCOL_HEADERS_DIR}/xdg-shell-protocol.h
 )
@@ -45,10 +45,21 @@ set(PROTOCOL_SOURCES
     ${PROTOCOL_HEADERS_DIR}/xdg-shell-protocol.c
 )
 
+# C++ WM core sources
+set(WM_CORE_SOURCES
+    src/wm/core/View.cpp
+    src/wm/core/Workspace.cpp
+    src/wm/core/Layout.cpp
+    src/wm/core/Focus.cpp
+    src/wm/core/Server.cpp
+    src/wm/core/bridge.cpp
+)
+
 # Add executable
-add_executable(${PROJECT_NAME} 
+add_executable(${PROJECT_NAME}
     src/main.cpp
     wlr_bridge.c
+    ${WM_CORE_SOURCES}
     ${PROTOCOL_SOURCES}
 )
 
@@ -61,6 +72,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${PROTOCOL_HEADERS_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
     ${WAYLAND_SERVER_INCLUDE_DIRS}
     ${WLROOTS_INCLUDE_DIRS}
     ${XKB_INCLUDE_DIRS}
@@ -83,7 +95,7 @@ target_link_directories(${PROJECT_NAME} PRIVATE
     ${PIXMAN_LIBRARY_DIRS}
 )
 
-# Compiler flags - Use C++17 to handle C99 array syntax
+# Compiler flags
 target_compile_options(${PROJECT_NAME} PRIVATE
     ${WAYLAND_SERVER_CFLAGS_OTHER}
     ${WLROOTS_CFLAGS_OTHER}
