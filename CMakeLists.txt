@@ -60,6 +60,13 @@ set(WM_CORE_SOURCES
     src/wm/core/VulkanRenderer.cpp
 )
 
+# UI framework sources
+set(UI_SOURCES
+    src/ui/components/UIElement.cpp
+    src/ui/components/UIContext.cpp
+    src/ui/components/UIComponents.cpp
+)
+
 # Utility sources
 set(UTIL_SOURCES
     src/utils/Logger.c
@@ -70,6 +77,7 @@ add_executable(${PROJECT_NAME}
     src/main.cpp
     wlr_bridge.c
     ${WM_CORE_SOURCES}
+    ${UI_SOURCES}
     ${UTIL_SOURCES}
     ${PROTOCOL_SOURCES}
 )
@@ -84,6 +92,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${PROTOCOL_HEADERS_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
     ${WAYLAND_SERVER_INCLUDE_DIRS}
     ${WLROOTS_INCLUDE_DIRS}
