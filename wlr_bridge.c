@@ -1,4 +1,5 @@
 #include <wm/wlr_bridge.h>
+#include <Logger.h>
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -459,8 +460,7 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     struct havel_wlr_server *server = wl_container_of(listener, server, new_output);
     struct wlr_output *wlr_output = data;
 
-    fprintf(stderr, "[HAVEL] [OUTPUT] New output: %s\n", wlr_output->name);
-    fflush(stderr);
+    LOG_INFO("[OUTPUT] New output: %s", wlr_output->name);
 
     wlr_output_init_render(wlr_output, server->allocator, server->renderer);
 
@@ -485,8 +485,7 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     wl_list_insert(&server->outputs, &output->link);
     output->is_primary = (server->outputs.next == &output->link);
 
-    fprintf(stderr, "[HAVEL] [OUTPUT] %s is %s\n", wlr_output->name, output->is_primary ? "primary" : "secondary");
-    fflush(stderr);
+    LOG_DEBUG("[OUTPUT] %s is %s", wlr_output->name, output->is_primary ? "primary" : "secondary");
 
     // Create workspace trees for this output
     for (uint32_t i = 0; i < HAVEL_WORKSPACE_COUNT; ++i) {
@@ -528,8 +527,7 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
         const uint32_t keycode = event->keycode + 8;
         uint32_t modifiers = keyboard->keyboard->modifiers.depressed;
 
-        fprintf(stderr, "[HAVEL] [KEY] keycode=%u modifiers=%u\n", keycode, modifiers);
-        fflush(stderr);
+        LOG_DEBUG("[KEY] keycode=%u modifiers=%u", keycode, modifiers);
 
         // Forward to C++ layer for policy decisions
         havel_cpp_on_key(server->cpp_server, keycode, true, modifiers);
@@ -577,8 +575,7 @@ static void server_new_keyboard(struct havel_wlr_server *server, struct wlr_inpu
 
     wlr_seat_set_keyboard(server->seat, wlr_keyboard);
     
-    fprintf(stderr, "[HAVEL] [INPUT] Keyboard added to seat\n");
-    fflush(stderr);
+    LOG_INFO("[INPUT] Keyboard added to seat");
 }
 
 static void server_new_pointer(struct havel_wlr_server *server, struct wlr_input_device *device) {
@@ -692,8 +689,7 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
                 wlr_seat_keyboard_notify_enter(server->seat, surface,
                     keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
             }
-            fprintf(stderr, "[HAVEL] [FOCUS] XDG surface focused\n");
-            fflush(stderr);
+            LOG_DEBUG("[FOCUS] XDG surface focused");
         }
 
         // Also check XWayland
@@ -709,8 +705,7 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
                     wlr_seat_keyboard_notify_enter(server->seat, surface,
                         keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
                 }
-                fprintf(stderr, "[HAVEL] [FOCUS] XWayland surface focused\n");
-                fflush(stderr);
+                LOG_DEBUG("[FOCUS] XWayland surface focused");
             }
         }
     }
@@ -735,14 +730,16 @@ static void server_cursor_frame(struct wl_listener *listener, void *data) {
 // ============================================================================
 
 havel_wlr_server_t* havel_wlr_create(void) {
+    // Initialize logger first
+    logger_init(LOG_DEBUG);
+    
     wlr_log_init(WLR_DEBUG, NULL);
 
     struct havel_wlr_server *server = calloc(1, sizeof(*server));
     wl_list_init(&server->outputs);
     server->active_workspace = 0;
     
-    fprintf(stderr, "[HAVEL] Initializing havel_wlr_server\n");
-    fflush(stderr);
+    LOG_DEBUG("Initializing havel_wlr_server");
 
     // Register callbacks before creating C++ server
     havel_cpp_register_view_callbacks(
@@ -865,24 +862,20 @@ int havel_wlr_run(havel_wlr_server_t *server) {
 
     const char *socket = wl_display_add_socket_auto(server->display);
     if (!socket) {
-        fprintf(stderr, "[HAVEL] [ERROR] Failed to create wayland socket\n");
-        fflush(stderr);
+        LOG_ERROR("Failed to create wayland socket");
         return 1;
     }
 
     if (!wlr_backend_start(server->backend)) {
-        fprintf(stderr, "[HAVEL] [ERROR] Failed to start backend\n");
-        fflush(stderr);
+        LOG_ERROR("Failed to start backend");
         return 1;
     }
 
     setenv("WAYLAND_DISPLAY", socket, true);
-    fprintf(stderr, "[HAVEL] === Havel Compositor running on %s ===\n", socket);
-    fflush(stderr);
+    LOG_INFO("=== Havel Compositor running on %s ===", socket);
     printf("Havel Compositor running on %s\n", socket);
 
     wl_display_run(server->display);
-    fprintf(stderr, "[HAVEL] Havel Compositor shutting down\n");
-    fflush(stderr);
+    LOG_INFO("Havel Compositor shutting down");
     return 0;
 }

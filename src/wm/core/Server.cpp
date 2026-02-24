@@ -1,6 +1,6 @@
 #include <wm/Server.hpp>
 #include <wm/Layout.hpp>
-#include <Logger.hpp>
+#include <Logger.h>
 #include <algorithm>
 #include <cstdlib>
 #include <unistd.h>
@@ -10,7 +10,7 @@
 namespace havel {
 
 Server::Server() {
-    HAVEL_LOG_DEBUG("Server constructor");
+    LOG_DEBUG("Server constructor");
     // Initialize workspaces
     for (uint32_t i = 0; i < WORKSPACE_COUNT; ++i) {
         m_workspaces[i] = std::make_unique<Workspace>(i);
@@ -18,7 +18,7 @@ Server::Server() {
 }
 
 Server::~Server() {
-    HAVEL_LOG_INFO("Server destructor");
+    LOG_INFO("Server destructor");
 }
 
 Workspace* Server::activeWorkspace() const {
@@ -28,7 +28,7 @@ Workspace* Server::activeWorkspace() const {
 void Server::setActiveWorkspace(uint32_t id) {
     if (id >= WORKSPACE_COUNT) return;
     
-    HAVEL_LOG_INFO("Switching to workspace {}", id);
+    LOG_INFO("Switching to workspace %u", id);
     
     // Hide all workspaces on primary output, show only the active one
     if (g_workspace_set_active) {
@@ -43,13 +43,13 @@ void Server::workspaceStep(bool backwards) {
     uint32_t next = backwards
         ? (m_activeWorkspace + WORKSPACE_COUNT - 1) % WORKSPACE_COUNT
         : (m_activeWorkspace + 1) % WORKSPACE_COUNT;
-    HAVEL_LOG_DEBUG("Workspace step: {} -> {}", m_activeWorkspace, next);
+    LOG_DEBUG("Workspace step: %u -> %u", m_activeWorkspace, next);
     setActiveWorkspace(next);
 }
 
 void Server::workspaceStepTo(uint32_t target) {
     if (target >= WORKSPACE_COUNT) return;
-    HAVEL_LOG_DEBUG("Workspace step to: {}", target);
+    LOG_DEBUG("Workspace step to: %u", target);
     setActiveWorkspace(target);
 }
 
@@ -57,7 +57,7 @@ void Server::workspaceToggleTiling() {
     auto* ws = activeWorkspace();
     if (ws) {
         bool newState = !ws->isTilingEnabled();
-        HAVEL_LOG_INFO("Tiling {} for workspace {}", newState ? "enabled" : "disabled", m_activeWorkspace);
+        LOG_INFO("Tiling %s for workspace %u", newState ? "enabled" : "disabled", m_activeWorkspace);
         ws->setTilingEnabled(newState);
         arrangeWorkspace(m_activeWorkspace);
     }
@@ -73,7 +73,7 @@ std::shared_ptr<View> Server::createXdgView(void* xdgSurface) {
         ws->addView(view);
     }
     
-    HAVEL_LOG_DEBUG("Created XDG view, workspace={}", m_activeWorkspace);
+    LOG_DEBUG("Created XDG view, workspace=%u", m_activeWorkspace);
     return view;
 }
 
@@ -88,7 +88,7 @@ std::shared_ptr<View> Server::createXwaylandView(void* xwaylandSurface) {
         ws->addView(view);
     }
     
-    HAVEL_LOG_DEBUG("Created XWayland view, workspace={}", m_activeWorkspace);
+    LOG_DEBUG("Created XWayland view, workspace=%u", m_activeWorkspace);
     return view;
 }
 
@@ -96,7 +96,7 @@ void Server::onViewMapped(View* view) {
     if (!view) return;
     
     view->setMapped(true);
-    HAVEL_LOG_INFO("View mapped, workspace={}", view->workspaceId());
+    LOG_INFO("View mapped, workspace=%u", view->workspaceId());
     
     focusView(std::shared_ptr<View>(view, [](View*){})); // Non-owning promote
     
@@ -109,7 +109,7 @@ void Server::onViewMapped(View* view) {
 void Server::onViewUnmapped(View* view) {
     if (!view) return;
     
-    HAVEL_LOG_DEBUG("View unmapped");
+    LOG_DEBUG("View unmapped");
     view->setMapped(false);
     
     auto* ws = m_workspaces[view->workspaceId()].get();
@@ -125,7 +125,7 @@ void Server::onViewUnmapped(View* view) {
 void Server::onViewDestroyed(View* view) {
     if (!view) return;
     
-    HAVEL_LOG_INFO("View destroyed");
+    LOG_INFO("View destroyed");
     m_focusManager.remove(view);
     
     auto* ws = m_workspaces[view->workspaceId()].get();
@@ -153,7 +153,7 @@ void Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
     bool shift = (modifiers & MOD_SHIFT) != 0;
     bool ctrl = (modifiers & MOD_CTRL) != 0;
     
-    HAVEL_LOG_DEBUG("Key event: keycode={} mod={}{}{}{}", keycode, 
+    LOG_DEBUG("Key event: keycode={} mod={}{}{}{}", keycode, 
                     alt ? "Alt+" : "", 
                     meta ? "Meta+" : "",
                     shift ? "Shift+" : "",
@@ -165,14 +165,14 @@ void Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
     
     // Ctrl+Meta+F4: Quit compositor
     if (ctrl && meta && keycode == 111) {  // F4
-        HAVEL_LOG_INFO("Quit requested (Ctrl+Meta+F4)");
+        LOG_INFO("Quit requested (Ctrl+Meta+F4)");
         quit();
         return;
     }
     
     // Ctrl+Meta+Return: Show rofi
     if (ctrl && meta && keycode == 28) {  // Return
-        HAVEL_LOG_INFO("Launching rofi (Ctrl+Meta+Return)");
+        LOG_INFO("Launching rofi (Ctrl+Meta+Return)");
         spawnRofi();
         return;
     }
@@ -184,17 +184,17 @@ void Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
     if (meta) {
         // Meta+Tab or Meta+PgUp/PgDn: Workspace switch
         if (keycode == 23) {  // Tab
-            HAVEL_LOG_INFO("Workspace switch (Meta+Tab)");
+            LOG_INFO("Workspace switch (Meta+Tab)");
             workspaceStep(shift);
             return;
         }
         if (keycode == 104) {  // PgUp
-            HAVEL_LOG_INFO("Workspace switch (Meta+PgUp)");
+            LOG_INFO("Workspace switch (Meta+PgUp)");
             workspaceStep(false);
             return;
         }
         if (keycode == 105) {  // PgDn
-            HAVEL_LOG_INFO("Workspace switch (Meta+PgDn)");
+            LOG_INFO("Workspace switch (Meta+PgDn)");
             workspaceStep(true);
             return;
         }
@@ -202,7 +202,7 @@ void Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
         // Meta+1/2/3/4/5/6/7/8/9/0: Direct workspace switch
         if (keycode >= 10 && keycode <= 19) {
             uint32_t ws = (keycode == 19) ? 9 : (keycode - 10);  // 0 = workspace 9
-            HAVEL_LOG_INFO("Switch to workspace {} (Meta+{})", ws, keycode - 9);
+            LOG_INFO("Switch to workspace %u (Meta+%u)", ws, keycode - 9);
             workspaceStepTo(ws);
             return;
         }
@@ -210,80 +210,80 @@ void Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
         // Meta+Shift+1/2/3/4/5/6/7/8/9/0: Move window to workspace
         if (shift && keycode >= 10 && keycode <= 19) {
             uint32_t ws = (keycode == 19) ? 9 : (keycode - 10);
-            HAVEL_LOG_INFO("Move view to workspace {} (Meta+Shift+{})", ws, keycode - 9);
+            LOG_INFO("Move view to workspace %u (Meta+Shift+%u)", ws, keycode - 9);
             moveViewToWorkspace(ws);
             return;
         }
         
         // Meta+y: Toggle tiling
         if (keycode == 21) {  // y
-            HAVEL_LOG_INFO("Toggle tiling (Meta+y)");
+            LOG_INFO("Toggle tiling (Meta+y)");
             workspaceToggleTiling();
             return;
         }
         
         // Meta+Return: Spawn terminal (alacritty/foot)
         if (keycode == 28) {  // Return
-            HAVEL_LOG_INFO("Spawn terminal (Meta+Return)");
+            LOG_INFO("Spawn terminal (Meta+Return)");
             spawnTerminal();
             return;
         }
         
         // Meta+h/l: Focus first/last view
         if (keycode == 35) {  // h
-            HAVEL_LOG_DEBUG("Focus first view (Meta+h)");
+            LOG_DEBUG("Focus first view (Meta+h)");
             focusFirstLastView(true);
             return;
         }
         if (keycode == 38) {  // l
-            HAVEL_LOG_DEBUG("Focus last view (Meta+l)");
+            LOG_DEBUG("Focus last view (Meta+l)");
             focusFirstLastView(false);
             return;
         }
         
         // Meta+b: Open default browser
         if (keycode == 30) {  // b
-            HAVEL_LOG_INFO("Open browser (Meta+b)");
+            LOG_INFO("Open browser (Meta+b)");
             spawnBrowser();
             return;
         }
         
         // Meta+e: Open default file explorer
         if (keycode == 18) {  // e
-            HAVEL_LOG_INFO("Open file explorer (Meta+e)");
+            LOG_INFO("Open file explorer (Meta+e)");
             spawnFileManager();
             return;
         }
         
         // Meta+q: Close window
         if (keycode == 16) {  // q
-            HAVEL_LOG_INFO("Close window (Meta+q)");
+            LOG_INFO("Close window (Meta+q)");
             closeFocusedWindow();
             return;
         }
         
         // Meta+m: Toggle maximize
         if (keycode == 31) {  // m
-            HAVEL_LOG_INFO("Toggle maximize (Meta+m)");
+            LOG_INFO("Toggle maximize (Meta+m)");
             toggleMaximize();
             return;
         }
         
         // Meta+j/k: Focus next/prev view
         if (keycode == 30) {  // j
-            HAVEL_LOG_DEBUG("Focus next view (Meta+j)");
+            LOG_DEBUG("Focus next view (Meta+j)");
             focusNextMru(false);
             return;
         }
         if (keycode == 31) {  // k
-            HAVEL_LOG_DEBUG("Focus prev view (Meta+k)");
+            LOG_DEBUG("Focus prev view (Meta+k)");
             focusNextMru(true);
             return;
         }
         
         // Meta+space: Toggle floating
         if (keycode == 57) {  // space
-            HAVEL_LOG_INFO("Toggle floating (Meta+space)");
+            LOG_INFO("Toggle floating (Meta+space)");
             toggleFloating();
             return;
         }
@@ -296,26 +296,26 @@ void Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
     if (alt) {
         // Alt+Tab: Focus MRU switch
         if (keycode == 23) {  // Tab
-            HAVEL_LOG_DEBUG("Focus MRU switch (Alt+Tab)");
+            LOG_DEBUG("Focus MRU switch (Alt+Tab)");
             focusNextMru(shift);
             return;
         }
         
         // Alt+PgUp/PgDn: Move window to next/previous workspace
         if (keycode == 104) {  // PgUp
-            HAVEL_LOG_INFO("Move view to prev workspace (Alt+PgUp)");
+            LOG_INFO("Move view to prev workspace (Alt+PgUp)");
             moveViewToWorkspaceRelative(false);
             return;
         }
         if (keycode == 105) {  // PgDn
-            HAVEL_LOG_INFO("Move view to next workspace (Alt+PgDn)");
+            LOG_INFO("Move view to next workspace (Alt+PgDn)");
             moveViewToWorkspaceRelative(true);
             return;
         }
         
         // Alt+Return: Spawn terminal (fallback)
         if (keycode == 28) {  // Return
-            HAVEL_LOG_INFO("Spawn terminal (Alt+Return)");
+            LOG_INFO("Spawn terminal (Alt+Return)");
             spawnTerminal();
             return;
         }
@@ -325,14 +325,14 @@ void Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
 void Server::handlePointerButton(uint32_t button, bool pressed, double x, double y) {
     if (!pressed) {
         if (m_grab.button == button) {
-            HAVEL_LOG_DEBUG("Pointer grab released");
+            LOG_DEBUG("Pointer grab released");
             m_grab.view = nullptr;
             m_grab.button = 0;
         }
         return;
     }
     
-    HAVEL_LOG_DEBUG("Pointer button press: button={} x={} y={}", button, x, y);
+    LOG_DEBUG("Pointer button press: button=%u x=%.0f y=%.0f", button, x, y);
     
     // For now, just track the grab start
     m_grab.startX = x;
@@ -395,7 +395,7 @@ void Server::focusNextMru(bool backwards) {
     auto current = activeWorkspace()->activeView();
     auto next = m_focusManager.nextMru(current, backwards);
     if (next) {
-        HAVEL_LOG_DEBUG("Focus MRU view");
+        LOG_DEBUG("Focus MRU view");
         focusView(next);
     }
 }
@@ -412,7 +412,7 @@ void Server::arrangeWorkspace(uint32_t id) {
     Rect geom = outputGeometry(id);
     if (!geom.isValid()) return;
     
-    HAVEL_LOG_DEBUG("Arranging workspace {} with {} views", id, views.size());
+    LOG_DEBUG("Arranging workspace %u with %zu views", id, views.size());
     
     Layout::arrangeMasterStack(views, geom);
     
@@ -455,7 +455,7 @@ void Server::spawnTerminal() {
             pclose(f);
             if (g_server_spawn) {
                 g_server_spawn(terminals[i]);
-                HAVEL_LOG_INFO("Spawned terminal: {}", terminals[i]);
+                LOG_INFO("Spawned terminal: %s", terminals[i]);
             }
             return;
         }
@@ -484,7 +484,7 @@ void Server::spawnBrowser() {
             int result = pclose(f);
             if (result == 0 && g_server_spawn) {
                 g_server_spawn(browsers[i]);
-                HAVEL_LOG_INFO("Spawned browser: {}", browsers[i]);
+                LOG_INFO("Spawned browser: %s", browsers[i]);
                 return;
             }
         }
@@ -502,7 +502,7 @@ void Server::spawnFileManager() {
             int result = pclose(f);
             if (result == 0 && g_server_spawn) {
                 g_server_spawn(managers[i]);
-                HAVEL_LOG_INFO("Spawned file manager: {}", managers[i]);
+                LOG_INFO("Spawned file manager: %s", managers[i]);
                 return;
             }
         }
@@ -513,7 +513,7 @@ void Server::closeFocusedWindow() {
     auto* ws = activeWorkspace();
     if (ws && ws->activeView()) {
         View* view = ws->activeView();
-        HAVEL_LOG_INFO("Closing focused window");
+        LOG_INFO("Closing focused window");
         // Send close request through wlroots
         // This would need a callback to C layer
     }
@@ -523,7 +523,7 @@ void Server::toggleMaximize() {
     auto* ws = activeWorkspace();
     if (ws && ws->activeView()) {
         View* view = ws->activeView();
-        HAVEL_LOG_INFO("Toggle maximize");
+        LOG_INFO("Toggle maximize");
         // Toggle maximize state
         // Would need implementation
     }
@@ -534,7 +534,7 @@ void Server::toggleFloating() {
     if (ws && ws->activeView()) {
         View* view = ws->activeView();
         view->setFloating(!view->isFloating());
-        HAVEL_LOG_INFO("View floating state: {}", view->isFloating() ? "on" : "off");
+        LOG_INFO("View floating state: %s", view->isFloating() ? "on" : "off");
         if (view->isFloating() && !view->hasFloatGeom()) {
             Rect geom = getViewGeometry(view);
             view->setFloatGeom(geom);
@@ -567,7 +567,7 @@ void Server::moveViewToWorkspace(uint32_t ws) {
         auto* targetWs = m_workspaces[ws].get();
         if (targetWs) {
             targetWs->addView(std::shared_ptr<View>(view, [](View*){}));
-            HAVEL_LOG_INFO("Moved view to workspace {}", ws);
+            LOG_INFO("Moved view to workspace %u", ws);
             arrangeWorkspace(ws);
         }
     }
@@ -595,7 +595,7 @@ void Server::quit() {
 
 void Server::setAnimationsEnabled(bool enabled) {
     m_animator.setEnabled(enabled);
-    HAVEL_LOG_INFO("Animations {}", enabled ? "enabled" : "disabled");
+    LOG_INFO("Animations %s", enabled ? "enabled" : "disabled");
 }
 
 void Server::updateAnimations() {

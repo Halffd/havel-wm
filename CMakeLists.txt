@@ -60,7 +60,7 @@ set(WM_CORE_SOURCES
 
 # Utility sources
 set(UTIL_SOURCES
-    src/utils/Logger.cpp
+    src/utils/Logger.c
 )
 
 # Add executable
