@@ -138,6 +138,11 @@ struct havel_xdg_view {
     struct wl_listener map;
     struct wl_listener unmap;
     struct wl_listener destroy;
+
+    struct havel_xdg_view *parent;
+    struct wl_list children;
+    struct wl_list parent_link;
+    struct wl_listener parent_destroy;
 };
 
 struct havel_xwayland_view {
@@ -228,6 +233,31 @@ static void view_apply_default_floating_geom_xdg(struct havel_wlr_server *server
         if (view->float_w > 0 && view->float_h > 0) {
             wlr_xdg_toplevel_set_size(view->xdg_surface->toplevel, view->float_w, view->float_h);
         }
+        return;
+    }
+
+    struct wlr_box geometry;
+        geometry = view->xdg_surface->current.geometry;
+    int width = geometry.width > 0 ? geometry.width : 800;
+    int height = geometry.height > 0 ? geometry.height : 600;
+
+    if (view->parent) {
+        int x = view->parent->x + (view->parent->xdg_surface->current.geometry.width - width) / 2;
+        int y = view->parent->y + (view->parent->xdg_surface->current.geometry.height - height) / 2;
+
+        struct havel_output *out = output_at_cursor(server);
+        struct wlr_box obox = {0};
+        output_get_box(out, &obox);
+
+        if (obox.width > 0 && obox.height > 0) {
+            if (x < obox.x) x = obox.x;
+            if (y < obox.y) y = obox.y;
+            if (x + width > obox.x + obox.width) x = obox.x + obox.width - width;
+            if (y + height > obox.y + obox.height) y = obox.y + obox.height - height;
+        }
+
+        xdg_view_set_position(view, x, y);
+        wlr_xdg_toplevel_set_size(view->xdg_surface->toplevel, width, height);
         return;
     }
 
@@ -1227,6 +1257,21 @@ static void xdg_view_handle_unmap(struct wl_listener *listener, void *data) {
     struct havel_xdg_view *view = wl_container_of(listener, view, unmap);
     (void)data;
     view->mapped = false;
+
+    if (view->parent) {
+        wl_list_remove(&view->parent_link);
+        wl_list_init(&view->parent_link);
+        wl_list_remove(&view->parent_destroy.link);
+        view->parent = NULL;
+    }
+
+    struct havel_xdg_view *child, *tmp;
+    wl_list_for_each_safe(child, tmp, &view->children, parent_link) {
+        if (child->xdg_surface && child->xdg_surface->toplevel) {
+            wlr_xdg_toplevel_send_close(child->xdg_surface->toplevel);
+        }
+    }
+
     if (view->server->workspace_tiling_enabled[view->workspace_id]) {
         arrange_workspace(view->server, view->workspace_id);
     }
@@ -1238,6 +1283,20 @@ static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
     wl_list_remove(&view->map.link);
     wl_list_remove(&view->unmap.link);
     wl_list_remove(&view->destroy.link);
+
+    if (view->parent) {
+        wl_list_remove(&view->parent_link);
+        wl_list_remove(&view->parent_destroy.link);
+        view->parent = NULL;
+    }
+
+    struct havel_xdg_view *child, *tmp;
+    wl_list_for_each_safe(child, tmp, &view->children, parent_link) {
+        child->parent = NULL;
+        wl_list_remove(&child->parent_link);
+        wl_list_init(&child->parent_link);
+        wl_list_remove(&child->parent_destroy.link);
+    }
 
     if (server && server->focused_xdg == view) {
         server->focused_xdg = NULL;
@@ -1255,6 +1314,13 @@ static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
     free(view);
 }
 
+static void handle_parent_destroy(struct wl_listener *listener, void *data) {
+    struct havel_xdg_view *view = wl_container_of(listener, view, parent_destroy);
+    wl_list_remove(&view->parent_link);
+    wl_list_remove(&view->parent_destroy.link);
+    view->parent = NULL;
+}
+
 static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
     struct havel_wlr_server *server = wl_container_of(listener, server, new_xdg_surface);
     struct wlr_xdg_surface *xdg_surface = data;
@@ -1270,6 +1336,8 @@ static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
 
     wl_list_init(&view->mru_link);
     wl_list_init(&view->ws_link);
+    wl_list_init(&view->children);
+    wl_list_init(&view->parent_link);
     view->mapped = false;
     view->workspace_id = server->active_workspace;
 
@@ -1278,6 +1346,16 @@ static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
     view->float_y = 0;
     view->float_w = 0;
     view->float_h = 0;
+
+    if (xdg_surface->toplevel->parent) {
+        struct havel_xdg_view *parent = xdg_surface->toplevel->parent->base->data;
+        if (parent) {
+            view->parent = parent;
+            wl_list_insert(&parent->children, &view->parent_link);
+            view->parent_destroy.notify = handle_parent_destroy;
+            wl_signal_add(&parent->xdg_surface->events.destroy, &view->parent_destroy);
+        }
+    }
 
     if (view->workspace_id < HAVEL_WORKSPACE_COUNT) {
         wl_list_insert(&server->xdg_views_ws[view->workspace_id], &view->ws_link);
@@ -1345,17 +1423,35 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
     view->scene_tree = wlr_scene_tree_create(parent);
     wlr_scene_surface_create(view->scene_tree, xsurface->surface);
 
-    xwayland_view_set_position(view, xsurface->x, xsurface->y);
+    bool has_position = (xsurface->x != 0 || xsurface->y != 0) &&
+                        (xsurface->x != -1 && xsurface->y != -1);
+    bool position_valid = false;
+    if (has_position) {
+        struct wlr_output *wlr_out = wlr_output_layout_output_at(server->output_layout,
+                                                               xsurface->x, xsurface->y);
+        position_valid = (wlr_out != NULL);
+    }
 
-    if (xsurface->width > 0 && xsurface->height > 0) {
+    if (position_valid) {
+        xwayland_view_set_position(view, xsurface->x, xsurface->y);
         view->float_x = xsurface->x;
         view->float_y = xsurface->y;
         view->float_w = xsurface->width;
         view->float_h = xsurface->height;
         view->have_float_geom = true;
-    }
+    } else {
+        xwayland_view_set_position(view, xsurface->x, xsurface->y);
 
-    view_apply_default_floating_geom_xwayland(server, view);
+        if (xsurface->width > 0 && xsurface->height > 0) {
+            view->float_x = xsurface->x;
+            view->float_y = xsurface->y;
+            view->float_w = xsurface->width;
+            view->float_h = xsurface->height;
+            view->have_float_geom = true;
+        }
+
+        view_apply_default_floating_geom_xwayland(server, view);
+    }
 
     view->destroy.notify = xwayland_view_handle_destroy;
     wl_signal_add(&xsurface->events.destroy, &view->destroy);
