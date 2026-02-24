@@ -45,6 +45,8 @@ static cpp_view_set_size_fn g_view_set_size = NULL;
 static cpp_view_focus_fn g_view_focus = NULL;
 static cpp_view_raise_fn g_view_raise = NULL;
 static cpp_view_get_geometry_fn g_view_get_geometry = NULL;
+static cpp_view_close_fn g_view_close = NULL;
+static cpp_view_set_fullscreen_fn g_view_set_fullscreen = NULL;
 static cpp_workspace_arrange_fn g_workspace_arrange = NULL;
 static cpp_workspace_set_active_fn g_workspace_set_active = NULL;
 static cpp_server_quit_fn g_server_quit = NULL;
@@ -55,13 +57,17 @@ void havel_cpp_register_view_callbacks(
     cpp_view_set_size_fn set_size,
     cpp_view_focus_fn focus,
     cpp_view_raise_fn raise,
-    cpp_view_get_geometry_fn get_geometry
+    cpp_view_get_geometry_fn get_geometry,
+    cpp_view_close_fn close,
+    cpp_view_set_fullscreen_fn set_fullscreen
 ) {
     g_view_set_position = set_position;
     g_view_set_size = set_size;
     g_view_focus = focus;
     g_view_raise = raise;
     g_view_get_geometry = get_geometry;
+    g_view_close = close;
+    g_view_set_fullscreen = set_fullscreen;
 }
 
 void havel_cpp_register_workspace_callbacks(
@@ -229,6 +235,22 @@ static void cpp_impl_view_get_geometry(void* view, int* x, int* y, int* w, int* 
     } else {
         if (w) *w = 0;
         if (h) *h = 0;
+    }
+}
+
+static void cpp_impl_view_close(void* view) {
+    if (!view) return;
+    struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
+    if (xdg_view->xdg_surface && xdg_view->xdg_surface->toplevel) {
+        wlr_xdg_toplevel_send_close(xdg_view->xdg_surface->toplevel);
+    }
+}
+
+static void cpp_impl_view_set_fullscreen(void* view, bool fullscreen) {
+    if (!view) return;
+    struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
+    if (xdg_view->xdg_surface && xdg_view->xdg_surface->toplevel) {
+        wlr_xdg_toplevel_set_fullscreen(xdg_view->xdg_surface->toplevel, fullscreen);
     }
 }
 
@@ -747,7 +769,9 @@ havel_wlr_server_t* havel_wlr_create(void) {
         cpp_impl_view_set_size,
         cpp_impl_view_focus,
         cpp_impl_view_raise,
-        cpp_impl_view_get_geometry
+        cpp_impl_view_get_geometry,
+        cpp_impl_view_close,
+        cpp_impl_view_set_fullscreen
     );
     havel_cpp_register_workspace_callbacks(
         cpp_impl_workspace_arrange,

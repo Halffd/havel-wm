@@ -542,8 +542,10 @@ void Server::closeFocusedWindow() {
     if (ws && ws->activeView()) {
         View* view = ws->activeView();
         LOG_INFO("Closing focused window");
-        // Send close request through wlroots
-        // This would need a callback to C layer
+        // Send close request through wlroots callback
+        if (g_view_close) {
+            g_view_close(view->nativeHandle());
+        }
     }
 }
 
@@ -551,9 +553,34 @@ void Server::toggleMaximize() {
     auto* ws = activeWorkspace();
     if (ws && ws->activeView()) {
         View* view = ws->activeView();
-        LOG_INFO("Toggle maximize");
-        // Toggle maximize state
-        // Would need implementation
+        
+        // Check if already maximized (compare with output geometry)
+        Rect outputGeom = outputGeometry(m_activeWorkspace);
+        Rect viewGeom = getViewGeometry(view);
+        
+        bool isMaximized = (viewGeom.x == outputGeom.x && 
+                           viewGeom.y == outputGeom.y &&
+                           viewGeom.w == outputGeom.w && 
+                           viewGeom.h == outputGeom.h);
+        
+        if (isMaximized) {
+            // Restore to floating geometry if available
+            if (view->hasFloatGeom()) {
+                Rect fg = view->floatGeom();
+                setViewPosition(view, fg.x, fg.y, false);
+                setViewSize(view, fg.w, fg.h, false);
+                LOG_INFO("Restore window from maximize");
+            }
+        } else {
+            // Store current geometry before maximizing
+            if (!view->hasFloatGeom()) {
+                view->setFloatGeom(viewGeom);
+            }
+            // Maximize to fill output
+            setViewPosition(view, outputGeom.x, outputGeom.y, false);
+            setViewSize(view, outputGeom.w, outputGeom.h, false);
+            LOG_INFO("Maximize window");
+        }
     }
 }
 
@@ -587,12 +614,25 @@ void Server::toggleFullscreen() {
     if (ws && ws->activeView()) {
         View* view = ws->activeView();
         LOG_INFO("Toggle fullscreen");
-        // Toggle fullscreen state - would need wlroots callback
-        // For now, maximize the window to fill the output
-        Rect outputGeom = outputGeometry(m_activeWorkspace);
-        if (outputGeom.isValid()) {
-            setViewPosition(view, outputGeom.x, outputGeom.y, false);
-            setViewSize(view, outputGeom.w, outputGeom.h, false);
+        // Toggle fullscreen through wlroots callback
+        // Store state to track current fullscreen status
+        static View* lastFullscreenView = nullptr;
+        
+        if (lastFullscreenView == view) {
+            // Exit fullscreen
+            if (g_view_set_fullscreen) {
+                g_view_set_fullscreen(view->nativeHandle(), false);
+            }
+            lastFullscreenView = nullptr;
+        } else {
+            // Enter fullscreen
+            if (lastFullscreenView && g_view_set_fullscreen) {
+                g_view_set_fullscreen(lastFullscreenView->nativeHandle(), false);
+            }
+            if (g_view_set_fullscreen) {
+                g_view_set_fullscreen(view->nativeHandle(), true);
+            }
+            lastFullscreenView = view;
         }
     }
 }

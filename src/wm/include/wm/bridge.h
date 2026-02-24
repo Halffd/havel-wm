@@ -13,6 +13,8 @@ typedef void (*cpp_view_set_size_fn)(void* view, int w, int h);
 typedef void (*cpp_view_focus_fn)(void* view);
 typedef void (*cpp_view_raise_fn)(void* view);
 typedef void (*cpp_view_get_geometry_fn)(void* view, int* x, int* y, int* w, int* h);
+typedef void (*cpp_view_close_fn)(void* view);
+typedef void (*cpp_view_set_fullscreen_fn)(void* view, bool fullscreen);
 typedef void (*cpp_workspace_arrange_fn)(uint32_t workspace_id);
 typedef void (*cpp_workspace_set_active_fn)(uint32_t workspace_id);
 typedef void (*cpp_server_quit_fn)(void);
@@ -52,7 +54,9 @@ void havel_cpp_register_view_callbacks(
     cpp_view_set_size_fn set_size,
     cpp_view_focus_fn focus,
     cpp_view_raise_fn raise,
-    cpp_view_get_geometry_fn get_geometry
+    cpp_view_get_geometry_fn get_geometry,
+    cpp_view_close_fn close,
+    cpp_view_set_fullscreen_fn set_fullscreen
 );
 
 void havel_cpp_register_workspace_callbacks(
@@ -74,6 +78,8 @@ using ViewSetSizeFn = cpp_view_set_size_fn;
 using ViewFocusFn = cpp_view_focus_fn;
 using ViewRaiseFn = cpp_view_raise_fn;
 using ViewGetGeometryFn = cpp_view_get_geometry_fn;
+using ViewCloseFn = cpp_view_close_fn;
+using ViewSetFullscreenFn = cpp_view_set_fullscreen_fn;
 using WorkspaceArrangeFn = cpp_workspace_arrange_fn;
 using WorkspaceSetActiveFn = cpp_workspace_set_active_fn;
 using ServerQuitFn = cpp_server_quit_fn;
@@ -85,6 +91,8 @@ extern ViewSetSizeFn g_view_set_size;
 extern ViewFocusFn g_view_focus;
 extern ViewRaiseFn g_view_raise;
 extern ViewGetGeometryFn g_view_get_geometry;
+extern ViewCloseFn g_view_close;
+extern ViewSetFullscreenFn g_view_set_fullscreen;
 extern WorkspaceArrangeFn g_workspace_arrange;
 extern WorkspaceSetActiveFn g_workspace_set_active;
 extern ServerQuitFn g_server_quit;
