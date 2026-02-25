@@ -14,7 +14,8 @@ pkg_check_modules(WLROOTS REQUIRED wlroots-0.20)
 pkg_check_modules(XKB REQUIRED xkbcommon)
 pkg_check_modules(PIXMAN REQUIRED pixman-1)
 pkg_check_modules(FMT REQUIRED fmt)
-pkg_check_modules(VULKAN REQUIRED vulkan)
+# Vulkan disabled - wlroots handles rendering
+# pkg_check_modules(VULKAN REQUIRED vulkan)
 
 # Get wayland-protocols datadir for protocol files
 execute_process(
@@ -57,15 +58,15 @@ set(WM_CORE_SOURCES
     src/wm/core/bridge.cpp
     src/wm/core/Animation.cpp
     src/wm/core/Animator.cpp
-    src/wm/core/VulkanRenderer.cpp
+    # VulkanRenderer.cpp - disabled, wlroots handles rendering
 )
 
-# UI framework sources
-set(UI_SOURCES
-    src/ui/components/UIElement.cpp
-    src/ui/components/UIContext.cpp
-    src/ui/components/UIComponents.cpp
-)
+# UI framework sources - disabled for now, keep for future debug overlay
+# set(UI_SOURCES
+#     src/ui/components/UIElement.cpp
+#     src/ui/components/UIContext.cpp
+#     src/ui/components/UIComponents.cpp
+# )
 
 # Utility sources
 set(UTIL_SOURCES
@@ -77,7 +78,6 @@ add_executable(${PROJECT_NAME}
     src/main.cpp
     wlr_bridge.c
     ${WM_CORE_SOURCES}
-    ${UI_SOURCES}
     ${UTIL_SOURCES}
     ${PROTOCOL_SOURCES}
 )
@@ -92,14 +92,14 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${PROTOCOL_HEADERS_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
     ${WAYLAND_SERVER_INCLUDE_DIRS}
     ${WLROOTS_INCLUDE_DIRS}
     ${XKB_INCLUDE_DIRS}
     ${PIXMAN_INCLUDE_DIRS}
     ${FMT_INCLUDE_DIRS}
-    ${VULKAN_INCLUDE_DIRS}
+    # UI framework include (for future use)
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/include
 )
 
 # Link libraries
@@ -109,7 +109,6 @@ target_link_libraries(${PROJECT_NAME}
     ${XKB_LIBRARIES}
     ${PIXMAN_LIBRARIES}
     ${FMT_LIBRARIES}
-    ${VULKAN_LIBRARIES}
 )
 
 # Set library directories
@@ -119,7 +118,6 @@ target_link_directories(${PROJECT_NAME} PRIVATE
     ${XKB_LIBRARY_DIRS}
     ${PIXMAN_LIBRARY_DIRS}
     ${FMT_LIBRARY_DIRS}
-    ${VULKAN_LIBRARY_DIRS}
 )
 
 # Compiler flags
