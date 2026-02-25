@@ -65,6 +65,10 @@ set(WM_CORE_SOURCES
     src/wm/core/bridge.cpp
     src/wm/core/Animation.cpp
     src/wm/core/Animator.cpp
+    src/wm/render/RenderPipeline.cpp
+    src/wm/render/render_c_wrappers.c
+    src/wm/input/InputManager.cpp
+    src/wm/overlay/OverlayScene.cpp
     # VulkanRenderer.cpp - disabled, wlroots handles rendering
 )
 
@@ -134,6 +138,7 @@ target_compile_options(${PROJECT_NAME} PRIVATE
     ${WLROOTS_CFLAGS_OTHER}
     ${XKB_CFLAGS_OTHER}
     ${PIXMAN_CFLAGS_OTHER}
+    ${FMT_CFLAGS_OTHER}
     -Wall
     -Wextra
     -Wno-unused-parameter
