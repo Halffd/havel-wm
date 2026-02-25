@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(wayland-compositor C CXX)
+project(havel-wm C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -143,14 +143,25 @@ target_compile_options(${PROJECT_NAME} PRIVATE
 # Set output directory
 set_target_properties(${PROJECT_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+    OUTPUT_NAME "havel-wm"
 )
 
-# Install target
+# Install targets
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
+)
+
+# Install session file
+install(FILES havel-wm.desktop
+    DESTINATION share/wayland-sessions
 )
 
 # Build panel if Qt6 is available
 if(PANEL_ENABLED)
     add_subdirectory(src/shell/panel)
+    
+    # Install panel target
+    install(TARGETS havel-panel
+        RUNTIME DESTINATION bin
+    )
 endif()
