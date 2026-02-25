@@ -40,6 +40,10 @@ public:
     void* nativeHandle() const { return m_nativeHandle; }
     void setNativeHandle(void* handle) { m_nativeHandle = handle; }
 
+    // Window manager ID (for taskbar integration)
+    uint64_t windowId() const { return m_windowId; }
+    void setWindowId(uint64_t id) { m_windowId = id; }
+
 private:
     uint32_t m_workspaceId = 0;
     Rect m_geom;
@@ -48,6 +52,7 @@ private:
     bool m_haveFloatGeom = false;
     bool m_mapped = false;
     void* m_nativeHandle = nullptr;
+    uint64_t m_windowId = 0;
 };
 
 } // namespace havel

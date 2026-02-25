@@ -75,7 +75,11 @@ View* Server::createXdgView(void* xdgSurface) {
         ws->addView(view);
     }
 
-    LOG_DEBUG("Created XDG view, workspace=%u", m_activeWorkspace);
+    // Register with window manager for taskbar integration
+    uint64_t windowId = m_windowManager.registerWindow(view);
+    view->setWindowId(windowId);
+
+    LOG_DEBUG("Created XDG view, workspace=%u windowId=%lu", m_activeWorkspace, windowId);
     return view;
 }
 
@@ -90,7 +94,11 @@ View* Server::createXwaylandView(void* xwaylandSurface) {
         ws->addView(view);
     }
 
-    LOG_DEBUG("Created XWayland view, workspace=%u", m_activeWorkspace);
+    // Register with window manager for taskbar integration
+    uint64_t windowId = m_windowManager.registerWindow(view, "xwayland", "XWayland Window");
+    view->setWindowId(windowId);
+
+    LOG_DEBUG("Created XWayland view, workspace=%u windowId=%lu", m_activeWorkspace, windowId);
     return view;
 }
 
@@ -100,6 +108,9 @@ void Server::onViewMapped(View* view) {
     view->setMapped(true);
     LOG_INFO("View mapped, workspace=%u", view->workspaceId());
 
+    // Update window manager with app_id and title from XDG surface
+    // (Would be called from C layer when surface is ready)
+    
     focusView(view);
 
     auto* ws = activeWorkspace();
@@ -128,11 +139,16 @@ void Server::onViewDestroyed(View* view) {
     if (!view) return;
 
     LOG_INFO("View destroyed");
-    
+
+    // Unregister from window manager
+    if (view->windowId() != 0) {
+        m_windowManager.unregisterWindow(view->windowId());
+    }
+
     // CRITICAL: Cancel animations for this view to prevent UAF
     m_animator.cancelAll();
     m_viewAnimState.erase(view);
-    
+
     m_focusManager.remove(view);
 
     auto* ws = m_workspaces[view->workspaceId()].get();
@@ -422,6 +438,11 @@ void Server::focusView(View* view) {
     auto* ws = m_workspaces[view->workspaceId()].get();
     if (ws) {
         ws->setActiveView(view);
+    }
+
+    // Update window manager focus state
+    if (view->windowId() != 0) {
+        m_windowManager.focusWindow(view->windowId());
     }
 
     // Raise and focus the view

@@ -5,6 +5,7 @@
 #include <wm/Focus.hpp>
 #include <wm/Animator.hpp>
 #include <wm/bridge.h>
+#include <shell/WindowManager.hpp>
 #include <memory>
 #include <array>
 #include <unordered_map>
@@ -64,10 +65,15 @@ public:
     bool animationsEnabled() const { return m_animator.isEnabled(); }
     void updateAnimations();
 
+    // Window management (for taskbar/panel)
+    WindowManager& windowManager() { return m_windowManager; }
+    const WindowManager& windowManager() const { return m_windowManager; }
+
 private:
     std::array<std::unique_ptr<Workspace>, WORKSPACE_COUNT> m_workspaces;
     uint32_t m_activeWorkspace = 0;
     FocusManager m_focusManager;
+    WindowManager m_windowManager;
     void* m_nativeHandle = nullptr;
     std::unordered_map<uint32_t, Rect> m_outputGeoms;
     Animator m_animator;

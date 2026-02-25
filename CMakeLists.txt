@@ -61,12 +61,11 @@ set(WM_CORE_SOURCES
     # VulkanRenderer.cpp - disabled, wlroots handles rendering
 )
 
-# UI framework sources - disabled for now, keep for future debug overlay
-# set(UI_SOURCES
-#     src/ui/components/UIElement.cpp
-#     src/ui/components/UIContext.cpp
-#     src/ui/components/UIComponents.cpp
-# )
+# Shell/panel sources (Phase 1 - window manager integration)
+set(SHELL_SOURCES
+    src/shell/WindowManager.cpp
+    src/shell/IPCServer.cpp
+)
 
 # Utility sources
 set(UTIL_SOURCES
@@ -78,6 +77,7 @@ add_executable(${PROJECT_NAME}
     src/main.cpp
     wlr_bridge.c
     ${WM_CORE_SOURCES}
+    ${SHELL_SOURCES}
     ${UTIL_SOURCES}
     ${PROTOCOL_SOURCES}
 )
@@ -92,6 +92,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${PROTOCOL_HEADERS_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/shell/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
     ${WAYLAND_SERVER_INCLUDE_DIRS}
     ${WLROOTS_INCLUDE_DIRS}
