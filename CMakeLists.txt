@@ -164,4 +164,7 @@ if(PANEL_ENABLED)
     install(TARGETS havel-panel
         RUNTIME DESTINATION bin
     )
+    
+    # Build and install settings
+    add_subdirectory(src/shell/settings)
 endif()
