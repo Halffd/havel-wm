@@ -4,6 +4,7 @@
 #include <QApplication>
 #include <QScreen>
 #include <QTimer>
+#include <QDateTime>
 
 namespace havel {
 
@@ -12,7 +13,10 @@ PanelWindow::PanelWindow(QWidget* parent)
     , m_centralWidget(new QWidget(this))
     , m_layout(new QHBoxLayout(m_centralWidget))
     , m_statusLabel(new QLabel(this))
+    , m_launcherButton(new QPushButton(this))
+    , m_clockLabel(new QLabel(this))
     , m_ipcClient(new IPCClient(this))
+    , m_launcher(new LauncherWindow(this))
 {
     setupUI();
     
@@ -22,6 +26,17 @@ PanelWindow::PanelWindow(QWidget* parent)
     connect(m_ipcClient, &IPCClient::socketError, this, &PanelWindow::onIPCError);
     connect(m_ipcClient, &IPCClient::windowsUpdated, this, &PanelWindow::onWindowsUpdated);
     connect(m_ipcClient, &IPCClient::focusedChanged, this, &PanelWindow::onFocusedChanged);
+    
+    // Launcher button
+    connect(m_launcherButton, &QPushButton::clicked, this, [this]() {
+        m_launcher->showAtCursor();
+    });
+    
+    // Clock timer
+    QTimer* clockTimer = new QTimer(this);
+    connect(clockTimer, &QTimer::timeout, this, &PanelWindow::updateClock);
+    clockTimer->start(1000);  // Update every second
+    updateClock();
     
     // Initial window list request after connection
     QTimer::singleShot(500, this, [this]() {
@@ -57,18 +72,43 @@ void PanelWindow::setupUI() {
     setStyleSheet(
         "QMainWindow { background: #1a1a20; }"
         "QWidget { background: #1a1a20; color: #eee; }"
+        "QPushButton { "
+        "  background: #2a2a30; "
+        "  border: 1px solid #444; "
+        "  border-radius: 4px; "
+        "  padding: 4px 12px; "
+        "  color: #eee; "
+        "  font-size: 14px; "
+        "} "
+        "QPushButton:hover { background: #3a3a45; } "
+        "QPushButton:pressed { background: #4a4a55; } "
+        "QLabel { color: #aaa; padding: 4px 8px; font-size: 13px; }"
     );
     
     // Layout
-    m_layout->setContentsMargins(4, 4, 4, 4);
-    m_layout->setSpacing(4);
+    m_layout->setContentsMargins(8, 4, 8, 4);
+    m_layout->setSpacing(8);
     
-    // Status label (left side)
-    m_statusLabel->setText("Havel Panel");
-    m_statusLabel->setStyleSheet("color: #888; padding: 4px;");
+    // Launcher button (left side)
+    m_launcherButton->setText("🚀 Apps");
+    m_launcherButton->setFixedHeight(36);
+    m_launcherButton->setToolTip("Click to open application launcher");
+    m_layout->addWidget(m_launcherButton);
+    
+    // Status label (hidden by default, shown for errors)
+    m_statusLabel->setText("");
+    m_statusLabel->setStyleSheet("color: #ff6464;");
     m_layout->addWidget(m_statusLabel);
     
     m_layout->addStretch();
+    
+    // Window buttons will be added here dynamically
+    
+    m_layout->addStretch();
+    
+    // Clock (right side)
+    m_clockLabel->setStyleSheet("color: #aaa; font-size: 13px; padding: 4px 8px;");
+    m_layout->addWidget(m_clockLabel);
     
     // Set fixed height
     setFixedHeight(48);
@@ -79,6 +119,11 @@ void PanelWindow::setupUI() {
         QRect geo = screen->geometry();
         setGeometry(0, geo.height() - 48, geo.width(), 48);
     }
+}
+
+void PanelWindow::updateClock() {
+    QDateTime now = QDateTime::currentDateTime();
+    m_clockLabel->setText(now.toString("ddd MMM d  HH:mm"));
 }
 
 void PanelWindow::onWindowsUpdated(const QVector<WindowInfo>& windows) {

@@ -19,6 +19,8 @@ add_executable(havel-panel
     PanelWindow.cpp
     WindowButton.cpp
     IPCClient.cpp
+    AppLauncher.cpp
+    LauncherWindow.cpp
 )
 
 target_include_directories(havel-panel PRIVATE

@@ -4,7 +4,9 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPushButton>
 #include "IPCClient.hpp"
+#include "LauncherWindow.hpp"
 
 namespace havel {
 
@@ -36,12 +38,16 @@ private:
     void setupUI();
     void updateWindowList();
     WindowButton* findButton(quint64 windowId);
+    void updateClock();
     
     QWidget* m_centralWidget;
     QHBoxLayout* m_layout;
     QLabel* m_statusLabel;
+    QPushButton* m_launcherButton;
+    QLabel* m_clockLabel;
     
     IPCClient* m_ipcClient;
+    LauncherWindow* m_launcher;
     QVector<WindowButton*> m_buttons;
     quint64 m_focusedWindowId = 0;
 };
