@@ -8,19 +8,20 @@ extern "C" {
 #endif
 
 // Opaque types - C++ never sees wlroots internals
-struct wlr_scene;
-struct wlr_output;
-struct wlr_renderer;
+typedef void wlr_scene_t;
+typedef void wlr_output_t;
+typedef void wlr_renderer_t;
+typedef void wlr_scene_output_t;
 
 // Render pipeline C interface
 typedef struct havel_render_pipeline havel_render_pipeline_t;
 
 // Create/destroy pipeline
-havel_render_pipeline_t* havel_render_pipeline_create(struct wlr_output* output, struct wlr_renderer* renderer);
+havel_render_pipeline_t* havel_render_pipeline_create(wlr_output_t* output, wlr_renderer_t* renderer);
 void havel_render_pipeline_destroy(havel_render_pipeline_t* pipeline);
 
 // Render scene through pipeline
-void havel_render_pipeline_render(havel_render_pipeline_t* pipeline, struct wlr_scene* scene);
+void havel_render_pipeline_render(havel_render_pipeline_t* pipeline, wlr_scene_t* scene, wlr_scene_output_t* scene_output);
 
 // Effects
 void havel_render_pipeline_add_effect(havel_render_pipeline_t* pipeline, const char* name);
@@ -36,7 +37,7 @@ float havel_render_pipeline_get_zoom(havel_render_pipeline_t* pipeline);
 // Overlay scene C interface
 typedef struct havel_overlay_scene havel_overlay_scene_t;
 
-havel_overlay_scene_t* havel_overlay_scene_create(struct wlr_scene* root_scene);
+havel_overlay_scene_t* havel_overlay_scene_create(wlr_scene_t* root_scene);
 void havel_overlay_scene_destroy(havel_overlay_scene_t* overlay);
 
 // Overlay types

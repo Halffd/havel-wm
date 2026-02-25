@@ -76,7 +76,7 @@ void RenderPipeline::setEffectsEnabled(bool enabled) {
     }
 }
 
-void RenderPipeline::render(void* scene) {
+void RenderPipeline::render(void* scene, void* sceneOutput) {
     if (!m_initialized || !m_pipeline) {
         return;
     }
@@ -84,7 +84,11 @@ void RenderPipeline::render(void* scene) {
     // For now, effects are not applied through the C wrapper
     // Real implementation would render scene to FBO, apply effects, present
     
-    havel_render_pipeline_render(m_pipeline, static_cast<struct wlr_scene*>(scene));
+    havel_render_pipeline_render(
+        m_pipeline, 
+        static_cast<struct wlr_scene*>(scene),
+        static_cast<struct wlr_scene_output*>(sceneOutput)
+    );
 }
 
 void RenderPipeline::setZoom(float zoom) {

@@ -42,7 +42,7 @@ public:
     RenderEffect* getEffect(const char* name);
     void setEffectsEnabled(bool enabled);
     
-    void render(void* scene);
+    void render(void* scene, void* sceneOutput);
     
     int width() const { return m_width; }
     int height() const { return m_height; }

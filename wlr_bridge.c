@@ -1,5 +1,6 @@
 #include <wm/wlr_bridge.h>
 #include <Logger.h>
+#include <wm/render_c.h>
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -142,6 +143,9 @@ struct havel_output {
     struct wl_list link;
 
     struct wlr_scene_tree *workspaces[HAVEL_WORKSPACE_COUNT];
+    
+    // Render pipeline for this output
+    havel_render_pipeline_t* render_pipeline;
 };
 
 struct havel_keyboard {
@@ -462,28 +466,27 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // Update animations before rendering
     havel_cpp_update_animations(server->cpp_server);
 
-    const struct wlr_scene_output_state_options options = {
-        .timer = NULL,
-    };
-
-    struct wlr_output_state state;
-    wlr_output_state_init(&state);
-    if (!wlr_scene_output_build_state(output->scene_output, &state, &options)) {
-        wlr_output_state_finish(&state);
-        return;
+    // Use render pipeline if available
+    if (output->render_pipeline) {
+        havel_render_pipeline_render(
+            output->render_pipeline,
+            server->scene,
+            output->scene_output
+        );
+    } else {
+        // Fallback to direct commit
+        wlr_scene_output_commit(output->scene_output, NULL);
     }
-
-    if (!wlr_output_commit_state(output->output, &state)) {
-        wlr_output_state_finish(&state);
-        return;
-    }
-
-    wlr_output_state_finish(&state);
-    wlr_scene_output_commit(output->scene_output, &options);
 }
 
 static void output_destroy(struct wl_listener *listener, void *data) {
     struct havel_output *output = wl_container_of(listener, output, destroy);
+    
+    // Destroy render pipeline
+    if (output->render_pipeline) {
+        havel_render_pipeline_destroy(output->render_pipeline);
+    }
+    
     wl_list_remove(&output->frame.link);
     wl_list_remove(&output->destroy.link);
     wl_list_remove(&output->link);
@@ -536,6 +539,12 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 
     output->destroy.notify = output_destroy;
     wl_signal_add(&wlr_output->events.destroy, &output->destroy);
+
+    // Create render pipeline for this output
+    output->render_pipeline = havel_render_pipeline_create(wlr_output, server->renderer);
+    if (output->render_pipeline) {
+        LOG_INFO("[OUTPUT] Render pipeline created for %s", wlr_output->name);
+    }
 
     wlr_output_layout_add_auto(server->output_layout, wlr_output);
 }
