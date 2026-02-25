@@ -14,8 +14,15 @@ pkg_check_modules(WLROOTS REQUIRED wlroots-0.20)
 pkg_check_modules(XKB REQUIRED xkbcommon)
 pkg_check_modules(PIXMAN REQUIRED pixman-1)
 pkg_check_modules(FMT REQUIRED fmt)
-# Vulkan disabled - wlroots handles rendering
-# pkg_check_modules(VULKAN REQUIRED vulkan)
+
+# Find Qt6 for panel
+find_package(Qt6 COMPONENTS Core Gui Widgets QUIET)
+if(Qt6_FOUND)
+    set(PANEL_ENABLED ON)
+else()
+    set(PANEL_ENABLED OFF)
+    message(STATUS "Qt6 not found - panel will not be built")
+endif()
 
 # Get wayland-protocols datadir for protocol files
 execute_process(
@@ -142,3 +149,8 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
 )
+
+# Build panel if Qt6 is available
+if(PANEL_ENABLED)
+    add_subdirectory(src/shell/panel)
+endif()
