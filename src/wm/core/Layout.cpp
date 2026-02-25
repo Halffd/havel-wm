@@ -1,17 +1,16 @@
 #include <wm/Layout.hpp>
-#include <algorithm>
 
 namespace havel {
 
-void Layout::arrangeMasterStack(const std::vector<std::shared_ptr<View>>& views,
+void Layout::arrangeMasterStack(const std::vector<View*>& views,
                                 const Rect& availableRect) {
     if (views.empty() || !availableRect.isValid()) {
         return;
     }
 
     // Filter to only mapped views
-    std::vector<std::shared_ptr<View>> mappedViews;
-    for (const auto& v : views) {
+    std::vector<View*> mappedViews;
+    for (auto* v : views) {
         if (v && v->isMapped()) {
             mappedViews.push_back(v);
         }
@@ -37,7 +36,7 @@ void Layout::arrangeMasterStack(const std::vector<std::shared_ptr<View>>& views,
 
     if (n == 1) {
         // Single view fills entire space
-        auto& view = mappedViews[0];
+        auto* view = mappedViews[0];
         view->setGeom(inner.x, inner.y, inner.w, inner.h);
         return;
     }
@@ -50,7 +49,7 @@ void Layout::arrangeMasterStack(const std::vector<std::shared_ptr<View>>& views,
     if (stackW < 1) stackW = 1;
 
     // Master view (first)
-    auto& master = mappedViews[0];
+    auto* master = mappedViews[0];
     master->setGeom(inner.x, inner.y, masterW, inner.h);
 
     // Stack views (remaining)
@@ -64,7 +63,7 @@ void Layout::arrangeMasterStack(const std::vector<std::shared_ptr<View>>& views,
             int vh = (i == n - 1) ? (inner.y + inner.h - vy) : slotH;
             if (vh < 1) vh = 1;
 
-            auto& view = mappedViews[i];
+            auto* view = mappedViews[i];
             view->setGeom(inner.x + masterW, vy, stackW, vh);
         }
     }

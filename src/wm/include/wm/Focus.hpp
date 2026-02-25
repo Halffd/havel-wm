@@ -2,34 +2,36 @@
 
 #include <wm/View.hpp>
 #include <list>
-#include <memory>
 
 namespace havel {
 
 /**
  * Focus manager handles MRU (most recently used) tracking and focus policy.
+ * 
+ * LIFETIME: Stores NON-OWNING raw pointers.
+ * Views are owned by C layer. Call remove() when view is destroyed.
  */
 class FocusManager {
 public:
     /**
      * Promote view to front of MRU list.
      */
-    void promote(std::shared_ptr<View> view);
+    void promote(View* view);
 
     /**
-     * Remove view from MRU tracking.
+     * Remove view from MRU tracking. Call when view is destroyed.
      */
     void remove(View* view);
 
     /**
      * Get most recently used view.
      */
-    std::shared_ptr<View> mru() const;
+    View* mru() const;
 
     /**
      * Get next/previous view in MRU order.
      */
-    std::shared_ptr<View> nextMru(View* current, bool backwards = false) const;
+    View* nextMru(View* current, bool backwards = false) const;
 
     /**
      * Clear all tracking.
@@ -37,8 +39,8 @@ public:
     void clear();
 
 private:
-    // Front = most recently used
-    std::list<std::shared_ptr<View>> m_mruList;
+    // Front = most recently used. Non-owning raw pointers.
+    std::list<View*> m_mruList;
 };
 
 } // namespace havel

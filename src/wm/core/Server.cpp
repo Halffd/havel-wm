@@ -27,14 +27,14 @@ Workspace* Server::activeWorkspace() const {
 
 void Server::setActiveWorkspace(uint32_t id) {
     if (id >= WORKSPACE_COUNT) return;
-    
+
     LOG_INFO("Switching to workspace %u", id);
-    
+
     // Hide all workspaces on primary output, show only the active one
     if (g_workspace_set_active) {
         g_workspace_set_active(id);
     }
-    
+
     m_activeWorkspace = id;
     arrangeWorkspace(id);
 }
@@ -63,43 +63,45 @@ void Server::workspaceToggleTiling() {
     }
 }
 
-std::shared_ptr<View> Server::createXdgView(void* xdgSurface) {
-    auto view = std::make_shared<View>();
+View* Server::createXdgView(void* xdgSurface) {
+    // Note: View is owned by C layer. We create it but C manages lifetime.
+    // Return raw pointer - C will store and manage it.
+    auto* view = new View();
     view->setWorkspaceId(m_activeWorkspace);
     view->setNativeHandle(xdgSurface);
-    
+
     auto* ws = m_workspaces[m_activeWorkspace].get();
     if (ws) {
         ws->addView(view);
     }
-    
+
     LOG_DEBUG("Created XDG view, workspace=%u", m_activeWorkspace);
     return view;
 }
 
-std::shared_ptr<View> Server::createXwaylandView(void* xwaylandSurface) {
-    auto view = std::make_shared<View>();
+View* Server::createXwaylandView(void* xwaylandSurface) {
+    auto* view = new View();
     view->setWorkspaceId(m_activeWorkspace);
     view->setNativeHandle(xwaylandSurface);
     view->setFloating(true); // Xwayland defaults to floating
-    
+
     auto* ws = m_workspaces[m_activeWorkspace].get();
     if (ws) {
         ws->addView(view);
     }
-    
+
     LOG_DEBUG("Created XWayland view, workspace=%u", m_activeWorkspace);
     return view;
 }
 
 void Server::onViewMapped(View* view) {
     if (!view) return;
-    
+
     view->setMapped(true);
     LOG_INFO("View mapped, workspace=%u", view->workspaceId());
-    
-    focusView(std::shared_ptr<View>(view, [](View*){})); // Non-owning promote
-    
+
+    focusView(view);
+
     auto* ws = activeWorkspace();
     if (ws && ws->isTilingEnabled()) {
         arrangeWorkspace(view->workspaceId());
@@ -108,15 +110,15 @@ void Server::onViewMapped(View* view) {
 
 void Server::onViewUnmapped(View* view) {
     if (!view) return;
-    
+
     LOG_DEBUG("View unmapped");
     view->setMapped(false);
-    
+
     auto* ws = m_workspaces[view->workspaceId()].get();
     if (ws && ws->activeView() == view) {
         ws->setActiveView(nullptr);
     }
-    
+
     if (m_workspaces[view->workspaceId()]->isTilingEnabled()) {
         arrangeWorkspace(view->workspaceId());
     }
@@ -124,15 +126,20 @@ void Server::onViewUnmapped(View* view) {
 
 void Server::onViewDestroyed(View* view) {
     if (!view) return;
-    
+
     LOG_INFO("View destroyed");
-    m_focusManager.remove(view);
     
+    // CRITICAL: Cancel animations for this view to prevent UAF
+    m_animator.cancelAll();
+    m_viewAnimState.erase(view);
+    
+    m_focusManager.remove(view);
+
     auto* ws = m_workspaces[view->workspaceId()].get();
     if (ws) {
         ws->removeView(view);
     }
-    
+
     if (m_grab.view == view) {
         m_grab.view = nullptr;
         m_grab.button = 0;
@@ -404,19 +411,19 @@ void Server::handlePointerMotion(double x, double y) {
     }
 }
 
-void Server::focusView(std::shared_ptr<View> view) {
+void Server::focusView(View* view) {
     if (!view) return;
-    
+
     m_focusManager.promote(view);
-    
+
     auto* ws = m_workspaces[view->workspaceId()].get();
     if (ws) {
-        ws->setActiveView(view.get());
+        ws->setActiveView(view);
     }
-    
+
     // Raise and focus the view
-    raiseView(view.get());
-    focusViewNative(view.get());
+    raiseView(view);
+    focusViewNative(view);
 }
 
 void Server::focusNextMru(bool backwards) {
@@ -430,25 +437,26 @@ void Server::focusNextMru(bool backwards) {
 
 void Server::arrangeWorkspace(uint32_t id) {
     if (id >= WORKSPACE_COUNT) return;
-    
+
     auto* ws = m_workspaces[id].get();
     if (!ws || !ws->isTilingEnabled()) return;
-    
-    auto views = ws->mappedViews();
+
+    // Use tiledViews() to exclude floating windows from tiling layout
+    auto views = ws->tiledViews();
     if (views.empty()) return;
-    
+
     Rect geom = outputGeometry(id);
     if (!geom.isValid()) return;
-    
-    LOG_DEBUG("Arranging workspace %u with %zu views", id, views.size());
-    
+
+    LOG_DEBUG("Arranging workspace %u with %zu tiled views", id, views.size());
+
     Layout::arrangeMasterStack(views, geom);
-    
+
     // Apply the layout by setting positions/sizes
-    for (const auto& view : views) {
+    for (auto* view : views) {
         Rect vGeom = view->geom();
-        setViewPosition(view.get(), vGeom.x, vGeom.y, true);
-        setViewSize(view.get(), vGeom.w, vGeom.h, true);
+        setViewPosition(view, vGeom.x, vGeom.y, true);
+        setViewSize(view, vGeom.w, vGeom.h, true);
     }
 }
 
@@ -673,7 +681,7 @@ void Server::moveViewToWorkspace(uint32_t ws) {
         // Add to target workspace
         auto* targetWs = m_workspaces[ws].get();
         if (targetWs) {
-            targetWs->addView(std::shared_ptr<View>(view, [](View*){}));
+            targetWs->addView(view);
             LOG_INFO("Moved view to workspace %u", ws);
             arrangeWorkspace(ws);
         }

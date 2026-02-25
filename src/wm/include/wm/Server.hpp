@@ -32,8 +32,9 @@ public:
     void workspaceToggleTiling();
 
     // View lifecycle (called from C bridge)
-    std::shared_ptr<View> createXdgView(void* xdgSurface);
-    std::shared_ptr<View> createXwaylandView(void* xwaylandSurface);
+    // Returns raw pointer - C layer owns and manages lifetime
+    View* createXdgView(void* xdgSurface);
+    View* createXwaylandView(void* xwaylandSurface);
     void onViewMapped(View* view);
     void onViewUnmapped(View* view);
     void onViewDestroyed(View* view);
@@ -44,7 +45,7 @@ public:
     void handlePointerMotion(double x, double y);
 
     // Focus
-    void focusView(std::shared_ptr<View> view);
+    void focusView(View* view);
     void focusNextMru(bool backwards = false);
 
     // Layout

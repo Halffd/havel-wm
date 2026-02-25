@@ -3,11 +3,11 @@
 
 namespace havel {
 
-void FocusManager::promote(std::shared_ptr<View> view) {
+void FocusManager::promote(View* view) {
     if (!view) return;
 
     // Remove if already in list
-    remove(view.get());
+    remove(view);
 
     // Insert at front (most recently used)
     m_mruList.push_front(view);
@@ -16,19 +16,17 @@ void FocusManager::promote(std::shared_ptr<View> view) {
 void FocusManager::remove(View* view) {
     if (!view) return;
 
-    m_mruList.remove_if([view](const std::shared_ptr<View>& v) {
-        return v.get() == view;
-    });
+    m_mruList.remove(view);
 }
 
-std::shared_ptr<View> FocusManager::mru() const {
+View* FocusManager::mru() const {
     if (m_mruList.empty()) {
         return nullptr;
     }
     return m_mruList.front();
 }
 
-std::shared_ptr<View> FocusManager::nextMru(View* current, bool backwards) const {
+View* FocusManager::nextMru(View* current, bool backwards) const {
     if (m_mruList.empty()) {
         return nullptr;
     }
@@ -38,8 +36,7 @@ std::shared_ptr<View> FocusManager::nextMru(View* current, bool backwards) const
     }
 
     // Find current in list
-    auto it = std::find_if(m_mruList.begin(), m_mruList.end(),
-        [current](const std::shared_ptr<View>& v) { return v.get() == current; });
+    auto it = std::find(m_mruList.begin(), m_mruList.end(), current);
 
     if (it == m_mruList.end()) {
         return mru();

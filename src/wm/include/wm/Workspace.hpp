@@ -3,12 +3,16 @@
 #include <wm/Types.hpp>
 #include <wm/View.hpp>
 #include <vector>
-#include <memory>
+#include <algorithm>
 
 namespace havel {
 
 /**
  * Workspace manages a collection of views and tiling state.
+ * 
+ * LIFETIME: Views are owned by C layer (wlr_bridge.c).
+ * Workspace stores NON-OWNING raw pointers.
+ * Never delete views through Workspace.
  */
 class Workspace {
 public:
@@ -16,11 +20,12 @@ public:
 
     uint32_t id() const { return m_id; }
 
-    // View management
-    void addView(std::shared_ptr<View> view);
+    // View management - raw pointers, C owns lifetime
+    void addView(View* view);
     void removeView(View* view);
-    std::vector<std::shared_ptr<View>> views() const;
-    std::vector<std::shared_ptr<View>> mappedViews() const;
+    std::vector<View*> views() const;
+    std::vector<View*> mappedViews() const;
+    std::vector<View*> tiledViews() const;  // Exclude floating views
 
     // Tiling state
     bool isTilingEnabled() const { return m_tilingEnabled; }
@@ -32,7 +37,7 @@ public:
 
 private:
     uint32_t m_id;
-    std::vector<std::shared_ptr<View>> m_views;
+    std::vector<View*> m_views;  // Non-owning raw pointers
     bool m_tilingEnabled = true;
     View* m_activeView = nullptr;
 };

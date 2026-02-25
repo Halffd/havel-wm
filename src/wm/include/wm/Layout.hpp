@@ -2,7 +2,6 @@
 
 #include <wm/Types.hpp>
 #include <wm/View.hpp>
-#include <memory>
 #include <vector>
 
 namespace havel {
@@ -14,10 +13,10 @@ class Layout {
 public:
     /**
      * Arrange views in master-stack layout.
-     * @param views List of views to arrange
+     * @param views List of views to arrange (raw pointers, non-owning)
      * @param availableRect Available screen space (after gaps)
      */
-    static void arrangeMasterStack(const std::vector<std::shared_ptr<View>>& views,
+    static void arrangeMasterStack(const std::vector<View*>& views,
                                    const Rect& availableRect);
 
 private:
