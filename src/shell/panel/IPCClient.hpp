@@ -45,9 +45,22 @@ public:
     void focusWindow(quint64 id);
     void minimizeWindow(quint64 id);
     void restoreWindow(quint64 id);
+    
+    // Panel control
+    void sendCommand(const QString& cmd);
 
     // Get current window list
     const QVector<WindowInfo>& windows() const { return m_windows; }
+    
+    // Closed apps tracking
+    struct ClosedApp {
+        QString appId;
+        QString title;
+        QString icon;
+        QString exec;
+    };
+    const QVector<ClosedApp>& closedApps() const { return m_closedApps; }
+    void reopenClosedApp(int index);
 
 signals:
     void connected();
@@ -71,6 +84,7 @@ private:
     QString m_socketPath;
     bool m_connected = false;
     QVector<WindowInfo> m_windows;
+    QVector<ClosedApp> m_closedApps;
     QString m_buffer;
 };
 

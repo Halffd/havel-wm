@@ -48,6 +48,12 @@ public:
     
     // Launch by command
     static void launchCommand(const QString& command);
+    
+    // Pinned apps
+    QStringList pinnedApps() const { return m_favorites; }
+    void pinApp(const QString& appId);
+    void unpinApp(const QString& appId);
+    bool isPinned(const QString& appId) const;
 
 signals:
     void scanComplete();

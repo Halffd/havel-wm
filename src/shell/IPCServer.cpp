@@ -8,6 +8,7 @@
 #include <cstring>
 #include <sstream>
 #include <algorithm>
+#include <cstdlib>
 
 namespace havel {
 
@@ -155,6 +156,46 @@ std::string IPCServer::handleMinimize(const std::string& args) {
 std::string IPCServer::handleRestore(const std::string& args) {
     uint64_t id = std::stoull(args);
     m_windowManager.restoreWindow(id);
+    return "OK\n";
+}
+
+std::string IPCServer::handlePin(const std::string& args) {
+    // Pin app - would persist to config file
+    // For now just acknowledge
+    return "OK\n";
+}
+
+std::string IPCServer::handleUnpin(const std::string& args) {
+    // Unpin app
+    return "OK\n";
+}
+
+std::string IPCServer::handlePanelHide(const std::string& args) {
+    // Hide panel - would signal panel to hide
+    return "OK\n";
+}
+
+std::string IPCServer::handlePanelShow(const std::string& args) {
+    // Show panel
+    return "OK\n";
+}
+
+std::string IPCServer::handlePanelOpacity(const std::string& args) {
+    // Set panel opacity (0-100)
+    int opacity = std::atoi(args.c_str());
+    if (opacity < 0 || opacity > 100) {
+        return "ERROR Invalid opacity value\n";
+    }
+    return "OK\n";
+}
+
+std::string IPCServer::handlePanelRestart(const std::string& args) {
+    // Restart panel - would respawn panel process
+    return "OK\n";
+}
+
+std::string IPCServer::handleLauncher(const std::string& args) {
+    // Trigger launcher - would signal panel to show launcher
     return "OK\n";
 }
 

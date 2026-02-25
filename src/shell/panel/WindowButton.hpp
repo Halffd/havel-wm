@@ -28,6 +28,10 @@ public:
 signals:
     void clicked(quint64 windowId);
     void rightClicked(quint64 windowId);
+    void pinRequested(const QString& appId);
+    void unpinRequested(const QString& appId);
+    void closeRequested(quint64 windowId);
+    void reopenRequested(int closedAppIndex);
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;
@@ -41,6 +45,8 @@ private:
     QString m_title;
     bool m_active = false;
     bool m_urgent = false;
+    bool m_pinned = false;
+    bool m_maximized = false;
 };
 
 } // namespace havel

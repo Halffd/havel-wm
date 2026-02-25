@@ -82,9 +82,14 @@ void WindowButton::mousePressEvent(QMouseEvent* event) {
 void WindowButton::contextMenuEvent(QContextMenuEvent* event) {
     QMenu menu(this);
     
+    // Window actions
     QAction* focusAction = menu.addAction(m_active ? "Unfocus" : "Focus");
     menu.addSeparator();
+    
+    QAction* pinAction = menu.addAction(m_pinned ? "Unpin from taskbar" : "Pin to taskbar");
     QAction* minimizeAction = menu.addAction("Minimize");
+    QAction* maximizeAction = menu.addAction(m_maximized ? "Unmaximize" : "Maximize");
+    menu.addSeparator();
     QAction* closeAction = menu.addAction("Close");
     
     connect(focusAction, &QAction::triggered, this, [this]() {
@@ -93,9 +98,19 @@ void WindowButton::contextMenuEvent(QContextMenuEvent* event) {
     connect(minimizeAction, &QAction::triggered, this, [this]() {
         emit rightClicked(m_windowId);
     });
-    
-    // Close would need IPC support
-    closeAction->setEnabled(false);
+    connect(maximizeAction, &QAction::triggered, this, [this]() {
+        // Would need IPC support for maximize
+    });
+    connect(closeAction, &QAction::triggered, this, [this]() {
+        emit closeRequested(m_windowId);
+    });
+    connect(pinAction, &QAction::triggered, this, [this]() {
+        if (m_pinned) {
+            emit unpinRequested(m_appId);
+        } else {
+            emit pinRequested(m_appId);
+        }
+    });
     
     menu.exec(event->globalPos());
 }

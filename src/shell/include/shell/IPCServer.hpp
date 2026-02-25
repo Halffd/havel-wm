@@ -37,6 +37,13 @@ private:
     std::string handleFocus(const std::string& args);
     std::string handleMinimize(const std::string& args);
     std::string handleRestore(const std::string& args);
+    std::string handlePin(const std::string& args);
+    std::string handleUnpin(const std::string& args);
+    std::string handlePanelHide(const std::string& args);
+    std::string handlePanelShow(const std::string& args);
+    std::string handlePanelOpacity(const std::string& args);
+    std::string handlePanelRestart(const std::string& args);
+    std::string handleLauncher(const std::string& args);
     
     WindowManager& m_windowManager;
     std::string m_socketPath;

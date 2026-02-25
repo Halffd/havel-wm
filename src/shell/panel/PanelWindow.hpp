@@ -30,6 +30,9 @@ private slots:
     void onFocusedChanged(quint64 windowId);
     void onWindowButtonClicked(quint64 windowId);
     void onWindowButtonRightClicked(quint64 windowId);
+    void onPinRequested(const QString& appId);
+    void onUnpinRequested(const QString& appId);
+    void onCloseRequested(quint64 windowId);
     void onIPCError(const QString& error);
     void onIPCConnected();
     void onIPCDisconnected();
@@ -39,6 +42,9 @@ private:
     void updateWindowList();
     WindowButton* findButton(quint64 windowId);
     void updateClock();
+    void setOpacity(int opacity);
+    void hidePanel();
+    void showPanel();
     
     QWidget* m_centralWidget;
     QHBoxLayout* m_layout;

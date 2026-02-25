@@ -167,4 +167,7 @@ if(PANEL_ENABLED)
     
     # Build and install settings
     add_subdirectory(src/shell/settings)
+    
+    # Build and install lock screen
+    add_subdirectory(src/shell/lockscreen)
 endif()

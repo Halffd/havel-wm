@@ -126,6 +126,21 @@ void PanelWindow::updateClock() {
     m_clockLabel->setText(now.toString("ddd MMM d  HH:mm"));
 }
 
+void PanelWindow::setOpacity(int opacity) {
+    // Opacity 0-100
+    qreal alpha = qBound(0.0, opacity / 100.0, 1.0);
+    setWindowOpacity(alpha);
+}
+
+void PanelWindow::hidePanel() {
+    hide();
+}
+
+void PanelWindow::showPanel() {
+    show();
+    raise();
+}
+
 void PanelWindow::onWindowsUpdated(const QVector<WindowInfo>& windows) {
     // Update existing buttons and create new ones
     QSet<quint64> visibleIds;
@@ -142,6 +157,9 @@ void PanelWindow::onWindowsUpdated(const QVector<WindowInfo>& windows) {
             button = new WindowButton(info, this);
             connect(button, &WindowButton::clicked, this, &PanelWindow::onWindowButtonClicked);
             connect(button, &WindowButton::rightClicked, this, &PanelWindow::onWindowButtonRightClicked);
+            connect(button, &WindowButton::pinRequested, this, &PanelWindow::onPinRequested);
+            connect(button, &WindowButton::unpinRequested, this, &PanelWindow::onUnpinRequested);
+            connect(button, &WindowButton::closeRequested, this, &PanelWindow::onCloseRequested);
             m_layout->addWidget(button);
             m_buttons.append(button);
         }
@@ -215,6 +233,22 @@ WindowButton* PanelWindow::findButton(quint64 windowId) {
         }
     }
     return nullptr;
+}
+
+void PanelWindow::onPinRequested(const QString& appId) {
+    // Pin app to taskbar - would persist to config
+    m_ipcClient->sendCommand(QString("PIN %1").arg(appId));
+}
+
+void PanelWindow::onUnpinRequested(const QString& appId) {
+    // Unpin app from taskbar
+    m_ipcClient->sendCommand(QString("UNPIN %1").arg(appId));
+}
+
+void PanelWindow::onCloseRequested(quint64 windowId) {
+    // Close window - would need compositor support
+    // For now, just minimize
+    m_ipcClient->minimizeWindow(windowId);
 }
 
 } // namespace havel

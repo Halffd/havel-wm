@@ -1,4 +1,5 @@
 #include "IPCClient.hpp"
+#include "AppLauncher.hpp"
 
 #include <QLocalSocket>
 #include <QJsonDocument>
@@ -54,6 +55,16 @@ void IPCClient::minimizeWindow(quint64 id) {
 
 void IPCClient::restoreWindow(quint64 id) {
     sendMessage(QString("RESTORE %1").arg(id));
+}
+
+void IPCClient::reopenClosedApp(int index) {
+    if (index >= 0 && index < m_closedApps.size()) {
+        AppLauncher::launchCommand(m_closedApps[index].exec);
+    }
+}
+
+void IPCClient::sendCommand(const QString& cmd) {
+    sendMessage(cmd);
 }
 
 void IPCClient::sendMessage(const QString& msg) {

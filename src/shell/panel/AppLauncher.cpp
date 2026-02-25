@@ -167,4 +167,18 @@ void AppLauncher::launchCommand(const QString& command) {
     QProcess::startDetached(command);
 }
 
+void AppLauncher::pinApp(const QString& appId) {
+    if (!m_favorites.contains(appId)) {
+        m_favorites.append(appId);
+    }
+}
+
+void AppLauncher::unpinApp(const QString& appId) {
+    m_favorites.removeAll(appId);
+}
+
+bool AppLauncher::isPinned(const QString& appId) const {
+    return m_favorites.contains(appId);
+}
+
 } // namespace havel
