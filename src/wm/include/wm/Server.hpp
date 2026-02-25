@@ -65,6 +65,14 @@ public:
     bool animationsEnabled() const { return m_animator.isEnabled(); }
     void updateAnimations();
 
+    // Effect control (global)
+    void setGrayscaleEnabled(bool enabled);
+    void setNegativeEnabled(bool enabled);
+    bool isGrayscaleEnabled() const;
+    bool isNegativeEnabled() const;
+    void toggleGrayscale();
+    void toggleNegative();
+
     // Window management (for taskbar/panel)
     WindowManager& windowManager() { return m_windowManager; }
     const WindowManager& windowManager() const { return m_windowManager; }

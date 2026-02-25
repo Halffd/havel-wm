@@ -244,7 +244,21 @@ bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
             workspaceToggleTiling();
             return true;
         }
-        
+
+        // Meta+g: Toggle grayscale effect
+        if (keycode == 34) {  // g
+            LOG_INFO("Toggle grayscale (Meta+g)");
+            toggleGrayscale();
+            return true;
+        }
+
+        // Meta+n: Toggle negative/invert effect
+        if (keycode == 39) {  // n
+            LOG_INFO("Toggle negative (Meta+n)");
+            toggleNegative();
+            return true;
+        }
+
         // Meta+Return: Spawn terminal (alacritty/foot)
         if (keycode == 28) {  // Return
             LOG_INFO("Spawn terminal (Meta+Return)");
@@ -744,6 +758,35 @@ void Server::setAnimationsEnabled(bool enabled) {
 void Server::updateAnimations() {
     m_animator.update();
     m_animator.cleanup();
+}
+
+// ============================================================================
+// Effect Control (Global)
+// ============================================================================
+
+void Server::setGrayscaleEnabled(bool enabled) {
+    // Would apply to all outputs in multi-monitor setup
+    printf("[Server] Grayscale %s\n", enabled ? "enabled" : "disabled");
+}
+
+void Server::setNegativeEnabled(bool enabled) {
+    printf("[Server] Negative %s\n", enabled ? "enabled" : "disabled");
+}
+
+bool Server::isGrayscaleEnabled() const {
+    return false;  // Would track state
+}
+
+bool Server::isNegativeEnabled() const {
+    return false;  // Would track state
+}
+
+void Server::toggleGrayscale() {
+    setGrayscaleEnabled(!isGrayscaleEnabled());
+}
+
+void Server::toggleNegative() {
+    setNegativeEnabled(!isNegativeEnabled());
 }
 
 // ============================================================================

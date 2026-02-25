@@ -14,6 +14,7 @@ pkg_check_modules(WLROOTS REQUIRED wlroots-0.20)
 pkg_check_modules(XKB REQUIRED xkbcommon)
 pkg_check_modules(PIXMAN REQUIRED pixman-1)
 pkg_check_modules(FMT REQUIRED fmt)
+pkg_check_modules(GLES2 REQUIRED glesv2)
 
 # Find Qt6 for panel
 find_package(Qt6 COMPONENTS Core Gui Widgets QUIET)
@@ -67,6 +68,7 @@ set(WM_CORE_SOURCES
     src/wm/core/Animator.cpp
     src/wm/render/RenderPipeline.cpp
     src/wm/render/render_c_wrappers.c
+    src/wm/render/ShaderEffect.cpp
     src/wm/input/InputManager.cpp
     src/wm/overlay/OverlayScene.cpp
     # VulkanRenderer.cpp - disabled, wlroots handles rendering
@@ -110,6 +112,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${XKB_INCLUDE_DIRS}
     ${PIXMAN_INCLUDE_DIRS}
     ${FMT_INCLUDE_DIRS}
+    ${GLES2_INCLUDE_DIRS}
     # UI framework include (for future use)
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/include
 )
@@ -121,6 +124,7 @@ target_link_libraries(${PROJECT_NAME}
     ${XKB_LIBRARIES}
     ${PIXMAN_LIBRARIES}
     ${FMT_LIBRARIES}
+    ${GLES2_LIBRARIES}
 )
 
 # Set library directories
@@ -130,6 +134,7 @@ target_link_directories(${PROJECT_NAME} PRIVATE
     ${XKB_LIBRARY_DIRS}
     ${PIXMAN_LIBRARY_DIRS}
     ${FMT_LIBRARY_DIRS}
+    ${GLES2_LIBRARY_DIRS}
 )
 
 # Compiler flags
