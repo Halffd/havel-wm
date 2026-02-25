@@ -39,8 +39,8 @@ public:
     void onViewUnmapped(View* view);
     void onViewDestroyed(View* view);
 
-    // Input handling
-    void handleKey(uint32_t keycode, bool pressed, uint32_t modifiers);
+    // Input handling - returns true if consumed by compositor
+    bool handleKey(uint32_t keycode, bool pressed, uint32_t modifiers);
     void handlePointerButton(uint32_t button, bool pressed, double x, double y);
     void handlePointerMotion(double x, double y);
 

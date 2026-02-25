@@ -15,6 +15,7 @@ typedef void (*cpp_view_raise_fn)(void* view);
 typedef void (*cpp_view_get_geometry_fn)(void* view, int* x, int* y, int* w, int* h);
 typedef void (*cpp_view_close_fn)(void* view);
 typedef void (*cpp_view_set_fullscreen_fn)(void* view, bool fullscreen);
+typedef void (*cpp_view_minimize_fn)(void* view);
 typedef void (*cpp_workspace_arrange_fn)(uint32_t workspace_id);
 typedef void (*cpp_workspace_set_active_fn)(uint32_t workspace_id);
 typedef void (*cpp_server_quit_fn)(void);
@@ -36,8 +37,8 @@ void havel_cpp_on_view_mapped(struct havel_cpp_server* server, void* view);
 void havel_cpp_on_view_unmapped(struct havel_cpp_server* server, void* view);
 void havel_cpp_on_view_destroyed(struct havel_cpp_server* server, void* view);
 
-// Input events
-void havel_cpp_on_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers);
+// Input events - returns true if consumed by compositor
+bool havel_cpp_on_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers);
 void havel_cpp_on_pointer_button(struct havel_cpp_server* server, uint32_t button, bool pressed, double x, double y);
 void havel_cpp_on_pointer_motion(struct havel_cpp_server* server, double x, double y);
 
@@ -56,7 +57,8 @@ void havel_cpp_register_view_callbacks(
     cpp_view_raise_fn raise,
     cpp_view_get_geometry_fn get_geometry,
     cpp_view_close_fn close,
-    cpp_view_set_fullscreen_fn set_fullscreen
+    cpp_view_set_fullscreen_fn set_fullscreen,
+    cpp_view_minimize_fn minimize
 );
 
 void havel_cpp_register_workspace_callbacks(
@@ -80,6 +82,7 @@ using ViewRaiseFn = cpp_view_raise_fn;
 using ViewGetGeometryFn = cpp_view_get_geometry_fn;
 using ViewCloseFn = cpp_view_close_fn;
 using ViewSetFullscreenFn = cpp_view_set_fullscreen_fn;
+using ViewMinimizeFn = cpp_view_minimize_fn;
 using WorkspaceArrangeFn = cpp_workspace_arrange_fn;
 using WorkspaceSetActiveFn = cpp_workspace_set_active_fn;
 using ServerQuitFn = cpp_server_quit_fn;
@@ -93,6 +96,7 @@ extern ViewRaiseFn g_view_raise;
 extern ViewGetGeometryFn g_view_get_geometry;
 extern ViewCloseFn g_view_close;
 extern ViewSetFullscreenFn g_view_set_fullscreen;
+extern ViewMinimizeFn g_view_minimize;
 extern WorkspaceArrangeFn g_workspace_arrange;
 extern WorkspaceSetActiveFn g_workspace_set_active;
 extern ServerQuitFn g_server_quit;

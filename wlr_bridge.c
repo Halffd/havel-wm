@@ -47,6 +47,7 @@ static cpp_view_raise_fn g_view_raise = NULL;
 static cpp_view_get_geometry_fn g_view_get_geometry = NULL;
 static cpp_view_close_fn g_view_close = NULL;
 static cpp_view_set_fullscreen_fn g_view_set_fullscreen = NULL;
+static cpp_view_minimize_fn g_view_minimize = NULL;
 static cpp_workspace_arrange_fn g_workspace_arrange = NULL;
 static cpp_workspace_set_active_fn g_workspace_set_active = NULL;
 static cpp_server_quit_fn g_server_quit = NULL;
@@ -59,7 +60,8 @@ void havel_cpp_register_view_callbacks(
     cpp_view_raise_fn raise,
     cpp_view_get_geometry_fn get_geometry,
     cpp_view_close_fn close,
-    cpp_view_set_fullscreen_fn set_fullscreen
+    cpp_view_set_fullscreen_fn set_fullscreen,
+    cpp_view_minimize_fn minimize
 ) {
     g_view_set_position = set_position;
     g_view_set_size = set_size;
@@ -68,6 +70,7 @@ void havel_cpp_register_view_callbacks(
     g_view_get_geometry = get_geometry;
     g_view_close = close;
     g_view_set_fullscreen = set_fullscreen;
+    g_view_minimize = minimize;
 }
 
 void havel_cpp_register_workspace_callbacks(
@@ -251,6 +254,15 @@ static void cpp_impl_view_set_fullscreen(void* view, bool fullscreen) {
     struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
     if (xdg_view->xdg_surface && xdg_view->xdg_surface->toplevel) {
         wlr_xdg_toplevel_set_fullscreen(xdg_view->xdg_surface->toplevel, fullscreen);
+    }
+}
+
+static void cpp_impl_view_minimize(void* view) {
+    if (!view) return;
+    struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
+    // Hide the scene node to minimize (doesn't unmap, just hides)
+    if (xdg_view->scene_tree) {
+        wlr_scene_node_set_enabled(&xdg_view->scene_tree->node, false);
     }
 }
 
@@ -552,10 +564,13 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
         LOG_DEBUG("[KEY] keycode=%u modifiers=%u", keycode, modifiers);
 
         // Forward to C++ layer for policy decisions
-        havel_cpp_on_key(server->cpp_server, keycode, true, modifiers);
+        // Returns true if event was consumed (e.g., keybinding matched)
+        bool consumed = havel_cpp_on_key(server->cpp_server, keycode, true, modifiers);
 
-        // Let wlroots handle the key event for clients
-        wlr_seat_keyboard_notify_key(server->seat, event->time_msec, event->keycode, event->state);
+        // Only forward to seat if not consumed by compositor
+        if (!consumed) {
+            wlr_seat_keyboard_notify_key(server->seat, event->time_msec, event->keycode, event->state);
+        }
         return;
     }
 
@@ -771,7 +786,8 @@ havel_wlr_server_t* havel_wlr_create(void) {
         cpp_impl_view_raise,
         cpp_impl_view_get_geometry,
         cpp_impl_view_close,
-        cpp_impl_view_set_fullscreen
+        cpp_impl_view_set_fullscreen,
+        cpp_impl_view_minimize
     );
     havel_cpp_register_workspace_callbacks(
         cpp_impl_workspace_arrange,

@@ -10,6 +10,7 @@ ViewRaiseFn g_view_raise = nullptr;
 ViewGetGeometryFn g_view_get_geometry = nullptr;
 ViewCloseFn g_view_close = nullptr;
 ViewSetFullscreenFn g_view_set_fullscreen = nullptr;
+ViewMinimizeFn g_view_minimize = nullptr;
 WorkspaceArrangeFn g_workspace_arrange = nullptr;
 WorkspaceSetActiveFn g_workspace_set_active = nullptr;
 ServerQuitFn g_server_quit = nullptr;
@@ -58,9 +59,9 @@ void havel_cpp_on_view_destroyed(struct havel_cpp_server* server, void* view) {
     server->server->onViewDestroyed(static_cast<havel::View*>(view));
 }
 
-void havel_cpp_on_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers) {
-    if (!server) return;
-    server->server->handleKey(keycode, pressed, modifiers);
+bool havel_cpp_on_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers) {
+    if (!server) return false;
+    return server->server->handleKey(keycode, pressed, modifiers);
 }
 
 void havel_cpp_on_pointer_button(struct havel_cpp_server* server, uint32_t button, bool pressed, double x, double y) {

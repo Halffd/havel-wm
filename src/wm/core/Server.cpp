@@ -146,22 +146,22 @@ void Server::onViewDestroyed(View* view) {
     }
 }
 
-void Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
-    if (!pressed) return;
-    
+bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
+    if (!pressed) return false;
+
     // Modifier masks (matching wlroots/xkbcommon)
     constexpr uint32_t MOD_ALT = 1 << 3;      // Mod1
     constexpr uint32_t MOD_LOGO = 1 << 6;     // Mod4
     constexpr uint32_t MOD_SHIFT = 1 << 0;    // Shift
     constexpr uint32_t MOD_CTRL = 1 << 2;     // Mod3/Control
-    
+
     bool alt = (modifiers & MOD_ALT) != 0;
     bool meta = (modifiers & MOD_LOGO) != 0;
     bool shift = (modifiers & MOD_SHIFT) != 0;
     bool ctrl = (modifiers & MOD_CTRL) != 0;
-    
-    LOG_DEBUG("Key event: keycode={} mod={}{}{}{}", keycode, 
-                    alt ? "Alt+" : "", 
+
+    LOG_DEBUG("Key event: keycode=%u mod=%s%s%s%s", keycode,
+                    alt ? "Alt+" : "",
                     meta ? "Meta+" : "",
                     shift ? "Shift+" : "",
                     ctrl ? "Ctrl+" : "");
@@ -174,14 +174,14 @@ void Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
     if (ctrl && meta && keycode == 111) {  // F4
         LOG_INFO("Quit requested (Ctrl+Meta+F4)");
         quit();
-        return;
+        return true;
     }
     
     // Ctrl+Meta+Return: Show rofi
     if (ctrl && meta && keycode == 28) {  // Return
         LOG_INFO("Launching rofi (Ctrl+Meta+Return)");
         spawnRofi();
-        return;
+        return true;
     }
 
     // ========================================================================
@@ -193,17 +193,17 @@ void Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
         if (keycode == 23) {  // Tab
             LOG_INFO("Workspace switch (Meta+Tab)");
             workspaceStep(shift);
-            return;
+            return true;
         }
         if (keycode == 104) {  // PgUp
             LOG_INFO("Workspace switch (Meta+PgUp)");
             workspaceStep(false);
-            return;
+            return true;
         }
         if (keycode == 105) {  // PgDn
             LOG_INFO("Workspace switch (Meta+PgDn)");
             workspaceStep(true);
-            return;
+            return true;
         }
         
         // Meta+1/2/3/4/5/6/7/8/9/0: Direct workspace switch
@@ -211,7 +211,7 @@ void Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
             uint32_t ws = (keycode == 19) ? 9 : (keycode - 10);  // 0 = workspace 9
             LOG_INFO("Switch to workspace %u (Meta+%u)", ws, keycode - 9);
             workspaceStepTo(ws);
-            return;
+            return true;
         }
         
         // Meta+Shift+1/2/3/4/5/6/7/8/9/0: Move window to workspace
@@ -219,101 +219,101 @@ void Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
             uint32_t ws = (keycode == 19) ? 9 : (keycode - 10);
             LOG_INFO("Move view to workspace %u (Meta+Shift+%u)", ws, keycode - 9);
             moveViewToWorkspace(ws);
-            return;
+            return true;
         }
         
         // Meta+y: Toggle tiling
         if (keycode == 21) {  // y
             LOG_INFO("Toggle tiling (Meta+y)");
             workspaceToggleTiling();
-            return;
+            return true;
         }
         
         // Meta+Return: Spawn terminal (alacritty/foot)
         if (keycode == 28) {  // Return
             LOG_INFO("Spawn terminal (Meta+Return)");
             spawnTerminal();
-            return;
+            return true;
         }
         
         // Meta+h/l: Focus first/last view
         if (keycode == 35) {  // h
             LOG_DEBUG("Focus first view (Meta+h)");
             focusFirstLastView(true);
-            return;
+            return true;
         }
         if (keycode == 38) {  // l
             LOG_DEBUG("Focus last view (Meta+l)");
             focusFirstLastView(false);
-            return;
+            return true;
         }
         
         // Meta+b: Open default browser
         if (keycode == 30) {  // b
             LOG_INFO("Open browser (Meta+b)");
             spawnBrowser();
-            return;
+            return true;
         }
         
         // Meta+e: Open default file explorer
         if (keycode == 18) {  // e
             LOG_INFO("Open file explorer (Meta+e)");
             spawnFileManager();
-            return;
+            return true;
         }
         
         // Meta+q: Close window
         if (keycode == 16) {  // q
             LOG_INFO("Close window (Meta+q)");
             closeFocusedWindow();
-            return;
+            return true;
         }
         
         // Meta+m: Toggle maximize
         if (keycode == 31) {  // m
             LOG_INFO("Toggle maximize (Meta+m)");
             toggleMaximize();
-            return;
+            return true;
         }
         
         // Meta+j/k: Focus next/prev view
         if (keycode == 30) {  // j
             LOG_DEBUG("Focus next view (Meta+j)");
             focusNextMru(false);
-            return;
+            return true;
         }
         if (keycode == 31) {  // k
             LOG_DEBUG("Focus prev view (Meta+k)");
             focusNextMru(true);
-            return;
+            return true;
         }
         
         // Meta+space: Toggle floating
         if (keycode == 57) {  // space
             LOG_INFO("Toggle floating (Meta+space)");
             toggleFloating();
-            return;
+            return true;
         }
         
         // Meta+Insert: Minimize window
         if (keycode == 118) {  // Insert
             LOG_INFO("Minimize window (Meta+Insert)");
             minimizeWindow();
-            return;
+            return true;
         }
         
         // Meta+F: Toggle fullscreen
         if (keycode == 33) {  // F
             LOG_INFO("Toggle fullscreen (Meta+F)");
             toggleFullscreen();
-            return;
+            return true;
         }
         
         // Meta+A: Toggle always-on-top
         if (keycode == 30) {  // A
             LOG_INFO("Toggle always-on-top (Meta+A)");
             toggleAlwaysOnTop();
-            return;
+            return true;
         }
     }
 
@@ -326,35 +326,38 @@ void Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
         if (keycode == 23) {  // Tab
             LOG_DEBUG("Focus MRU switch (Alt+Tab)");
             focusNextMru(shift);
-            return;
+            return true;
         }
         
         // Alt+PgUp/PgDn: Move window to next/previous workspace
         if (keycode == 104) {  // PgUp
             LOG_INFO("Move view to prev workspace (Alt+PgUp)");
             moveViewToWorkspaceRelative(false);
-            return;
+            return true;
         }
         if (keycode == 105) {  // PgDn
             LOG_INFO("Move view to next workspace (Alt+PgDn)");
             moveViewToWorkspaceRelative(true);
-            return;
+            return true;
         }
         
         // Alt+Return: Spawn terminal (fallback)
         if (keycode == 28) {  // Return
             LOG_INFO("Spawn terminal (Alt+Return)");
             spawnTerminal();
-            return;
+            return true;
         }
         
         // Alt+F4: Close window (standard WM binding)
         if (keycode == 111) {  // F4
             LOG_INFO("Close window (Alt+F4)");
             closeFocusedWindow();
-            return;
+            return true;
         }
     }
+    
+    // Key not consumed by compositor, forward to client
+    return false;
 }
 
 void Server::handlePointerButton(uint32_t button, bool pressed, double x, double y) {
@@ -610,8 +613,12 @@ void Server::minimizeWindow() {
     if (ws && ws->activeView()) {
         View* view = ws->activeView();
         LOG_INFO("Minimize window");
-        // Unmap the view to minimize
-        onViewUnmapped(view);
+        
+        // Hide the view in scene graph (proper minimize, not unmap)
+        if (g_view_minimize) {
+            g_view_minimize(view->nativeHandle());
+        }
+        
         // Focus next available view
         focusNextMru(false);
     }
