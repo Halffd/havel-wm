@@ -352,13 +352,16 @@ bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
     // ========================================================================
     
     if (alt) {
-        // Alt+Tab: Focus MRU switch
+        // Alt+Tab: Show overlay or navigate
         if (keycode == 23) {  // Tab
-            LOG_DEBUG("Focus MRU switch (Alt+Tab)");
-            focusNextMru(shift);
+            if (isAltTabVisible()) {
+                altTabNext();
+            } else {
+                showAltTab(shift);  // Shift reverses direction
+            }
             return true;
         }
-        
+
         // Alt+PgUp/PgDn: Move window to next/previous workspace
         if (keycode == 104) {  // PgUp
             LOG_INFO("Move view to prev workspace (Alt+PgUp)");
@@ -370,7 +373,7 @@ bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
             moveViewToWorkspaceRelative(true);
             return true;
         }
-        
+
         // Alt+Return: Spawn terminal (fallback)
         if (keycode == 28) {  // Return
             LOG_INFO("Spawn terminal (Alt+Return)");
@@ -520,24 +523,44 @@ Rect Server::outputGeometry(uint32_t workspaceId) const {
 
 void Server::spawnTerminal() {
     const char* terminals[] = {"alacritty", "foot", nullptr};
-    
+
     for (int i = 0; terminals[i] != nullptr; i++) {
-        char cmd[256];
-        snprintf(cmd, sizeof(cmd), "command -v %s > /dev/null 2>&1 && exec %s", terminals[i], terminals[i]);
-        FILE* f = popen(cmd, "r");
+        // Check if terminal exists
+        char checkCmd[256];
+        snprintf(checkCmd, sizeof(checkCmd), "command -v %s", terminals[i]);
+        FILE* f = popen(checkCmd, "r");
         if (f) {
-            pclose(f);
-            if (g_server_spawn) {
-                g_server_spawn(terminals[i]);
-                LOG_INFO("Spawned terminal: %s", terminals[i]);
+            char path[256];
+            if (fgets(path, sizeof(path), f) != nullptr) {
+                pclose(f);
+                // Terminal found, spawn it
+                LOG_INFO("Spawning terminal: %s", terminals[i]);
+                if (g_server_spawn) {
+                    g_server_spawn(terminals[i]);
+                } else {
+                    // Fallback to fork/exec
+                    pid_t pid = fork();
+                    if (pid == 0) {
+                        execlp(terminals[i], terminals[i], (char*)NULL);
+                        _exit(127);
+                    }
+                }
+                return;
             }
-            return;
+            pclose(f);
         }
     }
-    
-    // Fallback
+
+    // Fallback to foot
+    LOG_INFO("Spawning fallback terminal: foot");
     if (g_server_spawn) {
         g_server_spawn("foot");
+    } else {
+        pid_t pid = fork();
+        if (pid == 0) {
+            execlp("foot", "foot", (char*)NULL);
+            _exit(127);
+        }
     }
 }
 
@@ -787,6 +810,74 @@ void Server::toggleGrayscale() {
 
 void Server::toggleNegative() {
     setNegativeEnabled(!isNegativeEnabled());
+}
+
+// ============================================================================
+// Alt-Tab Overlay
+// ============================================================================
+
+void Server::showAltTab(bool reverse) {
+    // Get all windows from window manager
+    auto windows = m_windowManager.getAllWindows();
+    
+    if (windows.empty()) {
+        printf("[AltTab] No windows to show\n");
+        return;
+    }
+    
+    // Convert to thumbnails
+    std::vector<WindowThumbnail> thumbnails;
+    for (const auto& win : windows) {
+        WindowThumbnail thumb;
+        thumb.windowId = win.id;
+        thumb.appId = win.appId;
+        thumb.title = win.title;
+        thumb.isFocused = hasFlag(win.flags, WindowFlags::Focused);
+        thumbnails.push_back(thumb);
+    }
+    
+    m_altTabOverlay.show(thumbnails);
+    m_altTabOverlay.setSelectCallback([this](uint64_t windowId) {
+        // Focus the selected window
+        // Would need to find view by windowId and call focusView()
+        printf("[AltTab] Would focus window %lu\n", windowId);
+    });
+    
+    if (reverse) {
+        altTabPrevious();
+    }
+}
+
+void Server::hideAltTab() {
+    m_altTabOverlay.hide();
+}
+
+void Server::altTabNext() {
+    if (m_altTabOverlay.isVisible()) {
+        m_altTabOverlay.next();
+    }
+}
+
+void Server::altTabPrevious() {
+    if (m_altTabOverlay.isVisible()) {
+        m_altTabOverlay.previous();
+    }
+}
+
+void Server::altTabSelect() {
+    if (m_altTabOverlay.isVisible()) {
+        m_altTabOverlay.select();
+    }
+}
+
+void Server::altTabCancel() {
+    if (m_altTabOverlay.isVisible()) {
+        m_altTabOverlay.cancel();
+    }
+}
+
+bool Server::isAltTabVisible() const {
+    return m_altTabOverlay.isVisible();
 }
 
 // ============================================================================

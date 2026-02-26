@@ -466,17 +466,25 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // Update animations before rendering
     havel_cpp_update_animations(server->cpp_server);
 
-    // Use render pipeline if available
-    if (output->render_pipeline) {
-        havel_render_pipeline_render(
-            output->render_pipeline,
-            server->scene,
-            output->scene_output
-        );
-    } else {
-        // Fallback to direct commit
-        wlr_scene_output_commit(output->scene_output, NULL);
+    // Proper wlroots 0.20 output commit
+    const struct wlr_scene_output_state_options options = {
+        .timer = NULL,
+    };
+
+    struct wlr_output_state state;
+    wlr_output_state_init(&state);
+    if (!wlr_scene_output_build_state(output->scene_output, &state, &options)) {
+        wlr_output_state_finish(&state);
+        return;
     }
+
+    if (!wlr_output_commit_state(output->output, &state)) {
+        wlr_output_state_finish(&state);
+        return;
+    }
+
+    wlr_output_state_finish(&state);
+    wlr_scene_output_commit(output->scene_output, &options);
 }
 
 static void output_destroy(struct wl_listener *listener, void *data) {

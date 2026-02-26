@@ -5,6 +5,7 @@
 #include <wm/Focus.hpp>
 #include <wm/Animator.hpp>
 #include <wm/bridge.h>
+#include <wm/overlay/AltTabOverlay.hpp>
 #include <shell/WindowManager.hpp>
 #include <memory>
 #include <array>
@@ -73,6 +74,15 @@ public:
     void toggleGrayscale();
     void toggleNegative();
 
+    // Alt-Tab overlay
+    void showAltTab(bool reverse = false);
+    void hideAltTab();
+    void altTabNext();
+    void altTabPrevious();
+    void altTabSelect();
+    void altTabCancel();
+    bool isAltTabVisible() const;
+
     // Window management (for taskbar/panel)
     WindowManager& windowManager() { return m_windowManager; }
     const WindowManager& windowManager() const { return m_windowManager; }
@@ -82,6 +92,7 @@ private:
     uint32_t m_activeWorkspace = 0;
     FocusManager m_focusManager;
     WindowManager m_windowManager;
+    AltTabOverlay m_altTabOverlay;
     void* m_nativeHandle = nullptr;
     std::unordered_map<uint32_t, Rect> m_outputGeoms;
     Animator m_animator;
