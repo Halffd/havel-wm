@@ -1,5 +1,6 @@
 #include <wm/Server.hpp>
 #include <wm/Layout.hpp>
+#include <wm/plugins/ExamplePlugin.hpp>
 #include <Logger.h>
 #include <algorithm>
 #include <cstdlib>
@@ -15,10 +16,22 @@ Server::Server() {
     for (uint32_t i = 0; i < WORKSPACE_COUNT; ++i) {
         m_workspaces[i] = std::make_unique<Workspace>(i);
     }
+    
+    // Initialize plugin manager
+    m_pluginManager.initialize(this);
+    
+    // Register built-in plugins
+    registerPlugin(std::unique_ptr<Plugin>(create_example_plugin()));
+    LOG_INFO("Plugins initialized");
 }
 
 Server::~Server() {
     LOG_INFO("Server destructor");
+    m_pluginManager.shutdown();
+}
+
+void Server::registerPlugin(std::unique_ptr<Plugin> plugin) {
+    m_pluginManager.registerPlugin(std::move(plugin));
 }
 
 Workspace* Server::activeWorkspace() const {
@@ -108,9 +121,15 @@ void Server::onViewMapped(View* view) {
     view->setMapped(true);
     LOG_INFO("View mapped, workspace=%u", view->workspaceId());
 
-    // Update window manager with app_id and title from XDG surface
-    // (Would be called from C layer when surface is ready)
-    
+    // Dispatch to plugins
+    ViewEvent event;
+    event.view = view;
+    event.appId = "";  // Would get from XDG surface
+    event.title = "";
+    event.workspace = view->workspaceId();
+    event.x = 0; event.y = 0; event.width = 0; event.height = 0;
+    m_pluginManager.dispatchViewMap(event);
+
     focusView(view);
 
     auto* ws = activeWorkspace();
@@ -124,6 +143,15 @@ void Server::onViewUnmapped(View* view) {
 
     LOG_DEBUG("View unmapped");
     view->setMapped(false);
+
+    // Dispatch to plugins
+    ViewEvent event;
+    event.view = view;
+    event.appId = "";
+    event.title = "";
+    event.workspace = view->workspaceId();
+    event.x = 0; event.y = 0; event.width = 0; event.height = 0;
+    m_pluginManager.dispatchViewUnmap(event);
 
     auto* ws = m_workspaces[view->workspaceId()].get();
     if (ws && ws->activeView() == view) {
@@ -139,6 +167,15 @@ void Server::onViewDestroyed(View* view) {
     if (!view) return;
 
     LOG_INFO("View destroyed");
+
+    // Dispatch to plugins first (before removing from internal state)
+    ViewEvent event;
+    event.view = view;
+    event.appId = "";
+    event.title = "";
+    event.workspace = view->workspaceId();
+    event.x = 0; event.y = 0; event.width = 0; event.height = 0;
+    m_pluginManager.dispatchViewDestroy(event);
 
     // Unregister from window manager
     if (view->windowId() != 0) {
@@ -164,6 +201,17 @@ void Server::onViewDestroyed(View* view) {
 
 bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
     if (!pressed) return false;
+
+    // First, give plugins a chance to handle the key
+    KeyEvent event;
+    event.keycode = keycode;
+    event.modifiers = modifiers;
+    event.pressed = pressed;
+    
+    if (m_pluginManager.dispatchKey(event)) {
+        // Plugin consumed the event
+        return true;
+    }
 
     // Modifier masks (matching wlroots/xkbcommon)
     constexpr uint32_t MOD_ALT = 1 << 3;      // Mod1
@@ -1080,6 +1128,14 @@ void Server::setViewPosition(View* view, int x, int y, bool animate) {
             g_view_set_position(view->nativeHandle(), x, y);
         }
     }
+}
+
+void Server::setViewOpacity(View* view, float alpha) {
+    // wlroots 0.20 scene doesn't have per-node opacity
+    // This would require scene graph extension
+    // For now, stub - plugins can still call this safely
+    (void)view;
+    (void)alpha;
 }
 
 void Server::setViewSize(View* view, int w, int h, bool animate) {

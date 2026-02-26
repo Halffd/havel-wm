@@ -466,11 +466,14 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // Update animations before rendering
     havel_cpp_update_animations(server->cpp_server);
 
+    // Dispatch frame event to plugins (via C++ server)
+    havel_cpp_dispatch_output_frame(server->cpp_server, output->output, output->scene_output);
+
     // Commit scene output using wlroots 0.20 API
     const struct wlr_scene_output_state_options options = {
         .timer = NULL,
     };
-    
+
     wlr_scene_output_commit(output->scene_output, &options);
 }
 

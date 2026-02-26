@@ -49,6 +49,9 @@ void havel_cpp_set_active_workspace(struct havel_cpp_server* server, uint32_t wo
 // Animation updates (called from C frame handler)
 void havel_cpp_update_animations(struct havel_cpp_server* server);
 
+// Plugin event dispatch (called from C)
+void havel_cpp_dispatch_output_frame(struct havel_cpp_server* server, void* output, void* sceneOutput);
+
 // Callback registration (called from C during initialization)
 void havel_cpp_register_view_callbacks(
     cpp_view_set_position_fn set_position,

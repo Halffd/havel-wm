@@ -1,5 +1,6 @@
 #include <wm/bridge.h>
 #include <wm/Server.hpp>
+#include <wm/plugins/Plugin.hpp>
 #include <cstdint>
 
 // Global callback pointers (accessible from Server.cpp)
@@ -88,6 +89,19 @@ void havel_cpp_set_active_workspace(struct havel_cpp_server* server, uint32_t wo
 void havel_cpp_update_animations(struct havel_cpp_server* server) {
     if (!server) return;
     server->server->updateAnimations();
+}
+
+void havel_cpp_dispatch_output_frame(struct havel_cpp_server* server, void* output, void* sceneOutput) {
+    if (!server) return;
+    
+    havel::OutputFrameEvent frameEvent;
+    frameEvent.output = output;
+    frameEvent.sceneOutput = sceneOutput;
+    frameEvent.width = 1920;  // Would get from actual output
+    frameEvent.height = 1080;
+    frameEvent.refresh = 60000;  // 60Hz in mHz
+    
+    server->server->pluginManager().dispatchOutputFrame(frameEvent);
 }
 
 } // extern "C"

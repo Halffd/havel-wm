@@ -8,6 +8,7 @@
 #include <wm/overlay/AltTabOverlay.hpp>
 #include <wm/overlay/OverviewOverlay.hpp>
 #include <wm/overlay/AppLauncherOverlay.hpp>
+#include <wm/plugins/PluginManager.hpp>
 #include <shell/WindowManager.hpp>
 #include <memory>
 #include <array>
@@ -101,9 +102,18 @@ public:
     void launcherSelect();
     bool isLauncherVisible() const;
 
+    // Plugin management
+    PluginManager& pluginManager() { return m_pluginManager; }
+    const PluginManager& pluginManager() const { return m_pluginManager; }
+    void registerPlugin(std::unique_ptr<Plugin> plugin);
+
     // Window management (for taskbar/panel)
     WindowManager& windowManager() { return m_windowManager; }
     const WindowManager& windowManager() const { return m_windowManager; }
+
+    // CompositorAPI implementation (for plugins)
+    void setViewPosition(View* view, int x, int y, bool animate = true);
+    void setViewOpacity(View* view, float alpha);
 
 private:
     std::array<std::unique_ptr<Workspace>, WORKSPACE_COUNT> m_workspaces;
@@ -115,7 +125,8 @@ private:
     AltTabOverlay m_altTabOverlay;
     OverviewOverlay m_overviewOverlay;
     AppLauncherOverlay m_launcherOverlay;
-    
+    PluginManager m_pluginManager;
+
     void* m_nativeHandle = nullptr;
     std::unordered_map<uint32_t, Rect> m_outputGeoms;
     Animator m_animator;
@@ -158,7 +169,7 @@ private:
     void quit();
 
     // View manipulation through C callbacks (with optional animation)
-    void setViewPosition(View* view, int x, int y, bool animate = true);
+    // Note: setViewPosition and setViewOpacity are public for CompositorAPI
     void setViewSize(View* view, int w, int h, bool animate = true);
     void focusViewNative(View* view);
     void raiseView(View* view);
