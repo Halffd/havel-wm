@@ -1,7 +1,6 @@
 #include <wm/wlr_bridge.h>
 #include <Logger.h>
 #include <wm/render_c.h>
-#include <wm/view_transform.h>
 
 #include <stdbool.h>
 #include <stdint.h>
