@@ -168,8 +168,12 @@ int getOutputHeight();
 
 ### Scale Plugin
 - **File:** `ScalePlugin.cpp`
-- **Keybinding:** Meta+S
-- **Action:** Toggle overview scale (stub)
+- **Keybindings:** 
+  - Meta+S: Toggle overview
+  - Arrow keys / HJKL: Navigate grid
+  - Enter: Select window
+  - Escape: Cancel
+- **Action:** Grid overview with navigation (stub)
 
 ### Wallpaper Plugin
 - **File:** `WallpaperPlugin.cpp`
@@ -185,6 +189,22 @@ int getOutputHeight();
 - **File:** `CustomLayoutsPlugin.cpp`
 - **Keybindings:** Meta+H/V/G/T
 - **Action:** Switch tiling layouts
+
+### Window Snap Plugin
+- **File:** `WindowSnapPlugin.cpp`
+- **Keybindings:**
+  - Meta+Z: Toggle snap
+  - Meta+Left/Right: Snap left/right half
+  - Meta+Up/Down: Maximize/Restore
+- **Action:** Snap windows to edges/corners
+
+### Hot Corners Plugin
+- **File:** `HotCornersPlugin.cpp`
+- **Keybindings:**
+  - Meta+C: Toggle hot corners
+  - Meta+W: Trigger overview
+  - Meta+E: Trigger windows view
+- **Action:** Trigger actions on corner hover
 
 ## Event Flow
 
