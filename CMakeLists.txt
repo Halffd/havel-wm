@@ -76,6 +76,11 @@ set(WM_CORE_SOURCES
     src/wm/overlay/AppLauncherOverlay.cpp
     src/wm/plugins/PluginManager.cpp
     src/wm/plugins/ExamplePlugin.cpp
+    src/wm/plugins/BlurPlugin.cpp
+    src/wm/plugins/ScalePlugin.cpp
+    src/wm/plugins/WallpaperPlugin.cpp
+    src/wm/plugins/NotificationsPlugin.cpp
+    src/wm/plugins/CustomLayoutsPlugin.cpp
     # VulkanRenderer.cpp - disabled, wlroots handles rendering
 )
 

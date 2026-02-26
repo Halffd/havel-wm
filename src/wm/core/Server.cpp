@@ -1,6 +1,6 @@
 #include <wm/Server.hpp>
 #include <wm/Layout.hpp>
-#include <wm/plugins/ExamplePlugin.hpp>
+#include <wm/plugins/Plugins.hpp>
 #include <Logger.h>
 #include <algorithm>
 #include <cstdlib>
@@ -16,13 +16,19 @@ Server::Server() {
     for (uint32_t i = 0; i < WORKSPACE_COUNT; ++i) {
         m_workspaces[i] = std::make_unique<Workspace>(i);
     }
-    
+
     // Initialize plugin manager
     m_pluginManager.initialize(this);
-    
+
     // Register built-in plugins
     registerPlugin(std::unique_ptr<Plugin>(create_example_plugin()));
-    LOG_INFO("Plugins initialized");
+    registerPlugin(std::unique_ptr<Plugin>(create_blur_plugin()));
+    registerPlugin(std::unique_ptr<Plugin>(create_scale_plugin()));
+    registerPlugin(std::unique_ptr<Plugin>(create_wallpaper_plugin()));
+    registerPlugin(std::unique_ptr<Plugin>(create_notifications_plugin()));
+    registerPlugin(std::unique_ptr<Plugin>(create_custom_layouts_plugin()));
+    
+    LOG_INFO("Plugins initialized (%d plugins)", m_pluginManager.plugins().size());
 }
 
 Server::~Server() {
