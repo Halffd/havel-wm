@@ -906,6 +906,19 @@ void Server::quit() {
     }
 }
 
+void Server::setBackgroundColor(float r, float g, float b) {
+    m_bgColorR = r;
+    m_bgColorG = g;
+    m_bgColorB = b;
+    LOG_INFO("Background color set to (%.2f, %.2f, %.2f)", r, g, b);
+}
+
+void Server::getBackgroundColor(float* r, float* g, float* b) const {
+    if (r) *r = m_bgColorR;
+    if (g) *g = m_bgColorG;
+    if (b) *b = m_bgColorB;
+}
+
 // ============================================================================
 // Animation Control
 // ============================================================================

@@ -29,6 +29,8 @@ public:
         m_colorR = 0.1f;
         m_colorG = 0.1f;
         m_colorB = 0.15f;
+        // Set initial background color
+        m_api->setBackgroundColor(m_colorR, m_colorG, m_colorB);
         printf("[WallpaperPlugin] Initialized (solid color wallpaper)\n");
     }
     
@@ -75,7 +77,7 @@ private:
         // Simple color cycle for demo
         static int cycle = 0;
         cycle = (cycle + 1) % 4;
-        
+
         switch (cycle) {
             case 0:  // Dark blue
                 m_colorR = 0.1f; m_colorG = 0.1f; m_colorB = 0.15f;
@@ -90,6 +92,9 @@ private:
                 m_colorR = 0.12f; m_colorG = 0.12f; m_colorB = 0.12f;
                 break;
         }
+
+        // Apply the new background color
+        m_api->setBackgroundColor(m_colorR, m_colorG, m_colorB);
         
         printf("[WallpaperPlugin] Wallpaper color: (%.2f, %.2f, %.2f)\n",
                m_colorR, m_colorG, m_colorB);

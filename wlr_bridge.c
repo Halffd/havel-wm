@@ -469,6 +469,15 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // Dispatch frame event to plugins (via C++ server)
     havel_cpp_dispatch_output_frame(server->cpp_server, output->output, output->scene_output);
 
+    // Get background color from wallpaper plugin
+    float bgR, bgG, bgB;
+    havel_cpp_get_background_color(server->cpp_server, &bgR, &bgG, &bgB);
+
+    // Note: Background color clear requires proper render pass integration
+    // For now, the wallpaper plugin sets the color but clearing happens elsewhere
+    // TODO: Integrate with wlroots 0.20 render pass API for proper clear
+    (void)bgR; (void)bgG; (void)bgB;
+
     // Commit scene output using wlroots 0.20 API
     const struct wlr_scene_output_state_options options = {
         .timer = NULL,

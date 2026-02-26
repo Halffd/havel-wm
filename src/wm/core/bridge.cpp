@@ -104,4 +104,9 @@ void havel_cpp_dispatch_output_frame(struct havel_cpp_server* server, void* outp
     server->server->pluginManager().dispatchOutputFrame(frameEvent);
 }
 
+void havel_cpp_get_background_color(struct havel_cpp_server* server, float* r, float* g, float* b) {
+    if (!server) return;
+    server->server->getBackgroundColor(r, g, b);
+}
+
 } // extern "C"

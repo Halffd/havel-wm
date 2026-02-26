@@ -46,7 +46,8 @@ public:
     
     void setViewPosition(View* view, int x, int y) override;
     void setViewOpacity(View* view, float alpha) override;
-    
+    void setBackgroundColor(float r, float g, float b) override;
+
     void scheduleRedraw() override;
     
     int getOutputWidth() override;

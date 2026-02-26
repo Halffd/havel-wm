@@ -114,6 +114,10 @@ public:
     // CompositorAPI implementation (for plugins)
     void setViewPosition(View* view, int x, int y, bool animate = true);
     void setViewOpacity(View* view, float alpha);
+    
+    // Background color (for wallpaper plugin)
+    void setBackgroundColor(float r, float g, float b);
+    void getBackgroundColor(float* r, float* g, float* b) const;
 
 private:
     std::array<std::unique_ptr<Workspace>, WORKSPACE_COUNT> m_workspaces;
@@ -130,6 +134,11 @@ private:
     void* m_nativeHandle = nullptr;
     std::unordered_map<uint32_t, Rect> m_outputGeoms;
     Animator m_animator;
+    
+    // Background color (for wallpaper plugin)
+    float m_bgColorR = 0.1f;
+    float m_bgColorG = 0.1f;
+    float m_bgColorB = 0.15f;
 
     // Grab state for mouse operations
     struct GrabState {
