@@ -1,5 +1,6 @@
 #include <wm/Server.hpp>
 #include <wm/Layout.hpp>
+#include <wm/view_transform.h>
 #include <Logger.h>
 #include <algorithm>
 #include <cstdlib>
@@ -972,10 +973,42 @@ void Server::showOverview() {
     m_overviewOverlay.setWorkspaceCallback([this](uint32_t wsId) {
         setActiveWorkspace(wsId);
     });
+    
+    // Apply scale transforms to all views for overview effect
+    for (uint32_t ws = 0; ws < WORKSPACE_COUNT; ws++) {
+        auto* workspace = m_workspaces[ws].get();
+        auto views = workspace->tiledViews();
+        
+        for (auto* view : views) {
+            if (view->nativeHandle()) {
+                havel_view_transform_t transform;
+                transform.scale_x = 0.3f;
+                transform.scale_y = 0.3f;
+                transform.translation_x = 0;
+                transform.translation_y = 0;
+                transform.alpha = (ws == m_activeWorkspace) ? 1.0f : 0.5f;
+                transform.active = true;
+                
+                havel_cpp_apply_view_transform(view->nativeHandle(), &transform);
+            }
+        }
+    }
 }
 
 void Server::hideOverview() {
     m_overviewOverlay.hide();
+    
+    // Remove all view transforms
+    for (uint32_t ws = 0; ws < WORKSPACE_COUNT; ws++) {
+        auto* workspace = m_workspaces[ws].get();
+        auto views = workspace->tiledViews();
+        
+        for (auto* view : views) {
+            if (view->nativeHandle()) {
+                havel_cpp_remove_view_transform(view->nativeHandle());
+            }
+        }
+    }
 }
 
 void Server::overviewNavigate(int dx, int dy) {

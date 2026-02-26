@@ -74,6 +74,7 @@ set(WM_CORE_SOURCES
     src/wm/overlay/AltTabOverlay.cpp
     src/wm/overlay/OverviewOverlay.cpp
     src/wm/overlay/AppLauncherOverlay.cpp
+    src/wm/core/ViewTransform.cpp
     # VulkanRenderer.cpp - disabled, wlroots handles rendering
 )
 

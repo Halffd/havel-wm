@@ -1,6 +1,7 @@
 #include <wm/wlr_bridge.h>
 #include <Logger.h>
 #include <wm/render_c.h>
+#include <wm/view_transform.h>
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -466,24 +467,11 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // Update animations before rendering
     havel_cpp_update_animations(server->cpp_server);
 
-    // Proper wlroots 0.20 output commit
+    // Commit scene output using wlroots 0.20 API
     const struct wlr_scene_output_state_options options = {
         .timer = NULL,
     };
-
-    struct wlr_output_state state;
-    wlr_output_state_init(&state);
-    if (!wlr_scene_output_build_state(output->scene_output, &state, &options)) {
-        wlr_output_state_finish(&state);
-        return;
-    }
-
-    if (!wlr_output_commit_state(output->output, &state)) {
-        wlr_output_state_finish(&state);
-        return;
-    }
-
-    wlr_output_state_finish(&state);
+    
     wlr_scene_output_commit(output->scene_output, &options);
 }
 
