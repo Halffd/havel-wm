@@ -221,7 +221,21 @@ bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
             workspaceStep(true);
             return true;
         }
-        
+
+        // Meta+W: Show workspace overview
+        if (keycode == 32) {  // w
+            LOG_INFO("Show overview (Meta+W)");
+            showOverview();
+            return true;
+        }
+
+        // Meta+D: Show app launcher
+        if (keycode == 33) {  // d
+            LOG_INFO("Show launcher (Meta+D)");
+            showLauncher();
+            return true;
+        }
+
         // Meta+1/2/3/4/5/6/7/8/9/0: Direct workspace switch
         if (keycode >= 10 && keycode <= 19) {
             uint32_t ws = (keycode == 19) ? 9 : (keycode - 10);  // 0 = workspace 9
@@ -229,7 +243,7 @@ bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
             workspaceStepTo(ws);
             return true;
         }
-        
+
         // Meta+Shift+1/2/3/4/5/6/7/8/9/0: Move window to workspace
         if (shift && keycode >= 10 && keycode <= 19) {
             uint32_t ws = (keycode == 19) ? 9 : (keycode - 10);
@@ -350,7 +364,7 @@ bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
     // ========================================================================
     // Alt combinations
     // ========================================================================
-    
+
     if (alt) {
         // Alt+Tab: Show overlay or navigate
         if (keycode == 23) {  // Tab
@@ -380,7 +394,7 @@ bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
             spawnTerminal();
             return true;
         }
-        
+
         // Alt+F4: Close window (standard WM binding)
         if (keycode == 111) {  // F4
             LOG_INFO("Close window (Alt+F4)");
@@ -388,7 +402,76 @@ bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
             return true;
         }
     }
-    
+
+    // ========================================================================
+    // Overlay navigation (when visible)
+    // ========================================================================
+
+    // Alt-Tab overlay navigation
+    if (isAltTabVisible()) {
+        if (keycode == 111) {  // Escape - cancel
+            altTabCancel();
+            return true;
+        }
+        // Tab already handled above for cycling
+        return true;  // Consume other keys while overlay visible
+    }
+
+    // Overview overlay navigation
+    if (isOverviewVisible()) {
+        if (keycode == 111) {  // Escape
+            hideOverview();
+            return true;
+        }
+        if (keycode == 115) {  // Up
+            overviewNavigate(0, -1);
+            return true;
+        }
+        if (keycode == 116) {  // Down
+            overviewNavigate(0, 1);
+            return true;
+        }
+        if (keycode == 113) {  // Left
+            overviewNavigate(-1, 0);
+            return true;
+        }
+        if (keycode == 114) {  // Right
+            overviewNavigate(1, 0);
+            return true;
+        }
+        if (keycode == 28) {  // Enter - select
+            overviewSelect();
+            return true;
+        }
+        return true;
+    }
+
+    // Launcher overlay navigation
+    if (isLauncherVisible()) {
+        if (keycode == 111) {  // Escape
+            hideLauncher();
+            return true;
+        }
+        if (keycode == 115) {  // Up
+            launcherNavigate(-1);
+            return true;
+        }
+        if (keycode == 116) {  // Down
+            launcherNavigate(1);
+            return true;
+        }
+        if (keycode == 28) {  // Enter - select
+            launcherSelect();
+            return true;
+        }
+        if (keycode == 14) {  // Backspace
+            launcherBackspace();
+            return true;
+        }
+        // Text input handled separately
+        return true;
+    }
+
     // Key not consumed by compositor, forward to client
     return false;
 }
@@ -878,6 +961,79 @@ void Server::altTabCancel() {
 
 bool Server::isAltTabVisible() const {
     return m_altTabOverlay.isVisible();
+}
+
+// ============================================================================
+// Workspace Overview
+// ============================================================================
+
+void Server::showOverview() {
+    m_overviewOverlay.show(WORKSPACE_COUNT, m_activeWorkspace);
+    m_overviewOverlay.setWorkspaceCallback([this](uint32_t wsId) {
+        setActiveWorkspace(wsId);
+    });
+}
+
+void Server::hideOverview() {
+    m_overviewOverlay.hide();
+}
+
+void Server::overviewNavigate(int dx, int dy) {
+    if (dx < 0) m_overviewOverlay.navigateLeft();
+    if (dx > 0) m_overviewOverlay.navigateRight();
+    if (dy < 0) m_overviewOverlay.navigateUp();
+    if (dy > 0) m_overviewOverlay.navigateDown();
+}
+
+void Server::overviewSelect() {
+    m_overviewOverlay.select();
+}
+
+bool Server::isOverviewVisible() const {
+    return m_overviewOverlay.isVisible();
+}
+
+// ============================================================================
+// App Launcher
+// ============================================================================
+
+void Server::showLauncher() {
+    m_launcherOverlay.scanApplications();
+    m_launcherOverlay.show();
+    m_launcherOverlay.setLaunchCallback([this](const std::string& exec) {
+        if (g_server_spawn) {
+            g_server_spawn(exec.c_str());
+        }
+    });
+}
+
+void Server::hideLauncher() {
+    m_launcherOverlay.hide();
+}
+
+void Server::launcherInput(char key) {
+    if (m_launcherOverlay.isVisible()) {
+        std::string current = m_launcherOverlay.searchText();
+        current += key;
+        m_launcherOverlay.setSearchText(current);
+    }
+}
+
+void Server::launcherBackspace() {
+    m_launcherOverlay.backspace();
+}
+
+void Server::launcherNavigate(int dy) {
+    if (dy < 0) m_launcherOverlay.navigateUp();
+    if (dy > 0) m_launcherOverlay.navigateDown();
+}
+
+void Server::launcherSelect() {
+    m_launcherOverlay.select();
+}
+
+bool Server::isLauncherVisible() const {
+    return m_launcherOverlay.isVisible();
 }
 
 // ============================================================================

@@ -6,6 +6,8 @@
 #include <wm/Animator.hpp>
 #include <wm/bridge.h>
 #include <wm/overlay/AltTabOverlay.hpp>
+#include <wm/overlay/OverviewOverlay.hpp>
+#include <wm/overlay/AppLauncherOverlay.hpp>
 #include <shell/WindowManager.hpp>
 #include <memory>
 #include <array>
@@ -83,6 +85,22 @@ public:
     void altTabCancel();
     bool isAltTabVisible() const;
 
+    // Workspace Overview
+    void showOverview();
+    void hideOverview();
+    void overviewNavigate(int dx, int dy);
+    void overviewSelect();
+    bool isOverviewVisible() const;
+
+    // App Launcher
+    void showLauncher();
+    void hideLauncher();
+    void launcherInput(char key);
+    void launcherBackspace();
+    void launcherNavigate(int dy);
+    void launcherSelect();
+    bool isLauncherVisible() const;
+
     // Window management (for taskbar/panel)
     WindowManager& windowManager() { return m_windowManager; }
     const WindowManager& windowManager() const { return m_windowManager; }
@@ -92,7 +110,12 @@ private:
     uint32_t m_activeWorkspace = 0;
     FocusManager m_focusManager;
     WindowManager m_windowManager;
+    
+    // Overlays
     AltTabOverlay m_altTabOverlay;
+    OverviewOverlay m_overviewOverlay;
+    AppLauncherOverlay m_launcherOverlay;
+    
     void* m_nativeHandle = nullptr;
     std::unordered_map<uint32_t, Rect> m_outputGeoms;
     Animator m_animator;
