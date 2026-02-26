@@ -27,7 +27,9 @@ Server::Server() {
     registerPlugin(std::unique_ptr<Plugin>(create_wallpaper_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_notifications_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_custom_layouts_plugin()));
-    
+    registerPlugin(std::unique_ptr<Plugin>(create_window_snap_plugin()));
+    registerPlugin(std::unique_ptr<Plugin>(create_hot_corners_plugin()));
+
     LOG_INFO("Plugins initialized (%d plugins)", m_pluginManager.plugins().size());
 }
 
