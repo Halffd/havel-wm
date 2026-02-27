@@ -3,6 +3,7 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <wm/render/OverlayRenderer.hpp>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -340,11 +341,80 @@ private:
             0, 0, 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`',
             0, 0, '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0
         };
-        
+
         if (keycode < sizeof(keymap)) {
             return keymap[keycode];
         }
         return 0;
+    }
+    
+    void renderOverlay(void* rendererPtr) override {
+        if (!m_visible || !rendererPtr) return;
+        
+        OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+        
+        int screenWidth = renderer->getScreenWidth();
+        int screenHeight = renderer->getScreenHeight();
+        
+        // Launcher dimensions
+        int launcherWidth = 600;
+        int launcherHeight = 400;
+        int launcherX = (screenWidth - launcherWidth) / 2;
+        int launcherY = (screenHeight - launcherHeight) / 2;
+        
+        // Draw semi-transparent background
+        renderer->drawRect(0, 0, screenWidth, screenHeight, Color(0.0f, 0.0f, 0.0f, 0.7f));
+        
+        // Draw launcher background
+        renderer->drawRect((float)launcherX, (float)launcherY, (float)launcherWidth, (float)launcherHeight, Color(0.15f, 0.15f, 0.2f, 0.95f));
+        
+        // Draw launcher border
+        renderer->drawBorder(FloatRect((float)launcherX, (float)launcherY, (float)launcherWidth, (float)launcherHeight), Color(0.5f, 0.5f, 0.6f, 0.8f), 2.0f);
+        
+        // Draw search box
+        int searchHeight = 50;
+        renderer->drawRect((float)(launcherX + 10), (float)(launcherY + 10), (float)(launcherWidth - 20), (float)searchHeight, Color(0.0f, 0.0f, 0.0f, 0.5f));
+        renderer->drawBorder(FloatRect((float)(launcherX + 10), (float)(launcherY + 10), (float)(launcherWidth - 20), (float)searchHeight), Color(0.6f, 0.6f, 0.7f, 0.6f), 1.0f);
+        
+        // Draw search text
+        if (m_searchText.empty()) {
+            renderer->drawText("Type to search...", (float)(launcherX + 20), (float)(launcherY + 35), 18.0f, Color(0.5f, 0.5f, 0.5f, 0.7f));
+        } else {
+            renderer->drawText(m_searchText.c_str(), (float)(launcherX + 20), (float)(launcherY + 35), 18.0f, Color(1.0f, 1.0f, 1.0f, 1.0f));
+        }
+        
+        // Draw results list
+        int resultY = launcherY + searchHeight + 20;
+        int resultHeight = launcherHeight - searchHeight - 40;
+        int itemHeight = 40;
+        int maxVisibleItems = resultHeight / itemHeight;
+        
+        // Draw visible results
+        int startIndex = 0;
+        int endIndex = m_filtered.size();
+        if ((int)m_filtered.size() > maxVisibleItems) {
+            endIndex = startIndex + maxVisibleItems;
+        }
+        
+        for (int i = startIndex; i < (int)endIndex && i < (int)m_filtered.size(); i++) {
+            const DesktopEntry& entry = m_filtered[i];
+            bool isSelected = (i == m_selectedIndex);
+            
+            int itemY = resultY + (i - startIndex) * itemHeight;
+            
+            // Draw item background
+            Color itemBg = isSelected ? Color(0.3f, 0.4f, 0.5f, 0.8f) : Color(0.0f, 0.0f, 0.0f, 0.3f);
+            renderer->drawRect((float)(launcherX + 10), (float)itemY, (float)(launcherWidth - 20), (float)(itemHeight - 2), itemBg);
+            
+            // Draw app name
+            renderer->drawText(entry.name.c_str(), (float)(launcherX + 20), (float)(itemY + 25), 16.0f, isSelected ? Color(1.0f, 1.0f, 1.0f, 1.0f) : Color(0.8f, 0.8f, 0.8f, 1.0f));
+        }
+        
+        // Draw instruction text
+        const char* instruction = "Type: Search | Arrows: Navigate | Enter: Launch | Esc: Cancel";
+        float textWidth = strlen(instruction) * 8.0f;
+        float textX = (screenWidth - textWidth) / 2.0f;
+        renderer->drawText(instruction, textX, (float)(launcherY + launcherHeight + 15), 12.0f, Color(0.6f, 0.6f, 0.6f, 1.0f));
     }
 };
 

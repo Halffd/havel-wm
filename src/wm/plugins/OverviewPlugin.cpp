@@ -3,7 +3,9 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <wm/render/OverlayRenderer.hpp>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 #include <string>
 
@@ -248,18 +250,18 @@ private:
             hide();
             return;
         }
-        
+
         OverviewWorkspace& ws = m_workspaces[m_selectedWorkspace];
-        
+
         if (m_selectedWindow >= 0 && m_selectedWindow < (int)ws.windows.size()) {
             // Select specific window
             OverviewWindow& win = ws.windows[m_selectedWindow];
             printf("[Overview] Selecting window: %s\n", win.title.c_str());
-            
+
             if (win.viewPtr) {
                 m_api->focusView((View*)win.viewPtr);
             }
-            
+
             // Switch to workspace
             if (ws.id != m_api->getActiveWorkspace()) {
                 m_api->setActiveWorkspace(ws.id);
@@ -269,8 +271,66 @@ private:
             printf("[Overview] Selecting workspace: %d\n", ws.id + 1);
             m_api->setActiveWorkspace(ws.id);
         }
-        
+
         hide();
+    }
+    
+    void renderOverlay(void* rendererPtr) override {
+        if (!m_visible || !rendererPtr) return;
+        
+        OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+        
+        int screenWidth = renderer->getScreenWidth();
+        int screenHeight = renderer->getScreenHeight();
+        
+        // Draw semi-transparent background
+        renderer->drawRect(0, 0, screenWidth, screenHeight, Color(0.0f, 0.0f, 0.0f, 0.8f));
+        
+        // Calculate workspace grid layout
+        int wsCount = (int)m_workspaces.size();
+        int gridCols = 3;
+        int gridRows = (wsCount + gridCols - 1) / gridCols;
+        
+        int wsWidth = (screenWidth - 100) / gridCols;
+        int wsHeight = (screenHeight - 100) / gridRows;
+        int spacing = 20;
+        
+        // Draw each workspace
+        for (size_t i = 0; i < m_workspaces.size(); i++) {
+            OverviewWorkspace& ws = m_workspaces[i];
+            int col = ws.gridX;
+            int row = ws.gridY;
+            int x = 50 + col * (wsWidth + spacing);
+            int y = 50 + row * (wsHeight + spacing);
+            
+            bool isSelected = ((int)i == m_selectedWorkspace);
+            
+            // Draw workspace background
+            Color bgColor = isSelected ? Color(0.2f, 0.3f, 0.4f, 0.9f) : Color(0.15f, 0.15f, 0.15f, 0.8f);
+            renderer->drawRect((float)x, (float)y, (float)wsWidth, (float)wsHeight, bgColor);
+            
+            // Draw border
+            Color borderColor = isSelected ? Color(1.0f, 1.0f, 1.0f, 1.0f) : Color(0.4f, 0.4f, 0.4f, 0.5f);
+            renderer->drawBorder(FloatRect((float)x, (float)y, (float)wsWidth, (float)wsHeight), borderColor, isSelected ? 3.0f : 2.0f);
+            
+            // Draw workspace number
+            char wsLabel[16];
+            snprintf(wsLabel, sizeof(wsLabel), "Workspace %d", ws.id + 1);
+            renderer->drawTextCentered(wsLabel, (float)(x + wsWidth/2), (float)(y + 20), 16.0f, Color(0.8f, 0.8f, 0.8f, 1.0f));
+            
+            // Draw window count
+            if (!ws.windows.empty()) {
+                char winLabel[32];
+                snprintf(winLabel, sizeof(winLabel), "%zu window(s)", ws.windows.size());
+                renderer->drawTextCentered(winLabel, (float)(x + wsWidth/2), (float)(y + wsHeight - 20), 12.0f, Color(0.6f, 0.6f, 0.6f, 1.0f));
+            }
+        }
+        
+        // Draw instruction text
+        const char* instruction = "Arrows: Navigate | Enter: Select | Esc: Cancel";
+        float textWidth = strlen(instruction) * 10.0f;
+        float textX = (screenWidth - textWidth) / 2.0f;
+        renderer->drawText(instruction, textX, (float)(screenHeight - 40), 14.0f, Color(0.8f, 0.8f, 0.8f, 1.0f));
     }
 };
 
