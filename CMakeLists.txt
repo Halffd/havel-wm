@@ -73,6 +73,8 @@ set(WM_CORE_SOURCES
     src/wm/render/OverlayRenderer.cpp
     src/wm/render/OverlayRenderer.hpp
     src/wm/render/OverlayRendering.cpp
+    src/wm/render/BitmapFont.cpp
+    src/wm/render/BitmapFont.hpp
     src/wm/input/InputManager.cpp
     src/wm/overlay/OverlayScene.cpp
     src/wm/overlay/AltTabOverlay.cpp

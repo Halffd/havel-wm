@@ -4,8 +4,11 @@
 #include <GLES2/gl2.h>
 #include <cstdint>
 #include <string>
+#include <memory>
 
 namespace havel {
+
+class BitmapFont;  // Forward declaration
 
 /**
  * Float-based rectangle for rendering
@@ -88,8 +91,9 @@ private:
     // Vertex arrays
     GLuint m_vao = 0;
     GLuint m_vbo = 0;
-    
-    // Texture for bitmap font (loaded on demand)
+
+    // Bitmap font for text rendering
+    std::unique_ptr<BitmapFont> m_font;
     GLuint m_fontTexture = 0;
     bool m_fontLoaded = false;
 };

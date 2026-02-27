@@ -1,4 +1,5 @@
 #include "OverlayRenderer.hpp"
+#include "BitmapFont.hpp"
 #include <GLES2/gl2ext.h>
 #include <EGL/egl.h>
 #include <cstdio>
@@ -95,23 +96,79 @@ bool OverlayRenderer::initialize() {
     }
 
     printf("[OverlayRenderer] GL Version: %s\n", version);
-    
+
     // Compile shaders
     if (!compileShaders()) {
         fprintf(stderr, "[OverlayRenderer] Failed to compile shaders\n");
         return false;
     }
-    
+
     // Create geometry buffers
     createGeometry();
     
+    // Initialize bitmap font
+    m_font = std::make_unique<BitmapFont>();
+    
+    // Create a simple font atlas texture (8x16 glyphs, 128 chars)
+    // For now, create a placeholder texture - in production, load from file
+    const int glyphWidth = 8;
+    const int glyphHeight = 16;
+    const int atlasWidth = 128 * glyphWidth;  // 1024
+    const int atlasHeight = glyphHeight;       // 16
+    
+    std::vector<uint8_t> fontData(atlasWidth * atlasHeight, 0);
+    
+    // Generate simple blocky font pattern (placeholder)
+    // In production, load a real font atlas PNG
+    for (int i = 0; i < 128; i++) {
+        int charX = (i % 16) * glyphWidth;
+        int charY = (i / 16) * glyphHeight;
+        
+        // Simple pattern for each character (placeholder)
+        for (int y = 0; y < glyphHeight; y++) {
+            for (int x = 0; x < glyphWidth; x++) {
+                // Create a simple pattern (not a real font, just for testing)
+                int px = charX + x;
+                int py = charY + y;
+                if (x < 6 && y < 14 && x > 1 && y > 1) {
+                    fontData[py * atlasWidth + px] = 255;
+                }
+            }
+        }
+    }
+    
+    glGenTextures(1, &m_fontTexture);
+    glBindTexture(GL_TEXTURE_2D, m_fontTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, atlasWidth, atlasHeight, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, fontData.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    
+    // Initialize font with atlas
+    if (!m_font->initialize(m_fontTexture, glyphWidth, glyphHeight)) {
+        fprintf(stderr, "[OverlayRenderer] Failed to initialize bitmap font\n");
+        return false;
+    }
+    
+    m_fontLoaded = true;
+
     m_initialized = true;
-    printf("[OverlayRenderer] Initialized\n");
+    printf("[OverlayRenderer] Initialized (with bitmap font)\n");
     return true;
 }
 
 void OverlayRenderer::shutdown() {
     if (!m_initialized) return;
+
+    if (m_font) {
+        m_font->shutdown();
+        m_font.reset();
+    }
+    if (m_fontTexture) {
+        glDeleteTextures(1, &m_fontTexture);
+        m_fontTexture = 0;
+    }
+    m_fontLoaded = false;
     
     cleanup();
     m_initialized = false;
@@ -368,30 +425,19 @@ void OverlayRenderer::drawTexture(GLuint texture, float x, float y, float w, flo
 }
 
 void OverlayRenderer::drawText(const char* text, float x, float y, float size, const Color& color) {
-    if (!m_initialized || !text) return;
-
-    // STUB: Bitmap font rendering requires font atlas texture
-    // For now, draw a placeholder rectangle
-
-    float textWidth = strlen(text) * size * 0.6f;
-    float textHeight = size;
-
-    // Draw background box
-    drawRect(x - 2, y - 2, textWidth + 4, textHeight + 4, Color(0.0f, 0.0f, 0.0f, 0.8f));
-
-    // Draw border
-    drawBorder(FloatRect(x - 2, y - 2, textWidth + 4, textHeight + 4), Color(1.0f, 1.0f, 1.0f, 0.5f), 1.0f);
-
-    // TODO: Implement actual bitmap font rendering
-    // Requires: font atlas texture, glyph metrics, texture coordinate lookup
+    if (!m_initialized || !text || !m_fontLoaded) return;
+    
+    // Use bitmap font for rendering
+    m_font->renderText(x, y, size / 16.0f, text, color.r, color.g, color.b, color.a);
 }
 
 void OverlayRenderer::drawTextCentered(const char* text, float cx, float cy, float size, const Color& color) {
-    if (!text) return;
+    if (!text || !m_fontLoaded) return;
     
-    float textWidth = strlen(text) * size * 0.6f;
+    float textWidth = m_font->getTextWidth(text, size / 16.0f);
+    float textHeight = m_font->getTextHeight(size / 16.0f);
     float x = cx - textWidth / 2.0f;
-    float y = cy - size / 2.0f;
+    float y = cy - textHeight / 2.0f;
     
     drawText(text, x, y, size, color);
 }
