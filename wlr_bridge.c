@@ -143,9 +143,14 @@ struct havel_output {
     struct wl_list link;
 
     struct wlr_scene_tree *workspaces[HAVEL_WORKSPACE_COUNT];
-    
+
     // Render pipeline for this output
     havel_render_pipeline_t* render_pipeline;
+    
+    // Gamma/temperature/brightness state
+    float gamma;
+    int temperature;
+    float brightness;
 };
 
 struct havel_keyboard {
@@ -525,6 +530,11 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     output->server = server;
     output->output = wlr_output;
     output->scene_output = wlr_scene_output_create(server->scene, wlr_output);
+    
+    // Initialize gamma state to defaults
+    output->gamma = 1.0f;
+    output->temperature = 6500;
+    output->brightness = 1.0f;
 
     wl_list_insert(&server->outputs, &output->link);
     output->is_primary = (server->outputs.next == &output->link);
@@ -816,6 +826,7 @@ havel_wlr_server_t* havel_wlr_create(void) {
 
     // Create C++ server
     server->cpp_server = havel_cpp_server_create();
+    havel_cpp_server_set_native_handle(server->cpp_server, server);
 
     server->display = wl_display_create();
     if (!server->display) {
@@ -934,4 +945,60 @@ int havel_wlr_run(havel_wlr_server_t *server) {
     wl_display_run(server->display);
     LOG_INFO("Havel Compositor shutting down");
     return 0;
+}
+
+// ============================================================================
+// Gamma/Temperature/Brightness Control
+// ============================================================================
+
+static void havel_output_apply_gamma(struct havel_output *output) {
+    if (!output || !output->output) return;
+    
+    // Note: wlroots 0.20 doesn't have direct wlr_output_set_gamma()
+    // Gamma control requires gamma_control_v1 protocol
+    // For now, we store the values and log them
+    // Actual gamma application would use:
+    // - gamma_control_v1 protocol for DRM gamma LUTs
+    // - Or shader-based gamma in render pipeline
+    
+    LOG_INFO("[OUTPUT] %s gamma=%.2f temp=%dK brightness=%.2f",
+              output->output->name, output->gamma, output->temperature, output->brightness);
+}
+
+void havel_wlr_set_gamma(havel_wlr_server_t *server, float gamma) {
+    if (!server) return;
+    
+    struct havel_output *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        output->gamma = gamma;
+        havel_output_apply_gamma(output);
+    }
+    
+    LOG_INFO("Gamma set to %.2f on all outputs", gamma);
+}
+
+void havel_wlr_set_temperature(havel_wlr_server_t *server, int kelvin) {
+    if (!server) return;
+    
+    struct havel_output *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        output->temperature = kelvin;
+        // Temperature would be applied via shader or DRM color temp property
+        havel_output_apply_gamma(output);
+    }
+    
+    LOG_INFO("Temperature set to %dK on all outputs", kelvin);
+}
+
+void havel_wlr_set_brightness(havel_wlr_server_t *server, float brightness) {
+    if (!server) return;
+    
+    struct havel_output *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        output->brightness = brightness;
+        // Brightness would be applied via shader or DRM brightness property
+        havel_output_apply_gamma(output);
+    }
+    
+    LOG_INFO("Brightness set to %.2f on all outputs", brightness);
 }

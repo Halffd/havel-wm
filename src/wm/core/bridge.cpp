@@ -3,6 +3,15 @@
 #include <wm/plugins/Plugin.hpp>
 #include <cstdint>
 
+// Forward declare C server type and functions
+typedef struct havel_wlr_server havel_wlr_server_t;
+
+extern "C" {
+    void havel_wlr_set_gamma(havel_wlr_server_t* server, float gamma);
+    void havel_wlr_set_temperature(havel_wlr_server_t* server, int kelvin);
+    void havel_wlr_set_brightness(havel_wlr_server_t* server, float brightness);
+}
+
 // Global callback pointers (accessible from Server.cpp)
 ViewSetPositionFn g_view_set_position = nullptr;
 ViewSetSizeFn g_view_set_size = nullptr;
@@ -21,11 +30,13 @@ extern "C" {
 
 struct havel_cpp_server {
     havel::Server* server;
+    void* nativeHandle;  // havel_wlr_server_t* - for calling C layer functions
 };
 
 struct havel_cpp_server* havel_cpp_server_create(void) {
     auto* cpp = new havel_cpp_server;
     cpp->server = new havel::Server();
+    cpp->nativeHandle = nullptr;
     return cpp;
 }
 
@@ -38,6 +49,12 @@ void havel_cpp_server_destroy(struct havel_cpp_server* server) {
 void* havel_cpp_server_get_native_handle(struct havel_cpp_server* server) {
     if (!server) return nullptr;
     return server->server->nativeHandle();
+}
+
+void havel_cpp_server_set_native_handle(struct havel_cpp_server* server, void* handle) {
+    if (!server) return;
+    server->nativeHandle = handle;
+    server->server->setNativeHandle(handle);
 }
 
 void havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* xdg_surface) {
@@ -112,16 +129,28 @@ void havel_cpp_get_background_color(struct havel_cpp_server* server, float* r, f
 void havel_cpp_set_gamma(struct havel_cpp_server* server, float gamma) {
     if (!server) return;
     server->server->setGamma(gamma);
+    // Apply to all outputs via C layer
+    if (server->nativeHandle) {
+        havel_wlr_set_gamma((havel_wlr_server_t*)server->nativeHandle, gamma);
+    }
 }
 
 void havel_cpp_set_temperature(struct havel_cpp_server* server, int kelvin) {
     if (!server) return;
     server->server->setTemperature(kelvin);
+    // Apply to all outputs via C layer
+    if (server->nativeHandle) {
+        havel_wlr_set_temperature((havel_wlr_server_t*)server->nativeHandle, kelvin);
+    }
 }
 
 void havel_cpp_set_brightness(struct havel_cpp_server* server, float brightness) {
     if (!server) return;
     server->server->setBrightness(brightness);
+    // Apply to all outputs via C layer
+    if (server->nativeHandle) {
+        havel_wlr_set_brightness((havel_wlr_server_t*)server->nativeHandle, brightness);
+    }
 }
 
 } // extern "C"

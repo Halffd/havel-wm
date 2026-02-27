@@ -24,12 +24,17 @@ typedef void (*cpp_server_spawn_fn)(const char* command);
 // Opaque handle to C++ Server
 struct havel_cpp_server;
 
+// Opaque handle to C server (wlroots)
+struct havel_wlr_server;
+typedef struct havel_wlr_server havel_wlr_server_t;
+
 // Create/destroy C++ server
 struct havel_cpp_server* havel_cpp_server_create(void);
 void havel_cpp_server_destroy(struct havel_cpp_server* server);
 
 // Get native handle for storing in C struct
 void* havel_cpp_server_get_native_handle(struct havel_cpp_server* server);
+void havel_cpp_server_set_native_handle(struct havel_cpp_server* server, void* handle);
 
 // View lifecycle events (called from C bridge)
 void havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* xdg_surface);
@@ -59,6 +64,11 @@ void havel_cpp_get_background_color(struct havel_cpp_server* server, float* r, f
 void havel_cpp_set_gamma(struct havel_cpp_server* server, float gamma);
 void havel_cpp_set_temperature(struct havel_cpp_server* server, int kelvin);
 void havel_cpp_set_brightness(struct havel_cpp_server* server, float brightness);
+
+// C layer gamma application
+void havel_wlr_set_gamma(havel_wlr_server_t* server, float gamma);
+void havel_wlr_set_temperature(havel_wlr_server_t* server, int kelvin);
+void havel_wlr_set_brightness(havel_wlr_server_t* server, float brightness);
 
 // Callback registration (called from C during initialization)
 void havel_cpp_register_view_callbacks(
