@@ -979,10 +979,34 @@ void havel_wlr_set_gamma(havel_wlr_server_t *server, float gamma) {
     struct havel_output *output;
     wl_list_for_each(output, &server->outputs, link) {
         output->gamma = gamma;
-        havel_output_apply_gamma(output);
+        
+        // Check if output supports gamma
+        if (output->output->gamma_size > 0) {
+            // Build gamma ramp
+            uint16_t *ramp = malloc(sizeof(uint16_t) * 3 * output->output->gamma_size);
+            if (ramp) {
+                uint16_t *r = ramp;
+                uint16_t *g = ramp + output->output->gamma_size;
+                uint16_t *b = ramp + 2 * output->output->gamma_size;
+                
+                for (size_t i = 0; i < output->output->gamma_size; i++) {
+                    float value = (float)i / (output->output->gamma_size - 1);
+                    value = powf(value, 1.0f / gamma);
+                    uint16_t scaled = (uint16_t)(value * 0xFFFF);
+                    r[i] = g[i] = b[i] = scaled;
+                }
+                
+                wlr_output_set_gamma(output->output, output->output->gamma_size, r, g, b);
+                free(ramp);
+                
+                LOG_INFO("[OUTPUT] %s gamma set to %.2f (LUT applied)", 
+                         output->output->name, gamma);
+            }
+        } else {
+            LOG_WARN("[OUTPUT] %s does not support gamma (gamma_size=0)", 
+                     output->output->name);
+        }
     }
-    
-    LOG_INFO("Gamma set to %.2f on all outputs", gamma);
 }
 
 void havel_wlr_set_temperature(havel_wlr_server_t *server, int kelvin) {

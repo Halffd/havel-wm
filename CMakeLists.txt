@@ -79,6 +79,8 @@ set(WM_CORE_SOURCES
     src/wm/render/FreeTypeFont.cpp
     src/wm/render/FreeTypeFont.hpp
     src/wm/input/InputManager.cpp
+    src/wm/input/KeybindingManager.cpp
+    src/wm/input/KeybindingManager.hpp
     src/wm/overlay/OverlayScene.cpp
     src/wm/overlay/AltTabOverlay.cpp
     src/wm/overlay/OverviewOverlay.cpp
