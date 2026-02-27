@@ -153,4 +153,19 @@ void havel_cpp_set_brightness(struct havel_cpp_server* server, float brightness)
     }
 }
 
+void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int height) {
+    if (!server) return;
+    
+    // Get overlay renderer from render pipeline
+    // For now, this is a stub - actual implementation needs render pipeline access
+    // The overlay renderer is owned by RenderPipeline which is per-output
+    
+    // TODO: Get RenderPipeline for this output and call overlayRenderer()->beginFrame()
+    // Then dispatch to plugins to draw their overlays
+    // Then call overlayRenderer()->endFrame()
+    
+    (void)width;
+    (void)height;
+}
+
 } // extern "C"

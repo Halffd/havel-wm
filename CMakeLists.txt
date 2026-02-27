@@ -15,6 +15,7 @@ pkg_check_modules(XKB REQUIRED xkbcommon)
 pkg_check_modules(PIXMAN REQUIRED pixman-1)
 pkg_check_modules(FMT REQUIRED fmt)
 pkg_check_modules(GLES2 REQUIRED glesv2)
+pkg_check_modules(EGL REQUIRED egl)
 
 # Find Qt6 for panel
 find_package(Qt6 COMPONENTS Core Gui Widgets QUIET)
@@ -69,6 +70,8 @@ set(WM_CORE_SOURCES
     src/wm/render/RenderPipeline.cpp
     src/wm/render/render_c_wrappers.c
     src/wm/render/ShaderEffect.cpp
+    src/wm/render/OverlayRenderer.cpp
+    src/wm/render/OverlayRenderer.hpp
     src/wm/input/InputManager.cpp
     src/wm/overlay/OverlayScene.cpp
     src/wm/overlay/AltTabOverlay.cpp
@@ -129,6 +132,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${PIXMAN_INCLUDE_DIRS}
     ${FMT_INCLUDE_DIRS}
     ${GLES2_INCLUDE_DIRS}
+    ${EGL_INCLUDE_DIRS}
     # UI framework include (for future use)
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/include
 )
@@ -141,6 +145,7 @@ target_link_libraries(${PROJECT_NAME}
     ${PIXMAN_LIBRARIES}
     ${FMT_LIBRARIES}
     ${GLES2_LIBRARIES}
+    ${EGL_LIBRARIES}
 )
 
 # Set library directories
@@ -151,6 +156,7 @@ target_link_directories(${PROJECT_NAME} PRIVATE
     ${PIXMAN_LIBRARY_DIRS}
     ${FMT_LIBRARY_DIRS}
     ${GLES2_LIBRARY_DIRS}
+    ${EGL_LIBRARY_DIRS}
 )
 
 # Compiler flags

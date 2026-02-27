@@ -30,11 +30,18 @@ bool RenderPipeline::initialize(void* output, void* renderer) {
     // For now, use reasonable defaults - actual dimensions come from output events
     m_width = 1920;
     m_height = 1080;
-    
+
     // Initialize shader effects
     m_grayscaleEffect = std::make_unique<GrayscaleEffect>();
     m_negativeEffect = std::make_unique<NegativeEffect>();
     
+    // Initialize overlay renderer
+    m_overlayRenderer = std::make_unique<OverlayRenderer>();
+    if (!m_overlayRenderer->initialize()) {
+        fprintf(stderr, "[RenderPipeline] Warning: Overlay renderer failed to initialize\n");
+        m_overlayRenderer.reset();
+    }
+
     printf("[RenderPipeline] Initialized (%dx%d)\n", m_width, m_height);
     m_initialized = true;
     return true;
@@ -45,9 +52,10 @@ void RenderPipeline::cleanup() {
         havel_render_pipeline_destroy(m_pipeline);
         m_pipeline = nullptr;
     }
-    
+
     m_grayscaleEffect.reset();
     m_negativeEffect.reset();
+    m_overlayRenderer.reset();
     m_initialized = false;
 }
 

@@ -3,6 +3,7 @@
 #include <wm/render_c.h>
 #include <wm/Types.hpp>
 #include <wm/render/ShaderEffect.hpp>
+#include <wm/render/OverlayRenderer.hpp>
 #include <vector>
 #include <memory>
 
@@ -33,26 +34,29 @@ class RenderPipeline {
 public:
     RenderPipeline();
     ~RenderPipeline();
-    
+
     bool initialize(void* output, void* renderer);
     void cleanup();
     bool isInitialized() const { return m_initialized; }
-    
+
     // Effect management
     void addEffect(std::unique_ptr<RenderEffect> effect);
     void removeEffect(const char* name);
     RenderEffect* getEffect(const char* name);
     void setEffectsEnabled(bool enabled);
-    
+
     // Quick effect toggles
     void setGrayscaleEnabled(bool enabled);
     void setNegativeEnabled(bool enabled);
     bool isGrayscaleEnabled() const { return m_grayscaleEnabled; }
     bool isNegativeEnabled() const { return m_negativeEnabled; }
-    
+
     // Render scene through pipeline with effects
     void render(void* scene, void* sceneOutput);
     
+    // Overlay rendering (for Alt-Tab, Overview, etc.)
+    OverlayRenderer* overlayRenderer() { return m_overlayRenderer.get(); }
+
     int width() const { return m_width; }
     int height() const { return m_height; }
     
@@ -70,7 +74,8 @@ private:
     std::vector<std::unique_ptr<RenderEffect>> m_effects;
     std::unique_ptr<GrayscaleEffect> m_grayscaleEffect;
     std::unique_ptr<NegativeEffect> m_negativeEffect;
-    
+    std::unique_ptr<OverlayRenderer> m_overlayRenderer;
+
     // FBO for effect processing
     GLuint m_fbo = 0;
     GLuint m_texture = 0;

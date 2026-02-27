@@ -489,6 +489,9 @@ static void output_frame(struct wl_listener *listener, void *data) {
     };
 
     wlr_scene_output_commit(output->scene_output, &options);
+    
+    // Draw overlays (Alt-Tab, Overview, Launcher, etc.)
+    havel_cpp_draw_overlays(server->cpp_server, output->output->width, output->output->height);
 }
 
 static void output_destroy(struct wl_listener *listener, void *data) {
