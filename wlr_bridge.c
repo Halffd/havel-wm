@@ -491,7 +491,12 @@ static void output_frame(struct wl_listener *listener, void *data) {
     wlr_scene_output_commit(output->scene_output, &options);
     
     // Draw overlays (Alt-Tab, Overview, Launcher, etc.)
-    havel_cpp_draw_overlays(server->cpp_server, output->output->width, output->output->height);
+    // Get overlay renderer from render pipeline and render plugin overlays
+    if (output->render_pipeline) {
+        void* pluginManager = havel_cpp_get_plugin_manager(server->cpp_server);
+        havel_render_pipeline_draw_overlays(output->render_pipeline, 
+            output->output->width, output->output->height, pluginManager);
+    }
 }
 
 static void output_destroy(struct wl_listener *listener, void *data) {

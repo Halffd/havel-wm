@@ -33,7 +33,9 @@ public:
     void dispatchViewUnmap(const ViewEvent& event);
     void dispatchViewDestroy(const ViewEvent& event);
     bool dispatchKey(const KeyEvent& event);  // Returns true if consumed
-    void dispatchRenderOverlay(void* renderPass);
+    
+    // Overlay rendering
+    void renderOverlays(void* renderer);
     
     // CompositorAPI implementation
     View* getFocusedView() override;

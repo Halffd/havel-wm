@@ -37,8 +37,8 @@ public:
     virtual void onViewDestroy(const ViewEvent& event) { (void)event; }
     virtual bool onKey(const KeyEvent& event) { (void)event; return false; }
     
-    // Render hooks
-    virtual void renderOverlay(void* renderPass) { (void)renderPass; }
+    // Overlay rendering (called during render pass)
+    virtual void renderOverlay(void* renderer) { (void)renderer; }
     
     // Configuration
     virtual void loadConfig(const std::string& configPath) { (void)configPath; }

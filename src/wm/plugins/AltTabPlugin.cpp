@@ -3,7 +3,9 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <wm/render/OverlayRenderer.hpp>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 #include <string>
 
@@ -222,13 +224,59 @@ private:
         if (selected.viewPtr) {
             m_api->focusView((View*)selected.viewPtr);
         }
-        
+
         // Switch to its workspace if needed
         if (selected.workspace != m_api->getActiveWorkspace()) {
             m_api->setActiveWorkspace(selected.workspace);
         }
-        
+
         hide();
+    }
+    
+    void renderOverlay(void* rendererPtr) override {
+        if (!m_visible || !rendererPtr) return;
+        
+        OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+        
+        int screenWidth = renderer->getScreenWidth();
+        int screenHeight = renderer->getScreenHeight();
+        
+        // Draw semi-transparent background
+        renderer->drawRect(0, 0, screenWidth, screenHeight, Color(0.0f, 0.0f, 0.0f, 0.7f));
+        
+        if (m_windows.empty()) return;
+        
+        // Calculate thumbnail size and positions
+        int thumbnailWidth = 200;
+        int thumbnailHeight = 150;
+        int spacing = 30;
+        int totalWidth = (int)m_windows.size() * (thumbnailWidth + spacing) - spacing;
+        int startX = (screenWidth - totalWidth) / 2;
+        int y = (screenHeight - thumbnailHeight) / 2;
+        
+        // Draw each window thumbnail
+        for (size_t i = 0; i < m_windows.size(); i++) {
+            int x = startX + (int)i * (thumbnailWidth + spacing);
+            bool isSelected = ((int)i == m_selectedIndex);
+            
+            // Draw thumbnail background
+            Color bgColor = isSelected ? Color(0.3f, 0.4f, 0.5f, 0.9f) : Color(0.2f, 0.2f, 0.2f, 0.8f);
+            renderer->drawRect((float)x, (float)y, (float)thumbnailWidth, (float)thumbnailHeight, bgColor);
+            
+            // Draw border
+            Color borderColor = isSelected ? Color(1.0f, 1.0f, 1.0f, 1.0f) : Color(0.5f, 0.5f, 0.5f, 0.5f);
+            renderer->drawBorder(FloatRect((float)x, (float)y, (float)thumbnailWidth, (float)thumbnailHeight), borderColor, isSelected ? 3.0f : 2.0f);
+            
+            // Draw app name
+            const std::string& name = m_windows[i].appId;
+            renderer->drawText(name.c_str(), (float)(x + 10), (float)(y + thumbnailHeight - 25), 16.0f, Color(1.0f, 1.0f, 1.0f, 1.0f));
+        }
+        
+        // Draw instruction text
+        const char* instruction = "Alt+Tab: Cycle | Enter: Select | Esc: Cancel";
+        float textWidth = strlen(instruction) * 10.0f;
+        float textX = (screenWidth - textWidth) / 2.0f;
+        renderer->drawText(instruction, textX, (float)(screenHeight - 40), 14.0f, Color(0.8f, 0.8f, 0.8f, 1.0f));
     }
 };
 

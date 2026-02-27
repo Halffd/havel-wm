@@ -67,6 +67,7 @@ void havel_cpp_set_brightness(struct havel_cpp_server* server, float brightness)
 
 // Overlay rendering
 void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int height);
+void* havel_cpp_get_plugin_manager(struct havel_cpp_server* server);
 
 // C layer gamma application
 void havel_wlr_set_gamma(havel_wlr_server_t* server, float gamma);

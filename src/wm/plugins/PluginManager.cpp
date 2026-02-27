@@ -103,9 +103,9 @@ bool PluginManager::dispatchKey(const KeyEvent& event) {
     return false;  // Event not consumed, pass to compositor
 }
 
-void PluginManager::dispatchRenderOverlay(void* renderPass) {
+void PluginManager::renderOverlays(void* renderer) {
     for (auto& plugin : m_plugins) {
-        plugin->renderOverlay(renderPass);
+        plugin->renderOverlay(renderer);
     }
 }
 

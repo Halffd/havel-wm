@@ -72,6 +72,7 @@ set(WM_CORE_SOURCES
     src/wm/render/ShaderEffect.cpp
     src/wm/render/OverlayRenderer.cpp
     src/wm/render/OverlayRenderer.hpp
+    src/wm/render/OverlayRendering.cpp
     src/wm/input/InputManager.cpp
     src/wm/overlay/OverlayScene.cpp
     src/wm/overlay/AltTabOverlay.cpp

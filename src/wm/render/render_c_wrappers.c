@@ -17,12 +17,15 @@
 struct havel_render_pipeline {
     struct wlr_output* output;
     struct wlr_renderer* renderer;
-    
+
     float zoom;
     float gamma;
     float brightness;
     bool effectsEnabled;
     
+    // Opaque pointer to C++ OverlayRenderer
+    void* overlayRenderer;
+
     // Future: FBO chain, effect shaders, etc.
 };
 
@@ -207,4 +210,9 @@ void havel_overlay_destroy_wrapper(havel_overlay_scene_t* overlay) {
 bool havel_overlay_is_any_visible(void) {
     // Future: track all overlays and check visibility
     return false;
+}
+
+void havel_render_pipeline_set_overlay_renderer(havel_render_pipeline_t* pipeline, void* overlayRenderer) {
+    if (!pipeline) return;
+    pipeline->overlayRenderer = overlayRenderer;
 }

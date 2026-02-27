@@ -34,6 +34,10 @@ void havel_render_pipeline_set_gamma(havel_render_pipeline_t* pipeline, float ga
 void havel_render_pipeline_set_brightness(havel_render_pipeline_t* pipeline, float brightness);
 float havel_render_pipeline_get_zoom(havel_render_pipeline_t* pipeline);
 
+// Overlay rendering
+void havel_render_pipeline_draw_overlays(havel_render_pipeline_t* pipeline, int width, int height, void* pluginManager);
+void havel_render_pipeline_set_overlay_renderer(havel_render_pipeline_t* pipeline, void* overlayRenderer);
+
 // Overlay scene C interface
 typedef struct havel_overlay_scene havel_overlay_scene_t;
 

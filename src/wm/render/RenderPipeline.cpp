@@ -34,12 +34,17 @@ bool RenderPipeline::initialize(void* output, void* renderer) {
     // Initialize shader effects
     m_grayscaleEffect = std::make_unique<GrayscaleEffect>();
     m_negativeEffect = std::make_unique<NegativeEffect>();
-    
+
     // Initialize overlay renderer
     m_overlayRenderer = std::make_unique<OverlayRenderer>();
     if (!m_overlayRenderer->initialize()) {
         fprintf(stderr, "[RenderPipeline] Warning: Overlay renderer failed to initialize\n");
         m_overlayRenderer.reset();
+    }
+    
+    // Set overlay renderer pointer in C pipeline struct
+    if (m_pipeline && m_overlayRenderer) {
+        havel_render_pipeline_set_overlay_renderer(m_pipeline, m_overlayRenderer.get());
     }
 
     printf("[RenderPipeline] Initialized (%dx%d)\n", m_width, m_height);
