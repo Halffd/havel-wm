@@ -13,5 +13,6 @@ Plugin* create_notifications_plugin();
 Plugin* create_custom_layouts_plugin();
 Plugin* create_window_snap_plugin();
 Plugin* create_hot_corners_plugin();
+Plugin* create_gamma_plugin();
 
 } // namespace havel

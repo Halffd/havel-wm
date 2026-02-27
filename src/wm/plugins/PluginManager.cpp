@@ -166,6 +166,24 @@ void PluginManager::setBackgroundColor(float r, float g, float b) {
     server->setBackgroundColor(r, g, b);
 }
 
+void PluginManager::setGamma(float gamma) {
+    if (!m_server) return;
+    auto* server = static_cast<Server*>(m_server);
+    server->setGamma(gamma);
+}
+
+void PluginManager::setTemperature(int kelvin) {
+    if (!m_server) return;
+    auto* server = static_cast<Server*>(m_server);
+    server->setTemperature(kelvin);
+}
+
+void PluginManager::setBrightness(float brightness) {
+    if (!m_server) return;
+    auto* server = static_cast<Server*>(m_server);
+    server->setBrightness(brightness);
+}
+
 void PluginManager::scheduleRedraw() {
     // Would signal output to redraw
     // For now, stub

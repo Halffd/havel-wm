@@ -37,6 +37,11 @@ public:
     
     // Output/background control
     virtual void setBackgroundColor(float r, float g, float b) = 0;
+    
+    // Gamma/temperature control (per-output)
+    virtual void setGamma(float gamma) = 0;  // 0.1 - 2.0
+    virtual void setTemperature(int kelvin) = 0;  // 3000K - 6500K
+    virtual void setBrightness(float brightness) = 0;  // 0.1 - 1.0
     // Note: Scale requires scene graph extension (future)
     
     // Rendering

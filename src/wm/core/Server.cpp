@@ -29,6 +29,7 @@ Server::Server() {
     registerPlugin(std::unique_ptr<Plugin>(create_custom_layouts_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_window_snap_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_hot_corners_plugin()));
+    registerPlugin(std::unique_ptr<Plugin>(create_gamma_plugin()));
 
     LOG_INFO("Plugins initialized (%d plugins)", m_pluginManager.plugins().size());
 }
@@ -919,6 +920,24 @@ void Server::getBackgroundColor(float* r, float* g, float* b) const {
     if (r) *r = m_bgColorR;
     if (g) *g = m_bgColorG;
     if (b) *b = m_bgColorB;
+}
+
+void Server::setGamma(float gamma) {
+    m_gamma = gamma;
+    LOG_INFO("Gamma set to %.2f", gamma);
+    // Would apply to all outputs via C bridge
+}
+
+void Server::setTemperature(int kelvin) {
+    m_temperature = kelvin;
+    LOG_INFO("Temperature set to %dK", kelvin);
+    // Would apply to all outputs via C bridge
+}
+
+void Server::setBrightness(float brightness) {
+    m_brightness = brightness;
+    LOG_INFO("Brightness set to %.2f", brightness);
+    // Would apply to all outputs via C bridge
 }
 
 // ============================================================================

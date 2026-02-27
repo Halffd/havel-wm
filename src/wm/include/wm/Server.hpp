@@ -118,6 +118,11 @@ public:
     // Background color (for wallpaper plugin)
     void setBackgroundColor(float r, float g, float b);
     void getBackgroundColor(float* r, float* g, float* b) const;
+    
+    // Gamma/temperature control
+    void setGamma(float gamma);
+    void setTemperature(int kelvin);
+    void setBrightness(float brightness);
 
 private:
     std::array<std::unique_ptr<Workspace>, WORKSPACE_COUNT> m_workspaces;
@@ -139,6 +144,11 @@ private:
     float m_bgColorR = 0.1f;
     float m_bgColorG = 0.1f;
     float m_bgColorB = 0.15f;
+    
+    // Gamma/temperature (for gamma plugin)
+    float m_gamma = 1.0f;
+    int m_temperature = 6500;  // Kelvin
+    float m_brightness = 1.0f;
 
     // Grab state for mouse operations
     struct GrabState {

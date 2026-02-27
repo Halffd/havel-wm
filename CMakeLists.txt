@@ -83,6 +83,7 @@ set(WM_CORE_SOURCES
     src/wm/plugins/CustomLayoutsPlugin.cpp
     src/wm/plugins/WindowSnapPlugin.cpp
     src/wm/plugins/HotCornersPlugin.cpp
+    src/wm/plugins/GammaPlugin.cpp
     # VulkanRenderer.cpp - disabled, wlroots handles rendering
 )
 

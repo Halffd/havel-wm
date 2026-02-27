@@ -55,6 +55,11 @@ void havel_cpp_dispatch_output_frame(struct havel_cpp_server* server, void* outp
 // Background color (called from C for clear color)
 void havel_cpp_get_background_color(struct havel_cpp_server* server, float* r, float* g, float* b);
 
+// Gamma/temperature control
+void havel_cpp_set_gamma(struct havel_cpp_server* server, float gamma);
+void havel_cpp_set_temperature(struct havel_cpp_server* server, int kelvin);
+void havel_cpp_set_brightness(struct havel_cpp_server* server, float brightness);
+
 // Callback registration (called from C during initialization)
 void havel_cpp_register_view_callbacks(
     cpp_view_set_position_fn set_position,

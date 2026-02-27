@@ -109,4 +109,19 @@ void havel_cpp_get_background_color(struct havel_cpp_server* server, float* r, f
     server->server->getBackgroundColor(r, g, b);
 }
 
+void havel_cpp_set_gamma(struct havel_cpp_server* server, float gamma) {
+    if (!server) return;
+    server->server->setGamma(gamma);
+}
+
+void havel_cpp_set_temperature(struct havel_cpp_server* server, int kelvin) {
+    if (!server) return;
+    server->server->setTemperature(kelvin);
+}
+
+void havel_cpp_set_brightness(struct havel_cpp_server* server, float brightness) {
+    if (!server) return;
+    server->server->setBrightness(brightness);
+}
+
 } // extern "C"
