@@ -85,6 +85,8 @@ set(WM_CORE_SOURCES
     src/wm/plugins/HotCornersPlugin.cpp
     src/wm/plugins/GammaPlugin.cpp
     src/wm/plugins/AppLauncherPlugin.cpp
+    src/wm/plugins/AltTabPlugin.cpp
+    src/wm/plugins/OverviewPlugin.cpp
     # VulkanRenderer.cpp - disabled, wlroots handles rendering
 )
 
