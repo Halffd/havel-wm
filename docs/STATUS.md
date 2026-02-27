@@ -22,11 +22,13 @@
 - [x] CompositorAPI abstraction
 - [x] 12 plugins loaded
 
-### ✅ Gamma Control (FIXED)
+### ✅ Gamma Control (FIXED - COMBINED LUT)
 - [x] Per-output gamma LUT application
 - [x] Checks `wlr_output->gamma_size`
-- [x] Builds proper R/G/B ramps
-- [x] Calls `wlr_output_set_gamma()`
+- [x] **COMBINED**: gamma_curve × brightness × kelvin_rgb
+- [x] Single LUT upload (no stomping)
+- [x] Temperature RGB multipliers (blackbody approx)
+- [x] Brightness scalar multiplication
 - [x] Warns if output doesn't support gamma
 - [x] Meta+W cycles wallpaper colors
 
@@ -50,18 +52,14 @@
 ### ⏳ Alt-Tab Plugin
 **Status:** UI works, window list is FAKE
 
-```cpp
-// CURRENT (FAKE):
-WindowEntry term;
-term.appId = "foot";
-term.title = "Terminal";
-m_windows.push_back(term);
+**ARCHITECTURE BUG:** Stores `void* viewPtr` → breaks abstraction layer
 
-// NEEDS:
-auto views = server->getAllViews();
-for (auto* view : views) {
-    // Collect real windows
-}
+```cpp
+// CURRENT (BREAKS ENCAPSULATION):
+m_api->focusView((View*)win.viewPtr);  // ← Plugin sees View*
+
+// SHOULD BE:
+m_api->focusViewById(win.id);  // ← Opaque ID only
 ```
 
 **What works:**
@@ -75,7 +73,9 @@ for (auto* view : views) {
 - No actual window switching
 - No focus tracking
 
-**To fix:** Need `Server::getAllViews()` API
+**To fix:** 
+1. Add `focusViewById(uint64_t)` to CompositorAPI
+2. Add `Server::getAllViews()` API
 
 ---
 
@@ -204,22 +204,102 @@ No way to disable/reconfigure plugins.
 
 ---
 
+## Critical Architecture Bugs (Must Fix)
+
+### 🔴 P0: Plugin Keycode Hardcoding
+
+**Problem:** GammaPlugin, others use hardcoded keycodes
+
+```cpp
+// WRONG (US-only):
+if (event.keycode == 104) {  // PageUp - breaks on non-US }
+
+// RIGHT (use KeybindingManager):
+keybindingManager.register("gamma.increase", MOD_LOGO | KEY_PAGEUP, [](){
+    // ...
+});
+```
+
+**Impact:** International layouts broken
+
+**Fix:** Migrate all plugins to KeybindingManager
+
+---
+
+### 🔴 P0: View* Leak in Plugins
+
+**Problem:** AltTab/Overview store raw `View*` pointers
+
+```cpp
+// WRONG (breaks encapsulation):
+struct WindowEntry {
+    void* viewPtr;  // ← Internal type leaked to plugin
+};
+
+// RIGHT (opaque ID):
+struct WindowEntry {
+    uint64_t viewId;  // ← Opaque handle
+};
+```
+
+**Impact:** ABI break if View changes, plugin sees internals
+
+**Fix:** 
+1. Add `focusViewById(uint64_t)` to CompositorAPI
+2. Plugins store IDs only
+
+---
+
+### 🟡 P1: GammaPlugin State Inconsistency (FIXED)
+
+**Was:** `toggleNightMode()` didn't update `m_temperature`
+
+**Fixed:** Now updates internal state before calling API
+
+---
+
+### 🟡 P1: Separate Gamma/Brightness/Temp LUTs (FIXED)
+
+**Was:** Each setter uploaded separate LUT (stomping previous)
+
+**Fixed:** Single combined LUT: `gamma_curve × brightness × kelvin_rgb`
+
+---
+
+### 🟡 P1: HotCorners Debounce Broken
+
+**Problem:** `currentTime = 0` means debounce never triggers
+
+```cpp
+uint64_t currentTime = 0;  // ← Always zero!
+
+// Should be:
+uint64_t currentTime = getMonotonicTimeMs();
+```
+
+**Fix:** Add time source, fix debounce logic
+
+---
+
 ## Priority Fixes
 
 ### P0 (Critical)
-1. ✅ ~~Gamma LUT application~~ DONE
-2. ⏳ KeybindingManager integration into Server
-3. ⏳ Fix App Launcher to use xkbcommon
+1. ✅ ~~Gamma LUT combination~~ DONE
+2. ✅ ~~GammaPlugin state consistency~~ DONE
+3. ⏳ KeybindingManager integration into Server
+4. ⏳ Fix App Launcher to use xkbcommon
+5. ⏳ Fix View* leak in AltTab/Overview plugins
 
 ### P1 (High)
-4. Add `Server::getAllViews()` API
-5. Fix Alt-Tab to use real window list
-6. Fix Overview to use real workspace data
+6. Add `Server::getAllViews()` API
+7. Fix Alt-Tab to use real window list
+8. Fix Overview to use real workspace data
+9. Fix HotCorners debounce/time source
 
 ### P2 (Medium)
-7. Fix overlay render pass order
-8. Add window texture capture
-9. Add plugin configuration system
+10. Fix overlay render pass order
+11. Add window texture capture
+12. Add plugin configuration system
 
 ---
 

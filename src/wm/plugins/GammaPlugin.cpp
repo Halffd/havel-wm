@@ -131,9 +131,11 @@ private:
         m_nightMode = !m_nightMode;
         
         if (m_nightMode) {
+            m_temperature = NIGHT_TEMPERATURE;  // ← FIX: Update internal state
             m_api->setTemperature(NIGHT_TEMPERATURE);
             printf("[GammaPlugin] Night mode ON (%dK)\n", NIGHT_TEMPERATURE);
         } else {
+            m_temperature = DAY_TEMPERATURE;  // ← FIX: Update internal state
             m_api->setTemperature(DAY_TEMPERATURE);
             printf("[GammaPlugin] Night mode OFF (%dK)\n", DAY_TEMPERATURE);
         }
