@@ -30,6 +30,7 @@ Server::Server() {
     registerPlugin(std::unique_ptr<Plugin>(create_window_snap_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_hot_corners_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_gamma_plugin()));
+    registerPlugin(std::unique_ptr<Plugin>(create_app_launcher_plugin()));
 
     LOG_INFO("Plugins initialized (%d plugins)", m_pluginManager.plugins().size());
 }
