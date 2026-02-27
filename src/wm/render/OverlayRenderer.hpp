@@ -8,7 +8,7 @@
 
 namespace havel {
 
-class BitmapFont;  // Forward declaration
+class FreeTypeFont;  // Forward declaration
 
 /**
  * Float-based rectangle for rendering
@@ -92,9 +92,8 @@ private:
     GLuint m_vao = 0;
     GLuint m_vbo = 0;
 
-    // Bitmap font for text rendering
-    std::unique_ptr<BitmapFont> m_font;
-    GLuint m_fontTexture = 0;
+    // FreeType font for text rendering
+    std::unique_ptr<FreeTypeFont> m_font;
     bool m_fontLoaded = false;
 };
 

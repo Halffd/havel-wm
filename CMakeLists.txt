@@ -16,6 +16,7 @@ pkg_check_modules(PIXMAN REQUIRED pixman-1)
 pkg_check_modules(FMT REQUIRED fmt)
 pkg_check_modules(GLES2 REQUIRED glesv2)
 pkg_check_modules(EGL REQUIRED egl)
+pkg_check_modules(FREETYPE REQUIRED freetype2)
 
 # Find Qt6 for panel
 find_package(Qt6 COMPONENTS Core Gui Widgets QUIET)
@@ -75,6 +76,8 @@ set(WM_CORE_SOURCES
     src/wm/render/OverlayRendering.cpp
     src/wm/render/BitmapFont.cpp
     src/wm/render/BitmapFont.hpp
+    src/wm/render/FreeTypeFont.cpp
+    src/wm/render/FreeTypeFont.hpp
     src/wm/input/InputManager.cpp
     src/wm/overlay/OverlayScene.cpp
     src/wm/overlay/AltTabOverlay.cpp
@@ -136,6 +139,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${FMT_INCLUDE_DIRS}
     ${GLES2_INCLUDE_DIRS}
     ${EGL_INCLUDE_DIRS}
+    ${FREETYPE_INCLUDE_DIRS}
     # UI framework include (for future use)
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/include
 )
@@ -149,6 +153,7 @@ target_link_libraries(${PROJECT_NAME}
     ${FMT_LIBRARIES}
     ${GLES2_LIBRARIES}
     ${EGL_LIBRARIES}
+    ${FREETYPE_LIBRARIES}
 )
 
 # Set library directories

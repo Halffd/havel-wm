@@ -1,5 +1,5 @@
 #include "OverlayRenderer.hpp"
-#include "BitmapFont.hpp"
+#include "FreeTypeFont.hpp"
 #include <GLES2/gl2ext.h>
 #include <EGL/egl.h>
 #include <cstdio>
@@ -106,54 +106,38 @@ bool OverlayRenderer::initialize() {
     // Create geometry buffers
     createGeometry();
     
-    // Initialize bitmap font
-    m_font = std::make_unique<BitmapFont>();
+    // Initialize FreeType font
+    m_font = std::make_unique<FreeTypeFont>();
     
-    // Create a simple font atlas texture (8x16 glyphs, 128 chars)
-    // For now, create a placeholder texture - in production, load from file
-    const int glyphWidth = 8;
-    const int glyphHeight = 16;
-    const int atlasWidth = 128 * glyphWidth;  // 1024
-    const int atlasHeight = glyphHeight;       // 16
+    // Try to load a system font
+    // Common Linux font paths
+    const char* fontPaths[] = {
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/gnu-free/FreeSans.ttf",
+        nullptr
+    };
     
-    std::vector<uint8_t> fontData(atlasWidth * atlasHeight, 0);
-    
-    // Generate simple blocky font pattern (placeholder)
-    // In production, load a real font atlas PNG
-    for (int i = 0; i < 128; i++) {
-        int charX = (i % 16) * glyphWidth;
-        int charY = (i / 16) * glyphHeight;
-        
-        // Simple pattern for each character (placeholder)
-        for (int y = 0; y < glyphHeight; y++) {
-            for (int x = 0; x < glyphWidth; x++) {
-                // Create a simple pattern (not a real font, just for testing)
-                int px = charX + x;
-                int py = charY + y;
-                if (x < 6 && y < 14 && x > 1 && y > 1) {
-                    fontData[py * atlasWidth + px] = 255;
-                }
-            }
+    bool fontLoaded = false;
+    for (int i = 0; fontPaths[i] != nullptr; i++) {
+        if (m_font->loadFont(fontPaths[i], 16)) {
+            printf("[OverlayRenderer] Loaded font: %s\n", fontPaths[i]);
+            fontLoaded = true;
+            break;
         }
     }
     
-    glGenTextures(1, &m_fontTexture);
-    glBindTexture(GL_TEXTURE_2D, m_fontTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, atlasWidth, atlasHeight, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE, fontData.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glBindTexture(GL_TEXTURE_2D, 0);
-    
-    // Initialize font with atlas
-    if (!m_font->initialize(m_fontTexture, glyphWidth, glyphHeight)) {
-        fprintf(stderr, "[OverlayRenderer] Failed to initialize bitmap font\n");
-        return false;
+    if (!fontLoaded) {
+        fprintf(stderr, "[OverlayRenderer] Warning: Could not load TrueType font, using fallback\n");
+        // Font will render as empty - overlays will still work, just no text
     }
     
-    m_fontLoaded = true;
+    m_fontLoaded = fontLoaded;
 
     m_initialized = true;
-    printf("[OverlayRenderer] Initialized (with bitmap font)\n");
+    printf("[OverlayRenderer] Initialized (with FreeType font)\n");
     return true;
 }
 
@@ -163,10 +147,6 @@ void OverlayRenderer::shutdown() {
     if (m_font) {
         m_font->shutdown();
         m_font.reset();
-    }
-    if (m_fontTexture) {
-        glDeleteTextures(1, &m_fontTexture);
-        m_fontTexture = 0;
     }
     m_fontLoaded = false;
     
@@ -289,10 +269,6 @@ void OverlayRenderer::cleanup() {
     if (m_vbo) {
         glDeleteBuffers(1, &m_vbo);
         m_vbo = 0;
-    }
-    if (m_fontTexture) {
-        glDeleteTextures(1, &m_fontTexture);
-        m_fontTexture = 0;
     }
 }
 
@@ -425,14 +401,14 @@ void OverlayRenderer::drawTexture(GLuint texture, float x, float y, float w, flo
 }
 
 void OverlayRenderer::drawText(const char* text, float x, float y, float size, const Color& color) {
-    if (!m_initialized || !text || !m_fontLoaded) return;
+    if (!m_initialized || !text || !m_fontLoaded || !m_font) return;
     
-    // Use bitmap font for rendering
+    // Use FreeType font for rendering
     m_font->renderText(x, y, size / 16.0f, text, color.r, color.g, color.b, color.a);
 }
 
 void OverlayRenderer::drawTextCentered(const char* text, float cx, float cy, float size, const Color& color) {
-    if (!text || !m_fontLoaded) return;
+    if (!text || !m_fontLoaded || !m_font) return;
     
     float textWidth = m_font->getTextWidth(text, size / 16.0f);
     float textHeight = m_font->getTextHeight(size / 16.0f);
