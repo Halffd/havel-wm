@@ -234,8 +234,17 @@ bool OverlayRenderer::compileShaders() {
     
     glDeleteShader(vertShader);
     glDeleteShader(fragShader);
+
+    // Cache shader attribute/uniform locations (avoid glGet* per draw)
+    m_colorPosLoc = glGetAttribLocation(m_colorShader, "a_position");
+    m_colorColorLoc = glGetUniformLocation(m_colorShader, "a_color");
     
-    printf("[OverlayRenderer] Shaders compiled successfully\n");
+    m_texturePosLoc = glGetAttribLocation(m_textureShader, "a_position");
+    m_textureTexCoordLoc = glGetAttribLocation(m_textureShader, "a_texCoord");
+    m_textureAlphaLoc = glGetUniformLocation(m_textureShader, "u_alpha");
+    m_textureTexLoc = glGetUniformLocation(m_textureShader, "u_texture");
+
+    printf("[OverlayRenderer] Shaders compiled successfully (locations cached)\n");
     return true;
 }
 
@@ -274,17 +283,22 @@ void OverlayRenderer::cleanup() {
 
 void OverlayRenderer::beginFrame(int screenWidth, int screenHeight) {
     if (!m_initialized) return;
-    
+
     m_screenWidth = screenWidth;
     m_screenHeight = screenHeight;
-    
+
     // Setup viewport
     glViewport(0, 0, screenWidth, screenHeight);
-    
+
+    // Update font projection to match screen size
+    if (m_fontLoaded && m_font) {
+        m_font->setProjection(screenWidth, screenHeight);
+    }
+
     // Enable blending for transparency
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    
+
     // Disable depth test (2D overlay)
     glDisable(GL_DEPTH_TEST);
 }
@@ -303,13 +317,13 @@ void OverlayRenderer::drawRect(const FloatRect& rect, const Color& color) {
 
 void OverlayRenderer::drawRect(float x, float y, float w, float h, const Color& color) {
     if (!m_initialized) return;
-    
+
     // Convert to clip space (-1 to 1)
     float left = (2.0f * x) / m_screenWidth - 1.0f;
     float top = 1.0f - (2.0f * y) / m_screenHeight;
     float right = (2.0f * (x + w)) / m_screenWidth - 1.0f;
     float bottom = 1.0f - (2.0f * (y + h)) / m_screenHeight;
-    
+
     // Vertex data: position (x,y) + color (r,g,b,a)
     float vertices[] = {
         // pos x, pos y,  r, g, b, a
@@ -320,24 +334,21 @@ void OverlayRenderer::drawRect(float x, float y, float w, float h, const Color& 
         right,  top,     color.r, color.g, color.b, color.a,
         left,   top,     color.r, color.g, color.b, color.a,
     };
-    
+
     glUseProgram(m_colorShader);
-    
-    GLint posLoc = glGetAttribLocation(m_colorShader, "a_position");
-    GLint colorLoc = glGetAttribLocation(m_colorShader, "a_color");
-    
     glBindVertexArray(m_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-    
-    glEnableVertexAttribArray(posLoc);
-    glVertexAttribPointer(posLoc, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
-    
-    glEnableVertexAttribArray(colorLoc);
-    glVertexAttribPointer(colorLoc, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(2 * sizeof(float)));
-    
+
+    // Use cached locations (no glGet* per draw)
+    glEnableVertexAttribArray(m_colorPosLoc);
+    glVertexAttribPointer(m_colorPosLoc, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
+
+    glEnableVertexAttribArray(m_colorColorLoc);
+    glVertexAttribPointer(m_colorColorLoc, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(2 * sizeof(float)));
+
     glDrawArrays(GL_TRIANGLES, 0, 6);
-    
+
     glBindVertexArray(0);
 }
 
@@ -355,13 +366,13 @@ void OverlayRenderer::drawTexture(GLuint texture, const FloatRect& rect, float a
 
 void OverlayRenderer::drawTexture(GLuint texture, float x, float y, float w, float h, float alpha) {
     if (!m_initialized || !texture) return;
-    
+
     // Convert to clip space
     float left = (2.0f * x) / m_screenWidth - 1.0f;
     float top = 1.0f - (2.0f * y) / m_screenHeight;
     float right = (2.0f * (x + w)) / m_screenWidth - 1.0f;
     float bottom = 1.0f - (2.0f * (y + h)) / m_screenHeight;
-    
+
     // Vertex data: position (x,y) + texCoord (u,v)
     float vertices[] = {
         // pos x, pos y,  u, v
@@ -372,31 +383,27 @@ void OverlayRenderer::drawTexture(GLuint texture, float x, float y, float w, flo
         right,  top,     1.0f, 0.0f,
         left,   top,     0.0f, 0.0f,
     };
-    
+
     glUseProgram(m_textureShader);
     
-    GLint posLoc = glGetAttribLocation(m_textureShader, "a_position");
-    GLint texCoordLoc = glGetAttribLocation(m_textureShader, "a_texCoord");
-    GLint alphaLoc = glGetUniformLocation(m_textureShader, "u_alpha");
-    GLint texLoc = glGetUniformLocation(m_textureShader, "u_texture");
-    
-    glUniform1f(alphaLoc, alpha);
-    glUniform1i(texLoc, 0);
-    
+    glUniform1f(m_textureAlphaLoc, alpha);
+    glUniform1i(m_textureTexLoc, 0);
+
     glBindVertexArray(m_vao);
     glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-    
-    glEnableVertexAttribArray(posLoc);
-    glVertexAttribPointer(posLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-    
-    glEnableVertexAttribArray(texCoordLoc);
-    glVertexAttribPointer(texCoordLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-    
+
+    // Use cached locations (no glGet* per draw)
+    glEnableVertexAttribArray(m_texturePosLoc);
+    glVertexAttribPointer(m_texturePosLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+
+    glEnableVertexAttribArray(m_textureTexCoordLoc);
+    glVertexAttribPointer(m_textureTexCoordLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+
     glBindTexture(GL_TEXTURE_2D, texture);
     glDrawArrays(GL_TRIANGLES, 0, 6);
     glBindTexture(GL_TEXTURE_2D, 0);
-    
+
     glBindVertexArray(0);
 }
 

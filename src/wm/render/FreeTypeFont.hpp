@@ -27,7 +27,9 @@ struct Glyph {
  * 
  * Loads TrueType fonts dynamically using FreeType.
  * Generates glyph textures on-demand.
- * Supports variable-width fonts and proper kerning.
+ * Supports variable-width fonts.
+ * 
+ * Note: Kerning not yet implemented (FT_HAS_KERNING check missing)
  */
 class FreeTypeFont {
 public:
@@ -37,6 +39,9 @@ public:
     // Load font from TTF file
     bool loadFont(const char* fontPath, unsigned int fontSize);
     void shutdown();
+    
+    // Set projection matrix (call when screen size changes)
+    void setProjection(int screenWidth, int screenHeight);
     
     // Render text at screen coordinates
     void renderText(float x, float y, float scale, const char* text, 
@@ -77,6 +82,10 @@ private:
     
     // Projection matrix uniform location
     GLint m_projectionLoc = -1;
+    
+    // Screen dimensions for projection
+    int m_screenWidth = 1920;
+    int m_screenHeight = 1080;
 };
 
 } // namespace havel

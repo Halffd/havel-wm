@@ -48,6 +48,7 @@ public:
     
     void setViewPosition(View* view, int x, int y) override;
     void setViewOpacity(View* view, float alpha) override;
+    void setViewGeometry(View* view, int x, int y, int w, int h) override;
     void setBackgroundColor(float r, float g, float b) override;
     void setGamma(float gamma) override;
     void setTemperature(int kelvin) override;

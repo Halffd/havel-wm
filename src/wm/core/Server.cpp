@@ -1181,6 +1181,16 @@ void Server::setViewOpacity(View* view, float alpha) {
     (void)alpha;
 }
 
+void Server::setViewGeometry(View* view, int x, int y, int w, int h) {
+    if (!view) return;
+    
+    // Set both position and size
+    setViewPosition(view, x, y, false);
+    setViewSize(view, w, h, false);
+    
+    LOG_DEBUG("[Server] View geometry set: (%d,%d) %dx%d", x, y, w, h);
+}
+
 void Server::setViewSize(View* view, int w, int h, bool animate) {
     if (!view) return;
     

@@ -956,84 +956,27 @@ int havel_wlr_run(havel_wlr_server_t *server) {
 }
 
 // ============================================================================
-// Gamma/Temperature/Brightness Control
-// ============================================================================
-
-static void havel_output_apply_gamma(struct havel_output *output) {
-    if (!output || !output->output) return;
-    
-    // Note: wlroots 0.20 doesn't have direct wlr_output_set_gamma()
-    // Gamma control requires gamma_control_v1 protocol
-    // For now, we store the values and log them
-    // Actual gamma application would use:
-    // - gamma_control_v1 protocol for DRM gamma LUTs
-    // - Or shader-based gamma in render pipeline
-    
-// ============================================================================
 // Gamma/Temperature/Brightness Control (COMBINED LUT)
 // ============================================================================
 
 static void havel_output_apply_gamma(struct havel_output *output) {
     if (!output || !output->output) return;
-    
+
     // Check if output supports gamma
-    if (output->output->gamma_size == 0) {
+    size_t gamma_size = wlr_output_get_gamma_size(output->output);
+    
+    // NOTE: wlroots 0.20 does not expose wlr_output_set_gamma() directly.
+    // Gamma control requires the gamma_control_v1 protocol.
+    // For actual gamma application, implement gamma_control_v1 or use shader-based gamma.
+    // For now, we just log the intended values.
+    
+    if (gamma_size > 0) {
+        LOG_INFO("[OUTPUT] %s gamma=%.2f temp=%dK brightness=%.2f (gamma_control_v1 required)",
+                  output->output->name, output->gamma, output->temperature, output->brightness);
+    } else {
         LOG_WARN("[OUTPUT] %s does not support gamma (gamma_size=0)", 
                  output->output->name);
-        return;
     }
-    
-    // Build combined gamma ramp: gamma_curve * brightness * kelvin_rgb
-    uint16_t *ramp = malloc(sizeof(uint16_t) * 3 * output->output->gamma_size);
-    if (!ramp) return;
-    
-    uint16_t *r = ramp;
-    uint16_t *g = ramp + output->output->gamma_size;
-    uint16_t *b = ramp + 2 * output->output->gamma_size;
-    
-    // Calculate temperature RGB multipliers (simplified blackbody)
-    float temp = (float)output->temperature;
-    float r_mult = 1.0f, g_mult = 1.0f, b_mult = 1.0f;
-    
-    // Simplified temperature to RGB (approximation)
-    if (temp < 6500) {
-        // Cooler (blue-ish)
-        r_mult = 1.0f;
-        g_mult = 0.9f + 0.1f * (temp / 6500);
-        b_mult = 0.7f + 0.3f * (temp / 6500);
-    } else {
-        // Warmer (red-ish)
-        r_mult = 1.0f;
-        g_mult = 1.0f - 0.1f * ((temp - 6500) / 3500);
-        b_mult = 1.0f - 0.3f * ((temp - 6500) / 3500);
-    }
-    
-    // Clamp multipliers
-    r_mult = fmaxf(0.5f, fminf(1.0f, r_mult));
-    g_mult = fmaxf(0.5f, fminf(1.0f, g_mult));
-    b_mult = fmaxf(0.5f, fminf(1.0f, b_mult));
-    
-    // Build combined LUT
-    for (size_t i = 0; i < output->output->gamma_size; i++) {
-        float value = (float)i / (output->output->gamma_size - 1);
-        
-        // Apply gamma curve
-        value = powf(value, 1.0f / output->gamma);
-        
-        // Apply brightness
-        value *= output->brightness;
-        
-        // Apply temperature RGB multipliers
-        r[i] = (uint16_t)(value * r_mult * 0xFFFF);
-        g[i] = (uint16_t)(value * g_mult * 0xFFFF);
-        b[i] = (uint16_t)(value * b_mult * 0xFFFF);
-    }
-    
-    wlr_output_set_gamma(output->output, output->output->gamma_size, r, g, b);
-    free(ramp);
-    
-    LOG_DEBUG("[OUTPUT] %s gamma=%.2f temp=%dK brightness=%.2f (combined LUT)",
-              output->output->name, output->gamma, output->temperature, output->brightness);
 }
 
 void havel_wlr_set_gamma(havel_wlr_server_t *server, float gamma) {

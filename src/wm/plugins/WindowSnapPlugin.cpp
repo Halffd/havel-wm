@@ -136,28 +136,37 @@ private:
     
     void snapLeft(View* view) {
         int width = m_api->getOutputWidth();
+        int height = m_api->getOutputHeight();
         int halfWidth = width / 2;
-        (void)halfWidth;  // Would be used for size
-        m_api->setViewPosition(view, 0, 0);
-        printf("[WindowSnap] Snapped to left half\n");
+        
+        // REAL snap: set position AND size
+        m_api->setViewGeometry(view, 0, 0, halfWidth, height);
+        printf("[WindowSnap] Snapped to left half (%dx%d)\n", halfWidth, height);
     }
     
     void snapRight(View* view) {
         int width = m_api->getOutputWidth();
+        int height = m_api->getOutputHeight();
         int halfWidth = width / 2;
-        m_api->setViewPosition(view, halfWidth, 0);
-        (void)halfWidth;  // Would be used for size
-        printf("[WindowSnap] Snapped to right half\n");
+        
+        // REAL snap: set position AND size
+        m_api->setViewGeometry(view, halfWidth, 0, halfWidth, height);
+        printf("[WindowSnap] Snapped to right half (%dx%d at %d,0)\n", halfWidth, height, halfWidth);
     }
     
     void snapMaximize(View* view) {
-        m_api->setViewPosition(view, 0, 0);
-        printf("[WindowSnap] Maximized\n");
+        int width = m_api->getOutputWidth();
+        int height = m_api->getOutputHeight();
+        
+        // REAL maximize: full screen
+        m_api->setViewGeometry(view, 0, 0, width, height);
+        printf("[WindowSnap] Maximized (%dx%d)\n", width, height);
     }
     
     void snapRestore(View* view) {
         // Would restore to previous size/position
-        printf("[WindowSnap] Restored\n");
+        // For now, just log
+        printf("[WindowSnap] Restore (not implemented - needs geometry history)\n");
     }
     
     void snapCorner(View* view, SnapPosition corner) {

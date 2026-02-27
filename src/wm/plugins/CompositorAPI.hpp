@@ -34,6 +34,7 @@ public:
     // View transforms (for scale, overview, etc.)
     virtual void setViewPosition(View* view, int x, int y) = 0;
     virtual void setViewOpacity(View* view, float alpha) = 0;
+    virtual void setViewGeometry(View* view, int x, int y, int w, int h) = 0;
     
     // Output/background control
     virtual void setBackgroundColor(float r, float g, float b) = 0;

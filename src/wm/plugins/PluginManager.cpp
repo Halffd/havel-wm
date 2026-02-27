@@ -160,6 +160,12 @@ void PluginManager::setViewOpacity(View* view, float alpha) {
     (void)alpha;
 }
 
+void PluginManager::setViewGeometry(View* view, int x, int y, int w, int h) {
+    if (!m_server) return;
+    auto* server = static_cast<Server*>(m_server);
+    server->setViewGeometry(view, x, y, w, h);
+}
+
 void PluginManager::setBackgroundColor(float r, float g, float b) {
     if (!m_server) return;
     auto* server = static_cast<Server*>(m_server);

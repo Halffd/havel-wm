@@ -75,6 +75,14 @@ public:
     GLuint getColorShader() const { return m_colorShader; }
     GLuint getTextureShader() const { return m_textureShader; }
     
+    // Cached shader locations (avoid glGet* per draw)
+    GLint getColorPosLoc() const { return m_colorPosLoc; }
+    GLint getColorColorLoc() const { return m_colorColorLoc; }
+    GLint getTexturePosLoc() const { return m_texturePosLoc; }
+    GLint getTextureTexCoordLoc() const { return m_textureTexCoordLoc; }
+    GLint getTextureAlphaLoc() const { return m_textureAlphaLoc; }
+    GLint getTextureTexLoc() const { return m_textureTexLoc; }
+    
 private:
     bool compileShaders();
     void createGeometry();
@@ -87,6 +95,14 @@ private:
     // Shader programs
     GLuint m_colorShader = 0;    // For solid color rectangles
     GLuint m_textureShader = 0;  // For textured quads
+    
+    // Cached shader locations (avoid glGet* per draw)
+    GLint m_colorPosLoc = -1;
+    GLint m_colorColorLoc = -1;
+    GLint m_texturePosLoc = -1;
+    GLint m_textureTexCoordLoc = -1;
+    GLint m_textureAlphaLoc = -1;
+    GLint m_textureTexLoc = -1;
     
     // Vertex arrays
     GLuint m_vao = 0;

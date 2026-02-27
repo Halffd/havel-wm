@@ -114,6 +114,7 @@ public:
     // CompositorAPI implementation (for plugins)
     void setViewPosition(View* view, int x, int y, bool animate = true);
     void setViewOpacity(View* view, float alpha);
+    void setViewGeometry(View* view, int x, int y, int w, int h);
     
     // Background color (for wallpaper plugin)
     void setBackgroundColor(float r, float g, float b);

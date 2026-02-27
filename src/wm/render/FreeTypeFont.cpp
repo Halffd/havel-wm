@@ -245,14 +245,13 @@ bool FreeTypeFont::loadGlyph(unsigned char c) {
 void FreeTypeFont::renderText(float x, float y, float scale, const char* text,
                                float r, float g, float b, float a) {
     if (!m_initialized || !text) return;
-    
+
     glUseProgram(m_shaderProgram);
-    
-    // Create orthographic projection matrix
-    // Note: In production, get actual screen dimensions
-    glm::mat4 projection = glm::ortho(0.0f, 1920.0f, 0.0f, 1080.0f);
+
+    // Create orthographic projection matrix using current screen dimensions
+    glm::mat4 projection = glm::ortho(0.0f, (float)m_screenWidth, 0.0f, (float)m_screenHeight);
     glUniformMatrix4fv(m_projectionLoc, 1, GL_FALSE, &projection[0][0]);
-    
+
     glUniform3f(glGetUniformLocation(m_shaderProgram, "textColor"), r, g, b);
     
     glActiveTexture(GL_TEXTURE0);
@@ -327,6 +326,11 @@ float FreeTypeFont::getTextWidth(const char* text, float scale) {
         }
     }
     return width;
+}
+
+void FreeTypeFont::setProjection(int screenWidth, int screenHeight) {
+    m_screenWidth = screenWidth;
+    m_screenHeight = screenHeight;
 }
 
 float FreeTypeFont::getTextHeight(float scale) {
