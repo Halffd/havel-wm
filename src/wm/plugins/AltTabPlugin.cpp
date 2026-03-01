@@ -6,6 +6,7 @@
 #include <wm/render/OverlayRenderer.hpp>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 #include <vector>
 #include <string>
 
@@ -16,6 +17,7 @@ namespace havel {
  */
 struct WindowEntry {
     void* viewPtr = nullptr;  // Opaque pointer - actual View* used internally
+    uint64_t viewId = 0;      // Opaque window ID (for focusViewById)
     std::string appId;
     std::string title;
     uint32_t workspace = 0;
@@ -152,38 +154,59 @@ private:
     
     void collectWindows() {
         m_windows.clear();
-        
-        // Would get actual windows from compositor
-        // For now, stub entries showing the pattern
-        
-        // Example: Get focused view
+
+        // Get all views from compositor
+        auto allViews = m_api->getAllViews();
+        uint32_t currentWorkspace = m_api->getActiveWorkspace();
         View* focused = m_api->getFocusedView();
-        
-        // Stub entries for demonstration
-        WindowEntry term;
-        term.viewPtr = focused;
-        term.appId = "foot";
-        term.title = "Terminal";
-        term.workspace = m_api->getActiveWorkspace();
-        term.isFocused = (focused != nullptr);
-        term.x = 100; term.y = 100; term.w = 800; term.h = 600;
-        m_windows.push_back(term);
-        
-        WindowEntry browser;
-        browser.viewPtr = nullptr;  // Would get actual view
-        browser.appId = "firefox";
-        browser.title = "Firefox";
-        browser.workspace = m_api->getActiveWorkspace();
-        browser.isFocused = false;
-        browser.x = 200; term.y = 200; browser.w = 1200; browser.h = 800;
-        m_windows.push_back(browser);
-        
-        // Find and mark focused window
-        for (auto& win : m_windows) {
-            win.isFocused = (win.viewPtr == focused);
-            if (win.isFocused) {
-                m_selectedIndex = 0;
-                // Move focused to front of list
+
+        // Collect views - use opaque IDs, don't dereference View pointers
+        for (View* view : allViews) {
+            if (!view) continue;
+            
+            WindowEntry entry;
+            entry.viewPtr = view;  // Keep for internal use
+            entry.viewId = 0;  // Would get from API in real impl
+            entry.workspace = currentWorkspace;  // Assume current workspace
+            entry.isFocused = (view == focused);
+            
+            // Get app ID and title (would get from XDG surface in real impl)
+            // For now use placeholder - real impl would query view metadata via API
+            entry.appId = "app";
+            entry.title = "Window";
+            
+            // Get geometry
+            entry.x = 0; entry.y = 0; entry.w = 800; entry.h = 600;
+            
+            m_windows.push_back(entry);
+        }
+
+        // If no windows, add placeholder
+        if (m_windows.empty()) {
+            WindowEntry placeholder;
+            placeholder.viewPtr = nullptr;
+            placeholder.viewId = 0;
+            placeholder.appId = "none";
+            placeholder.title = "No windows";
+            placeholder.workspace = currentWorkspace;
+            placeholder.isFocused = false;
+            placeholder.x = 100; placeholder.y = 100; 
+            placeholder.w = 400; placeholder.h = 200;
+            m_windows.push_back(placeholder);
+        }
+
+        // Sort: focused first, then by workspace, then by title
+        std::sort(m_windows.begin(), m_windows.end(),
+            [focused](const WindowEntry& a, const WindowEntry& b) {
+                if (a.isFocused != b.isFocused) return a.isFocused;
+                if (a.workspace != b.workspace) return a.workspace < b.workspace;
+                return a.title < b.title;
+            });
+
+        // Find focused window index
+        for (size_t i = 0; i < m_windows.size(); ++i) {
+            if (m_windows[i].isFocused) {
+                m_selectedIndex = (int)i;
                 break;
             }
         }
@@ -216,12 +239,16 @@ private:
             hide();
             return;
         }
-        
+
         WindowEntry& selected = m_windows[m_selectedIndex];
-        printf("[AltTab] Selecting: %s\n", selected.title.c_str());
-        
-        // Focus the selected window
-        if (selected.viewPtr) {
+        printf("[AltTab] Selecting: %s (id=%lu)\n", 
+               selected.title.c_str(), (unsigned long)selected.viewId);
+
+        // Focus the selected window using opaque ID (no raw pointer!)
+        if (selected.viewId != 0) {
+            m_api->focusViewById(selected.viewId);
+        } else if (selected.viewPtr) {
+            // Fallback for placeholder entries
             m_api->focusView((View*)selected.viewPtr);
         }
 
