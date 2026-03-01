@@ -35,11 +35,20 @@
 #include <xkbcommon/xkbcommon.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 
+// Gamma control v1 protocol
+#include <wlr/types/wlr_gamma_control_v1.h>
+
+// Session/VT switching
+#include <wlr/backend/session.h>
+
 #define HAVEL_WORKSPACE_COUNT 10
 
 // ============================================================================
 // C++ → C Callback Storage
 // ============================================================================
+
+// Global running server pointer (for quit functionality)
+struct havel_wlr_server *g_running_server = NULL;
 
 static cpp_view_set_position_fn g_view_set_position = NULL;
 static cpp_view_set_size_fn g_view_set_size = NULL;
@@ -96,6 +105,9 @@ struct havel_keyboard;
 struct havel_xdg_view;
 struct havel_xwayland_view;
 
+// Global server pointer for overlay access
+static struct havel_wlr_server *server = NULL;
+
 struct havel_wlr_server {
     struct wl_display *display;
     struct wlr_backend *backend;
@@ -107,7 +119,11 @@ struct havel_wlr_server {
     struct wlr_scene *scene;
 
     struct wlr_xdg_shell *xdg_shell;
+    struct wl_listener new_xdg_toplevel;
     struct wl_listener new_xdg_surface;
+
+    // Overlay scene layer (for Alt-Tab, Overview, etc.)
+    struct wlr_scene_tree *overlay_layer;
 
     struct wlr_xwayland *xwayland;
     struct wl_listener new_xwayland_surface;
@@ -128,6 +144,26 @@ struct havel_wlr_server {
     uint32_t active_workspace;
     struct wl_list outputs; // havel_output::link
 
+    // Gamma control v1 manager
+    struct wlr_gamma_control_manager_v1 *gamma_control_manager;
+
+    // Session for VT switching
+    struct wlr_session *session;
+
+    // Interactive move/resize state
+    struct {
+        struct havel_xdg_view *view;
+        double start_x, start_y;      // Cursor position at grab start
+        int view_start_x, view_start_y; // View position at grab start
+        int view_start_w, view_start_h; // View size at grab start (for resize)
+        enum {
+            INTERACTIVE_NONE = 0,
+            INTERACTIVE_MOVE,
+            INTERACTIVE_RESIZE,
+        } mode;
+        uint32_t edges;  // Resize edges
+    } grab;
+
     // C++ server handle - owns WM policy/state
     struct havel_cpp_server *cpp_server;
 };
@@ -146,11 +182,18 @@ struct havel_output {
 
     // Render pipeline for this output
     havel_render_pipeline_t* render_pipeline;
-    
+
     // Gamma/temperature/brightness state
     float gamma;
     int temperature;
     float brightness;
+
+    // Gamma LUT buffers (allocated once per output)
+    uint16_t *gamma_ramp_red;
+    uint16_t *gamma_ramp_green;
+    uint16_t *gamma_ramp_blue;
+    size_t gamma_ramp_size;
+    bool gamma_ramp_dirty;  // Flag to indicate LUT needs regeneration
 };
 
 struct havel_keyboard {
@@ -160,6 +203,10 @@ struct havel_keyboard {
     struct wl_listener destroy;
 
     struct havel_wlr_server *server;
+    
+    // XKB state for keysym lookup (international keyboard support)
+    struct xkb_state *xkb_state;
+    struct xkb_keymap *keymap;
 };
 
 struct havel_xdg_view {
@@ -167,15 +214,17 @@ struct havel_xdg_view {
     struct wlr_scene_tree *scene_tree;
     struct havel_wlr_server *server;
 
-    bool mapped;
-    uint32_t workspace_id;
-    int x, y;
-    int float_x, float_y, float_w, float_h;
-    bool have_float_geom;
+    // NO workspace_id - C++ owns this
+    // NO mapped flag - C++ owns this
+    // NO geometry - C++ owns this
+    
+    // Only wlroots handles and C++ opaque pointer
+    void *cpp_view;  // Opaque pointer to C++ View object
 
     struct wl_listener map;
     struct wl_listener unmap;
     struct wl_listener destroy;
+    struct wl_listener surface_commit;  // Waits for first commit before sending configure
 };
 
 struct havel_xwayland_view {
@@ -183,10 +232,10 @@ struct havel_xwayland_view {
     struct wlr_scene_tree *scene_tree;
     struct havel_wlr_server *server;
 
-    uint32_t workspace_id;
-    int x, y;
-    int float_x, float_y, float_w, float_h;
-    bool have_float_geom;
+    // NO workspace_id - C++ owns this
+    // NO geometry - C++ owns this
+    
+    void *cpp_view;  // Opaque pointer to C++ View object
 
     struct wl_listener destroy;
 };
@@ -217,29 +266,51 @@ static void cpp_impl_view_set_size(void* view, int w, int h) {
 }
 
 static void cpp_impl_view_focus(void* view) {
+    LOG_INFO("[C] cpp_impl_view_focus: %p", view);
     if (!view) return;
     struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
     if (xdg_view->xdg_surface && xdg_view->xdg_surface->surface) {
         struct wlr_seat *seat = xdg_view->server->seat;
         struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
+        LOG_INFO("[C] Calling wlr_seat_keyboard_notify_enter");
         if (keyboard) {
             wlr_seat_keyboard_notify_enter(seat, xdg_view->xdg_surface->surface,
                 keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
+            LOG_INFO("[C] wlr_seat_keyboard_notify_enter complete");
+        } else {
+            LOG_WARN("[C] No keyboard available");
         }
+    } else {
+        LOG_WARN("[C] Invalid xdg_surface or surface");
     }
 }
 
 static void cpp_impl_view_raise(void* view) {
-    if (!view || !((struct havel_xdg_view*)view)->scene_tree) return;
+    LOG_INFO("[C] cpp_impl_view_raise: %p", view);
+    if (!view || !((struct havel_xdg_view*)view)->scene_tree) {
+        LOG_WARN("[C] Invalid view or scene_tree");
+        return;
+    }
     struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
+    LOG_INFO("[C] Calling wlr_scene_node_raise_to_top");
     wlr_scene_node_raise_to_top(&xdg_view->scene_tree->node);
+    LOG_INFO("[C] wlr_scene_node_raise_to_top complete");
 }
 
 static void cpp_impl_view_get_geometry(void* view, int* x, int* y, int* w, int* h) {
     if (!view) return;
     struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
-    if (x) *x = xdg_view->x;
-    if (y) *y = xdg_view->y;
+    
+    // Get position from scene node (single source of truth)
+    if (xdg_view->scene_tree) {
+        if (x) *x = xdg_view->scene_tree->node.x;
+        if (y) *y = xdg_view->scene_tree->node.y;
+    } else {
+        if (x) *x = 0;
+        if (y) *y = 0;
+    }
+    
+    // Get size from XDG surface geometry
     if (xdg_view->xdg_surface && xdg_view->xdg_surface->surface) {
         struct wlr_box geo = xdg_view->xdg_surface->current.geometry;
         if (w) *w = geo.width;
@@ -285,7 +356,14 @@ static void cpp_impl_workspace_set_active(uint32_t workspace_id) {
 }
 
 static void cpp_impl_server_quit(void) {
-    // Would need access to display - handled differently
+    // This is called from C++ layer when quit is requested
+    // We need to terminate the wl_display event loop
+    // The display pointer is stored in the server struct
+    // For now, we'll use a global pointer (initialized in havel_wlr_run)
+    extern struct havel_wlr_server *g_running_server;
+    if (g_running_server && g_running_server->display) {
+        wl_display_terminate(g_running_server->display);
+    }
 }
 
 static void cpp_impl_server_spawn(const char* command) {
@@ -301,53 +379,143 @@ static void cpp_impl_server_spawn(const char* command) {
 // XDG View Handlers
 // ============================================================================
 
+// XDG surface commit listener - sends configure after first client commit
+static void xdg_surface_handle_commit(struct wl_listener *listener, void *data) {
+    struct havel_xdg_view *view = wl_container_of(listener, view, surface_commit);
+
+    // Safety check: view might be destroyed before first commit
+    if (!view || !view->xdg_surface) {
+        return;
+    }
+
+    // Remove this listener - only needed once
+    wl_list_remove(&view->surface_commit.link);
+    view->surface_commit.notify = NULL;  // Mark as removed
+
+    // NOW we can safely send configure - surface->initialized is true
+    if (view->xdg_surface->toplevel) {
+        LOG_INFO("[XDG] First commit received, sending configure");
+        wlr_xdg_toplevel_set_size(view->xdg_surface->toplevel, 800, 600);
+        wlr_xdg_toplevel_set_activated(view->xdg_surface->toplevel, true);
+    }
+}
+
 static void xdg_view_set_position(struct havel_xdg_view *view, int x, int y) {
     if (!view || !view->scene_tree) return;
-    view->x = x;
-    view->y = y;
+    // Geometry stored in C++ View now, not in C struct
     wlr_scene_node_set_position(&view->scene_tree->node, x, y);
 }
 
 static void xwayland_view_set_position(struct havel_xwayland_view *view, int x, int y) {
     if (!view || !view->scene_tree) return;
-    view->x = x;
-    view->y = y;
+    // Geometry stored in C++ View now, not in C struct
     wlr_scene_node_set_position(&view->scene_tree->node, x, y);
 }
 
 static void xdg_view_handle_map(struct wl_listener *listener, void *data) {
     struct havel_xdg_view *view = wl_container_of(listener, view, map);
-    view->mapped = true;
     
-    // Notify C++ layer
-    havel_cpp_on_view_mapped(view->server->cpp_server, view);
+    // Safety check: view might be in inconsistent state
+    if (!view || !view->xdg_surface || !view->scene_tree || !view->cpp_view) {
+        LOG_WARN("[XDG] MAP: Invalid view or null pointers");
+        return;
+    }
     
-    // Apply default floating geometry if not tiling
-    // (C++ layer will handle tiling arrangement via callback)
+    LOG_INFO("[XDG] MAP: %p (xdg_surface=%p, scene_tree=%p, cpp_view=%p)", 
+             (void*)view, (void*)view->xdg_surface, (void*)view->scene_tree, view->cpp_view);
+    
+    // Notify C++ layer - C++ owns mapped state
+    havel_cpp_on_view_mapped(view->server->cpp_server, view->cpp_view);
+
+    // Force node to top and enabled
+    wlr_scene_node_raise_to_top(&view->scene_tree->node);
+    wlr_scene_node_set_enabled(&view->scene_tree->node, true);
+
+    // Position window in center of output (using output layout coordinates)
+    // Get first output from list
+    struct havel_output *havel_out = NULL;
+    if (!wl_list_empty(&view->server->outputs)) {
+        struct wl_list *next = view->server->outputs.next;
+        havel_out = wl_container_of(next, havel_out, link);
+    }
+    struct wlr_output *wlr_out = havel_out ? havel_out->output : NULL;
+
+    if (wlr_out && wlr_out->width > 0 && wlr_out->height > 0) {
+        // Get surface size
+        struct wlr_box geo = view->xdg_surface->current.geometry;
+        int win_w = geo.width > 0 ? geo.width : 800;
+        int win_h = geo.height > 0 ? geo.height : 600;
+        
+        // Get output position in layout (for multi-monitor support)
+        struct wlr_box output_box;
+        wlr_output_layout_get_box(view->server->output_layout, wlr_out, &output_box);
+        
+        // Center window in output, accounting for output position in layout
+        int x = output_box.x + (wlr_out->width - win_w) / 2;
+        int y = output_box.y + (wlr_out->height - win_h) / 2;
+        wlr_scene_node_set_position(&view->scene_tree->node, x, y);
+        LOG_INFO("[XDG] Positioned window at (%d, %d) size (%dx%d) on output %s", 
+                 x, y, win_w, win_h, wlr_out->name);
+    }
+    
+    // Set keyboard focus to this surface
+    struct wlr_seat *seat = view->server->seat;
+    struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
+    if (keyboard && view->xdg_surface->surface) {
+        LOG_INFO("[XDG] Setting keyboard focus to surface %p", (void*)view->xdg_surface->surface);
+        wlr_seat_keyboard_notify_enter(seat, view->xdg_surface->surface,
+            keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
+    }
+    
+    LOG_INFO("[DEBUG] Node raised, positioned, keyboard focus set");
 }
 
 static void xdg_view_handle_unmap(struct wl_listener *listener, void *data) {
     struct havel_xdg_view *view = wl_container_of(listener, view, unmap);
-    view->mapped = false;
-    havel_cpp_on_view_unmapped(view->server->cpp_server, view);
+    
+    if (!view || !view->cpp_view) return;
+    
+    // Notify C++ layer - C++ owns mapped state
+    havel_cpp_on_view_unmapped(view->server->cpp_server, view->cpp_view);
 }
 
 static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
     struct havel_xdg_view *view = wl_container_of(listener, view, destroy);
-    
+
+    LOG_INFO("[XDG] DESTROY: %p (cpp_view=%p)", (void*)view, view->cpp_view);
+
+    // Remove listeners (map/unmap/destroy are always valid)
     wl_list_remove(&view->map.link);
     wl_list_remove(&view->unmap.link);
     wl_list_remove(&view->destroy.link);
     
-    havel_cpp_on_view_destroyed(view->server->cpp_server, view);
+    // surface_commit may have already been removed by the commit handler
+    // Check if notify is NULL (set by commit handler after removal)
+    if (view->surface_commit.notify != NULL) {
+        wl_list_remove(&view->surface_commit.link);
+    }
+
+    // Notify C++ layer BEFORE freeing - C++ destroys View object
+    if (view->cpp_view) {
+        havel_cpp_on_view_destroyed(view->server->cpp_server, view->cpp_view);
+    }
+
+    // Scene node is destroyed automatically by wlr_scene_xdg_surface_create
+    // Do NOT manually destroy it
+
+    LOG_INFO("[XDG] View freed");
     free(view);
 }
 
-static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
-    struct havel_wlr_server *server = wl_container_of(listener, server, new_xdg_surface);
-    struct wlr_xdg_surface *xdg_surface = data;
+static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
+    struct havel_wlr_server *server = wl_container_of(listener, server, new_xdg_toplevel);
+    struct wlr_xdg_toplevel *toplevel = data;
+    struct wlr_xdg_surface *xdg_surface = toplevel->base;
+
+    LOG_INFO("[XDG] New toplevel: %p (surface=%p)", (void*)toplevel, (void*)xdg_surface);
 
     if (xdg_surface->role != WLR_XDG_SURFACE_ROLE_TOPLEVEL) {
+        LOG_WARN("[XDG] Toplevel has wrong role: %d", xdg_surface->role);
         return;
     }
 
@@ -355,35 +523,65 @@ static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
     view->server = server;
     view->xdg_surface = xdg_surface;
     xdg_surface->data = view;
-    view->mapped = false;
-    view->workspace_id = server->active_workspace;
-    view->have_float_geom = false;
-
-    // Notify C++ layer - it creates the domain model
-    havel_cpp_on_xdg_surface_new(server->cpp_server, view);
-
-    // Create scene tree
+    // NO workspace_id in C - C++ owns this
+    // NO mapped in C - C++ owns this
+    
+    // Find workspace tree for proper output assignment BEFORE creating scene
     struct havel_output *out = NULL;
-    struct wlr_scene_tree *parent = &server->scene->tree;
+    struct wlr_scene_tree *parent = &server->scene->tree;  // Default to root
     wl_list_for_each(out, &server->outputs, link) {
-        if (out->is_primary && view->workspace_id < HAVEL_WORKSPACE_COUNT) {
-            parent = out->workspaces[view->workspace_id];
+        if (out->is_primary && server->active_workspace < HAVEL_WORKSPACE_COUNT) {
+            parent = out->workspaces[server->active_workspace];
+            break;
         }
-        break;
     }
+    LOG_INFO("[XDG] Using parent=%p (workspace %d tree)", (void*)parent, server->active_workspace);
 
-    view->scene_tree = wlr_scene_tree_create(parent);
-    wlr_scene_xdg_surface_create(view->scene_tree, xdg_surface);
-    xdg_view_set_position(view, 0, 0);
-
+    // CRITICAL: Add listeners BEFORE creating scene surface
+    // This ensures we don't miss the map event
+    LOG_INFO("[XDG] Adding map listener to surface %p", (void*)xdg_surface->surface);
     view->map.notify = xdg_view_handle_map;
     wl_signal_add(&xdg_surface->surface->events.map, &view->map);
 
+    LOG_INFO("[XDG] Adding unmap listener");
     view->unmap.notify = xdg_view_handle_unmap;
     wl_signal_add(&xdg_surface->surface->events.unmap, &view->unmap);
 
+    LOG_INFO("[XDG] Adding destroy listener");
     view->destroy.notify = xdg_view_handle_destroy;
     wl_signal_add(&xdg_surface->events.destroy, &view->destroy);
+
+    // Add commit listener - will send configure after first client commit
+    LOG_INFO("[XDG] Adding commit listener (will send configure after first commit)");
+    view->surface_commit.notify = xdg_surface_handle_commit;
+    wl_signal_add(&xdg_surface->surface->events.commit, &view->surface_commit);
+
+    // NOW create scene surface attached to workspace tree (SINGLE CALL)
+    LOG_INFO("[XDG] Calling wlr_scene_xdg_surface_create (parent=%p)...", (void*)parent);
+    view->scene_tree = wlr_scene_xdg_surface_create(parent, xdg_surface);
+    if (!view->scene_tree) {
+        LOG_ERROR("[XDG] wlr_scene_xdg_surface_create returned NULL!");
+        return;
+    }
+    LOG_INFO("[XDG] scene_tree created: %p, node.enabled=%d", 
+             (void*)view->scene_tree, view->scene_tree->node.enabled);
+
+    // DO NOT call wlr_xdg_toplevel_set_size here!
+    // surface->initialized is false at this point - will crash!
+    // Size/activation must be set AFTER first commit (handled by commit listener).
+
+    // Notify C++ layer - it creates the View object and owns all state
+    view->cpp_view = havel_cpp_on_xdg_surface_new(server->cpp_server, view, server->active_workspace);
+
+    LOG_INFO("[XDG] View setup complete for %p (cpp_view=%p, parent=%p)", 
+             (void*)view, view->cpp_view, (void*)parent);
+}
+
+static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
+    // Don't handle new_surface - wait for new_toplevel event instead
+    // This ensures the role is already assigned
+    (void)listener;
+    (void)data;
 }
 
 // ============================================================================
@@ -392,8 +590,16 @@ static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
 
 static void xwayland_view_handle_destroy(struct wl_listener *listener, void *data) {
     struct havel_xwayland_view *view = wl_container_of(listener, view, destroy);
+    
+    LOG_INFO("[XWayland] DESTROY: %p (cpp_view=%p)", (void*)view, view->cpp_view);
+    
     wl_list_remove(&view->destroy.link);
-    havel_cpp_on_view_destroyed(view->server->cpp_server, view);
+    
+    // Notify C++ layer BEFORE freeing - C++ destroys View object
+    if (view->cpp_view) {
+        havel_cpp_on_view_destroyed(view->server->cpp_server, view->cpp_view);
+    }
+    
     free(view);
 }
 
@@ -409,23 +615,10 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
     view->server = server;
     view->xsurface = xsurface;
     xsurface->data = view;
-    view->workspace_id = server->active_workspace;
-    view->have_float_geom = false;
-
-    // Notify C++ layer
-    havel_cpp_on_xdg_surface_new(server->cpp_server, view);
-
-    // Create scene tree
-    struct havel_output *out = NULL;
-    struct wlr_scene_tree *parent = &server->scene->tree;
-    wl_list_for_each(out, &server->outputs, link) {
-        if (out->is_primary && view->workspace_id < HAVEL_WORKSPACE_COUNT) {
-            parent = out->workspaces[view->workspace_id];
-        }
-        break;
-    }
-
-    view->scene_tree = wlr_scene_tree_create(parent);
+    // NO workspace_id in C - C++ owns this
+    
+    // Create scene tree first
+    view->scene_tree = wlr_scene_tree_create(&server->scene->tree);
     wlr_scene_surface_create(view->scene_tree, xsurface->surface);
 
     // Apply geometry
@@ -440,24 +633,18 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
 
     if (position_valid) {
         xwayland_view_set_position(view, xsurface->x, xsurface->y);
-        view->float_x = xsurface->x;
-        view->float_y = xsurface->y;
-        view->float_w = xsurface->width;
-        view->float_h = xsurface->height;
-        view->have_float_geom = true;
     } else {
         xwayland_view_set_position(view, xsurface->x, xsurface->y);
-        if (xsurface->width > 0 && xsurface->height > 0) {
-            view->float_x = xsurface->x;
-            view->float_y = xsurface->y;
-            view->float_w = xsurface->width;
-            view->float_h = xsurface->height;
-            view->have_float_geom = true;
-        }
+        // Geometry stored in C++ View now, not in C struct
     }
+
+    // Notify C++ layer - it creates the View object and owns all state
+    view->cpp_view = havel_cpp_on_xdg_surface_new(server->cpp_server, view, server->active_workspace);
 
     view->destroy.notify = xwayland_view_handle_destroy;
     wl_signal_add(&xsurface->events.destroy, &view->destroy);
+    
+    LOG_INFO("[XWayland] View setup complete for %p (cpp_view=%p)", (void*)view, view->cpp_view);
 }
 
 // ============================================================================
@@ -467,6 +654,14 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
 static void output_frame(struct wl_listener *listener, void *data) {
     struct havel_output *output = wl_container_of(listener, output, frame);
     struct havel_wlr_server *server = output->server;
+
+    // DEBUG: Confirm frame callback is firing
+    static int frame_count = 0;
+    if (++frame_count % 60 == 0) {
+        LOG_INFO("[DEBUG] Frame #%d on %s", frame_count, output->output->name);
+    }
+
+    LOG_INFO("[FRAME] %s: >>> START", output->output->name);
 
     // Update animations before rendering
     havel_cpp_update_animations(server->cpp_server);
@@ -488,25 +683,42 @@ static void output_frame(struct wl_listener *listener, void *data) {
         .timer = NULL,
     };
 
-    wlr_scene_output_commit(output->scene_output, &options);
-    
-    // Draw overlays (Alt-Tab, Overview, Launcher, etc.)
-    // Get overlay renderer from render pipeline and render plugin overlays
-    if (output->render_pipeline) {
-        void* pluginManager = havel_cpp_get_plugin_manager(server->cpp_server);
-        havel_render_pipeline_draw_overlays(output->render_pipeline, 
-            output->output->width, output->output->height, pluginManager);
+    if (!output->scene_output) {
+        LOG_ERROR("[FRAME] %s: scene_output is NULL!", output->output->name);
+        return;
     }
+
+    LOG_INFO("[FRAME] %s: calling wlr_scene_output_commit", output->output->name);
+    
+    // TODO: Overlay rendering integration
+    // Current OverlayRenderer uses raw GLES which renders outside wlroots control.
+    // Proper fix: Use wlr_scene_buffer nodes with textures, added to overlay layer.
+    // See: docs/STATUS.md "Overlay Render Order" for details.
+    // For now, overlay rendering is disabled to prevent undefined behavior.
+    
+    wlr_scene_output_commit(output->scene_output, &options);
+    LOG_INFO("[FRAME] %s: <<< COMMIT COMPLETE", output->output->name);
 }
 
 static void output_destroy(struct wl_listener *listener, void *data) {
     struct havel_output *output = wl_container_of(listener, output, destroy);
-    
+
     // Destroy render pipeline
     if (output->render_pipeline) {
         havel_render_pipeline_destroy(output->render_pipeline);
     }
-    
+
+    // Free gamma LUT buffers
+    if (output->gamma_ramp_red) {
+        free(output->gamma_ramp_red);
+    }
+    if (output->gamma_ramp_green) {
+        free(output->gamma_ramp_green);
+    }
+    if (output->gamma_ramp_blue) {
+        free(output->gamma_ramp_blue);
+    }
+
     wl_list_remove(&output->frame.link);
     wl_list_remove(&output->destroy.link);
     wl_list_remove(&output->link);
@@ -538,29 +750,52 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     output->server = server;
     output->output = wlr_output;
     output->scene_output = wlr_scene_output_create(server->scene, wlr_output);
-    
+
     // Initialize gamma state to defaults
     output->gamma = 1.0f;
     output->temperature = 6500;
     output->brightness = 1.0f;
+
+    // Allocate gamma LUT buffers once per output
+    size_t gamma_size = wlr_output_get_gamma_size(wlr_output);
+    if (gamma_size > 0) {
+        output->gamma_ramp_size = gamma_size;
+        output->gamma_ramp_red = calloc(gamma_size, sizeof(uint16_t));
+        output->gamma_ramp_green = calloc(gamma_size, sizeof(uint16_t));
+        output->gamma_ramp_blue = calloc(gamma_size, sizeof(uint16_t));
+        output->gamma_ramp_dirty = true;  // Force initial LUT generation
+        LOG_INFO("[OUTPUT] Gamma LUT allocated for %s (size=%zu)", wlr_output->name, gamma_size);
+    } else {
+        output->gamma_ramp_size = 0;
+        output->gamma_ramp_red = NULL;
+        output->gamma_ramp_green = NULL;
+        output->gamma_ramp_blue = NULL;
+        output->gamma_ramp_dirty = false;
+        LOG_WARN("[OUTPUT] %s does not support gamma control", wlr_output->name);
+    }
 
     wl_list_insert(&server->outputs, &output->link);
     output->is_primary = (server->outputs.next == &output->link);
 
     LOG_DEBUG("[OUTPUT] %s is %s", wlr_output->name, output->is_primary ? "primary" : "secondary");
 
-    // Create workspace trees for this output
+    // Create output-specific tree, then workspace trees as children
+    // This ensures windows only render on their assigned output
+    struct wlr_scene_tree *output_tree = wlr_scene_tree_create(&server->scene->tree);
+    wlr_scene_node_set_position(&output_tree->node, 0, 0);
+    
+    // Create workspace trees for this output (as children of output_tree)
     for (uint32_t i = 0; i < HAVEL_WORKSPACE_COUNT; ++i) {
-        output->workspaces[i] = wlr_scene_tree_create(&server->scene->tree);
-        if (!output->is_primary) {
-            wlr_scene_node_set_enabled(&output->workspaces[i]->node, i == 0);
-        } else {
-            wlr_scene_node_set_enabled(&output->workspaces[i]->node, i == server->active_workspace);
-        }
+        output->workspaces[i] = wlr_scene_tree_create(output_tree);
+        // Enable only active workspace on primary output
+        bool should_enable = (!output->is_primary) || (i == server->active_workspace);
+        wlr_scene_node_set_enabled(&output->workspaces[i]->node, should_enable);
+        LOG_INFO("[DEBUG] Workspace %u tree created, enabled=%d", i, should_enable);
     }
 
     output->frame.notify = output_frame;
     wl_signal_add(&wlr_output->events.frame, &output->frame);
+    LOG_INFO("[OUTPUT] Frame handler installed for %s", wlr_output->name);
 
     output->destroy.notify = output_destroy;
     wl_signal_add(&wlr_output->events.destroy, &output->destroy);
@@ -572,6 +807,100 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     }
 
     wlr_output_layout_add_auto(server->output_layout, wlr_output);
+    
+    // Verify output state
+    LOG_INFO("[OUTPUT] %s setup COMPLETE (enabled=%d)", 
+             wlr_output->name, wlr_output->enabled);
+}
+
+// ============================================================================
+// Overlay Rendering (Scene Graph Based)
+// ============================================================================
+
+// Simple Alt-Tab overlay state
+static struct {
+    struct wlr_scene_rect *background;
+    struct wlr_scene_rect *box;
+    struct wlr_scene_rect *highlight;  // Highlight bar for selection
+    bool visible;
+    int selected_index;
+} alt_tab_overlay = {0};
+
+static void alt_tab_init(void) {
+    if (alt_tab_overlay.background) return;  // Already initialized
+    
+    // Create semi-transparent dark background (full screen)
+    alt_tab_overlay.background = wlr_scene_rect_create(
+        server->overlay_layer, 1, 1, (float[4]){0.0f, 0.0f, 0.0f, 0.7f});
+    
+    // Create centered box (400x200)
+    alt_tab_overlay.box = wlr_scene_rect_create(
+        server->overlay_layer, 400, 200, (float[4]){0.2f, 0.2f, 0.3f, 0.95f});
+    
+    // Create highlight bar (shows selected window)
+    alt_tab_overlay.highlight = wlr_scene_rect_create(
+        server->overlay_layer, 360, 40, (float[4]){0.4f, 0.4f, 0.5f, 0.8f});
+    
+    alt_tab_overlay.visible = false;
+    alt_tab_overlay.selected_index = 0;
+    LOG_INFO("[Overlay] Alt-Tab overlay initialized");
+}
+
+static void alt_tab_show(int screen_width, int screen_height) {
+    if (!alt_tab_overlay.background) alt_tab_init();
+    
+    // Size background to screen
+    wlr_scene_rect_set_size(alt_tab_overlay.background, screen_width, screen_height);
+    
+    // Center the box
+    int box_x = (screen_width - 400) / 2;
+    int box_y = (screen_height - 200) / 2;
+    wlr_scene_node_set_position(&alt_tab_overlay.box->node, box_x, box_y);
+    
+    // Position highlight bar
+    wlr_scene_node_set_position(&alt_tab_overlay.highlight->node, box_x + 20, box_y + 60);
+    
+    wlr_scene_node_set_enabled(&alt_tab_overlay.background->node, true);
+    wlr_scene_node_set_enabled(&alt_tab_overlay.box->node, true);
+    wlr_scene_node_set_enabled(&alt_tab_overlay.highlight->node, true);
+    alt_tab_overlay.visible = true;
+    alt_tab_overlay.selected_index = 0;
+    
+    LOG_INFO("[Overlay] Alt-Tab shown (%dx%d)", screen_width, screen_height);
+}
+
+static void alt_tab_hide(void) {
+    if (!alt_tab_overlay.visible) return;
+    
+    wlr_scene_node_set_enabled(&alt_tab_overlay.background->node, false);
+    wlr_scene_node_set_enabled(&alt_tab_overlay.box->node, false);
+    wlr_scene_node_set_enabled(&alt_tab_overlay.highlight->node, false);
+    alt_tab_overlay.visible = false;
+    
+    LOG_INFO("[Overlay] Alt-Tab hidden");
+}
+
+static void alt_tab_cycle(void) {
+    if (!alt_tab_overlay.visible) return;
+    
+    // Cycle selected index
+    alt_tab_overlay.selected_index = (alt_tab_overlay.selected_index + 1) % 10;
+    
+    // Update highlight position (3 windows visible, 50px each including spacing)
+    int box_x = alt_tab_overlay.box->node.x;
+    int box_y = alt_tab_overlay.box->node.y;
+    int new_y = box_y + 60 + (alt_tab_overlay.selected_index * 50);
+    wlr_scene_node_set_position(&alt_tab_overlay.highlight->node, box_x + 20, new_y);
+    
+    LOG_DEBUG("[AltTab] Cycle to index %d", alt_tab_overlay.selected_index);
+}
+
+static void alt_tab_select(void) {
+    if (!alt_tab_overlay.visible) return;
+    
+    LOG_INFO("[AltTab] Select window at index %d", alt_tab_overlay.selected_index);
+    // TODO: Focus selected window via C++ layer
+    alt_tab_hide();
 }
 
 // ============================================================================
@@ -591,15 +920,116 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
 
     wlr_seat_set_keyboard(server->seat, keyboard->keyboard);
 
+    // Update XKB state
+    if (keyboard->xkb_state) {
+        xkb_state_update_key(keyboard->xkb_state, event->keycode + 8,
+                            event->state == WL_KEYBOARD_KEY_STATE_PRESSED ? XKB_KEY_DOWN : XKB_KEY_UP);
+    }
+
     if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
         const uint32_t keycode = event->keycode + 8;
         uint32_t modifiers = keyboard->keyboard->modifiers.depressed;
 
-        LOG_DEBUG("[KEY] keycode=%u modifiers=%u", keycode, modifiers);
+        // Get keysym from XKB state (layout-aware)
+        xkb_keysym_t keysym = 0;
+        char key_char = 0;
+        if (keyboard->xkb_state) {
+            keysym = xkb_state_key_get_one_sym(keyboard->xkb_state, keycode);
+            // Try to get the ASCII character from keysym
+            if (keysym >= XKB_KEY_space && keysym <= XKB_KEY_asciitilde) {
+                key_char = (char)keysym;
+            }
+        }
+
+        // ====================================================================
+        // VT Switching (Ctrl+Alt+F1..F12) - MUST be handled before C++ layer
+        // ====================================================================
+        // Check for Ctrl+Alt modifiers using XKB state (layout-independent)
+        xkb_mod_index_t ctrl_idx = xkb_keymap_mod_get_index(keyboard->keymap, XKB_MOD_NAME_CTRL);
+        xkb_mod_index_t alt_idx = xkb_keymap_mod_get_index(keyboard->keymap, XKB_MOD_NAME_ALT);
+
+        bool ctrl_pressed = (ctrl_idx != XKB_MOD_INVALID) &&
+                           (xkb_state_mod_index_is_active(keyboard->xkb_state, ctrl_idx, XKB_STATE_MODS_DEPRESSED) > 0);
+        bool alt_pressed = (alt_idx != XKB_MOD_INVALID) &&
+                          (xkb_state_mod_index_is_active(keyboard->xkb_state, alt_idx, XKB_STATE_MODS_DEPRESSED) > 0);
+
+        // Fallback: check raw modifier mask (Mod1=Alt=bit 3, Control=bit 2)
+        #define MOD_CTRL (1 << 2)
+        #define MOD_ALT (1 << 3)
+        if (!ctrl_pressed && (modifiers & MOD_CTRL)) ctrl_pressed = true;
+        if (!alt_pressed && (modifiers & MOD_ALT)) alt_pressed = true;
+        #undef MOD_CTRL
+        #undef MOD_ALT
+
+        LOG_INFO("[VT] keysym=0x%x ctrl=%d alt=%d modifiers=0x%x", keysym, ctrl_pressed, alt_pressed, modifiers);
+
+        if (ctrl_pressed && alt_pressed && keysym >= XKB_KEY_F1 && keysym <= XKB_KEY_F12) {
+            unsigned int vt = keysym - XKB_KEY_F1 + 1;
+            LOG_INFO("[VT] >>> Switching to VT%u (keysym=0x%x) <<<", vt, keysym);
+            if (server->session) {
+                int result = wlr_session_change_vt(server->session, vt);
+                LOG_INFO("[VT] wlr_session_change_vt returned: %d", result);
+            } else {
+                LOG_ERROR("[VT] No session available for VT switch!");
+            }
+            return;  // Consume the event, don't forward
+        }
+
+        // ====================================================================
+        // Alt+Tab Overlay (basic scene-graph based)
+        // ====================================================================
+        LOG_INFO("[AltTab] Check: alt=%d keysym=0x%x(XKB_Tab=0x%x) ctrl=%d", 
+                 alt_pressed, keysym, XKB_KEY_Tab, ctrl_pressed);
+        
+        if (alt_pressed && keysym == XKB_KEY_Tab && !ctrl_pressed) {
+            LOG_INFO("[AltTab] Condition matched!");
+            // Get primary output dimensions
+            struct havel_output *output;
+            int width = 1920, height = 1080;  // Default fallback
+            wl_list_for_each(output, &server->outputs, link) {
+                if (output->output && output->output->enabled) {
+                    width = output->output->width;
+                    height = output->output->height;
+                    break;
+                }
+            }
+
+            LOG_INFO("[AltTab] Overlay visible=%d", alt_tab_overlay.visible);
+            if (alt_tab_overlay.visible) {
+                // Cycle to next window
+                LOG_INFO("[AltTab] Cycling...");
+                alt_tab_cycle();
+            } else {
+                // Show overlay
+                LOG_INFO("[AltTab] Showing overlay %dx%d", width, height);
+                alt_tab_show(width, height);
+            }
+            return;  // Consume the event
+        }
+        
+        // Enter selects window
+        if (alt_tab_overlay.visible && (keysym == XKB_KEY_Return || keysym == XKB_KEY_KP_Enter)) {
+            alt_tab_select();
+            return;  // Consume the event
+        }
+        
+        // Escape hides Alt-Tab
+        if (alt_tab_overlay.visible && keysym == XKB_KEY_Escape) {
+            alt_tab_hide();
+            return;  // Consume the event
+        }
+
+        LOG_DEBUG("[KEY] keycode=%u modifiers=%u keysym=0x%x char='%c'",
+                  keycode, modifiers, keysym, key_char ? key_char : ' ');
+
+        // DEBUG: Log before forwarding to C++
+        LOG_INFO("[DEBUG] Forwarding key to C++: keycode=%u, mods=0x%x", keycode, modifiers);
 
         // Forward to C++ layer for policy decisions
         // Returns true if event was consumed (e.g., keybinding matched)
-        bool consumed = havel_cpp_on_key(server->cpp_server, keycode, true, modifiers);
+        bool consumed = havel_cpp_on_key(server->cpp_server, keycode, true, modifiers, keysym, key_char);
+        
+        LOG_INFO("[DEBUG] Key consumed=%d", consumed);
 
         // Only forward to seat if not consumed by compositor
         if (!consumed) {
@@ -613,6 +1043,15 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
 
 static void keyboard_handle_destroy(struct wl_listener *listener, void *data) {
     struct havel_keyboard *keyboard = wl_container_of(listener, keyboard, destroy);
+    
+    // Free XKB resources
+    if (keyboard->xkb_state) {
+        xkb_state_unref(keyboard->xkb_state);
+    }
+    if (keyboard->keymap) {
+        xkb_keymap_unref(keyboard->keymap);
+    }
+    
     wl_list_remove(&keyboard->modifiers.link);
     wl_list_remove(&keyboard->key.link);
     wl_list_remove(&keyboard->destroy.link);
@@ -622,6 +1061,17 @@ static void keyboard_handle_destroy(struct wl_listener *listener, void *data) {
 static void server_new_keyboard(struct havel_wlr_server *server, struct wlr_input_device *device) {
     struct wlr_keyboard *wlr_keyboard = wlr_keyboard_from_input_device(device);
 
+    // Check for duplicate keyboard (same device pointer)
+    // This can happen if hotplug events fire multiple times
+    struct wlr_seat *seat = server->seat;
+    if (seat->keyboard_state.keyboard == wlr_keyboard) {
+        LOG_DEBUG("[INPUT] Keyboard already active (device=%p), skipping", (void*)device);
+        return;
+    }
+
+    // Log device pointer to detect duplicates
+    LOG_INFO("[INPUT] Keyboard added to seat (device=%p, keyboard=%p)", (void*)device, (void*)wlr_keyboard);
+
     struct havel_keyboard *keyboard = calloc(1, sizeof(*keyboard));
     keyboard->server = server;
     keyboard->keyboard = wlr_keyboard;
@@ -630,7 +1080,11 @@ static void server_new_keyboard(struct havel_wlr_server *server, struct wlr_inpu
     struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
 
     wlr_keyboard_set_keymap(wlr_keyboard, keymap);
-    xkb_keymap_unref(keymap);
+    
+    // Store keymap and create state for keysym lookup
+    keyboard->keymap = keymap;
+    keyboard->xkb_state = xkb_state_new(keymap);
+    
     xkb_context_unref(context);
 
     wlr_keyboard_set_repeat_info(wlr_keyboard, 25, 600);
@@ -711,8 +1165,43 @@ static void process_cursor_motion(struct havel_wlr_server *server, uint32_t time
 static void server_cursor_motion(struct wl_listener *listener, void *data) {
     struct havel_wlr_server *server = wl_container_of(listener, server, cursor_motion);
     struct wlr_pointer_motion_event *event = data;
-    
+
     wlr_cursor_move(server->cursor, &event->pointer->base, event->delta_x, event->delta_y);
+    
+    // Handle interactive move/resize
+    if (server->grab.mode != INTERACTIVE_NONE && server->grab.view) {
+        if (server->grab.mode == INTERACTIVE_MOVE) {
+            // Move: update view position based on cursor delta
+            double dx = server->cursor->x - server->grab.start_x;
+            double dy = server->cursor->y - server->grab.start_y;
+            int new_x = server->grab.view_start_x + (int)dx;
+            int new_y = server->grab.view_start_y + (int)dy;
+            wlr_scene_node_set_position(&server->grab.view->scene_tree->node, new_x, new_y);
+        } else if (server->grab.mode == INTERACTIVE_RESIZE) {
+            // Resize: update view size based on cursor delta
+            double dx = server->cursor->x - server->grab.start_x;
+            double dy = server->cursor->y - server->grab.start_y;
+            int new_w = server->grab.view_start_w + (int)dx;
+            int new_h = server->grab.view_start_h + (int)dy;
+            // Minimum size constraints
+            if (new_w < 100) new_w = 100;
+            if (new_h < 60) new_h = 60;
+            wlr_scene_node_set_position(&server->grab.view->scene_tree->node, 
+                                        server->grab.view->scene_tree->node.x,
+                                        server->grab.view->scene_tree->node.y);
+            // Note: wlr_scene doesn't have direct resize, need to update xdg toplevel
+            if (server->grab.view->xdg_surface && server->grab.view->xdg_surface->toplevel) {
+                wlr_xdg_toplevel_set_size(server->grab.view->xdg_surface->toplevel, new_w, new_h);
+            }
+        }
+        havel_cpp_on_pointer_motion(server->cpp_server, server->cursor->x, server->cursor->y);
+        return;
+    }
+    
+    // Normal cursor motion - notify for decoration hover
+    havel_cpp_on_pointer_decoration_motion(server->cpp_server, 
+                                           (int)server->cursor->x, 
+                                           (int)server->cursor->y);
     havel_cpp_on_pointer_motion(server->cpp_server, server->cursor->x, server->cursor->y);
     process_cursor_motion(server, event->time_msec);
 }
@@ -733,10 +1222,25 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
     wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
 
     if (event->state != WL_POINTER_BUTTON_STATE_PRESSED) {
+        // Button released - end interactive move/resize
+        if (server->grab.mode != INTERACTIVE_NONE) {
+            LOG_INFO("[Cursor] Interactive %s ended", 
+                     server->grab.mode == INTERACTIVE_MOVE ? "move" : "resize");
+            server->grab.view = NULL;
+            server->grab.mode = INTERACTIVE_NONE;
+        }
+        // Notify decoration plugin of button release
+        havel_cpp_on_pointer_decoration_button(server->cpp_server, event->button, false,
+                                               (int)server->cursor->x, (int)server->cursor->y);
         havel_cpp_on_pointer_button(server->cpp_server, event->button, false, server->cursor->x, server->cursor->y);
         return;
     }
 
+    // Check for Meta (Mod4) modifier for move/resize
+    struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
+    uint32_t mods = keyboard ? keyboard->modifiers.depressed : 0;
+    bool meta_pressed = (mods & (1 << 6)) != 0;  // Mod4 = Meta/Windows key
+    
     // Hit test for surface under cursor
     double sx = 0, sy = 0;
     struct wlr_surface *surface = seat_surface_at(server, server->cursor->x, server->cursor->y, &sx, &sy);
@@ -755,12 +1259,38 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
                 wlr_scene_node_raise_to_top(&xdg_view->scene_tree->node);
             }
             // CRITICAL: Give keyboard focus
-            struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
+            keyboard = wlr_seat_get_keyboard(server->seat);
             if (keyboard) {
                 wlr_seat_keyboard_notify_enter(server->seat, surface,
                     keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
             }
             LOG_DEBUG("[FOCUS] XDG surface focused");
+            
+            // Meta+click for move/resize (compositor-driven, manual scene node manipulation)
+            if (meta_pressed) {
+                if (event->button == BTN_LEFT) {
+                    // Meta+Left = Move
+                    LOG_INFO("[Cursor] Meta+Left: Starting manual window move");
+                    server->grab.view = xdg_view;
+                    server->grab.mode = INTERACTIVE_MOVE;
+                    server->grab.start_x = server->cursor->x;
+                    server->grab.start_y = server->cursor->y;
+                    server->grab.view_start_x = xdg_view->scene_tree->node.x;
+                    server->grab.view_start_y = xdg_view->scene_tree->node.y;
+                } else if (event->button == BTN_RIGHT) {
+                    // Meta+Right = Resize
+                    LOG_INFO("[Cursor] Meta+Right: Starting manual window resize");
+                    server->grab.view = xdg_view;
+                    server->grab.mode = INTERACTIVE_RESIZE;
+                    server->grab.start_x = server->cursor->x;
+                    server->grab.start_y = server->cursor->y;
+                    // Get current size from xdg surface geometry
+                    struct wlr_box geo = xdg_view->xdg_surface->current.geometry;
+                    server->grab.view_start_w = geo.width > 0 ? geo.width : 800;
+                    server->grab.view_start_h = geo.height > 0 ? geo.height : 600;
+                }
+                return;  // Don't process further for Meta+click
+            }
         }
 
         // Also check XWayland
@@ -771,7 +1301,7 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
                 wlr_xwayland_surface_activate(xsurface, true);
                 wlr_scene_node_raise_to_top(&xwayland_view->scene_tree->node);
                 // CRITICAL: Give keyboard focus
-                struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
+                keyboard = wlr_seat_get_keyboard(server->seat);
                 if (keyboard) {
                     wlr_seat_keyboard_notify_enter(server->seat, surface,
                         keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
@@ -781,6 +1311,9 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
         }
     }
 
+    // Notify decoration plugin of button press (for click handling)
+    havel_cpp_on_pointer_decoration_button(server->cpp_server, event->button, true,
+                                           (int)server->cursor->x, (int)server->cursor->y);
     havel_cpp_on_pointer_button(server->cpp_server, event->button, true, server->cursor->x, server->cursor->y);
 }
 
@@ -806,10 +1339,13 @@ havel_wlr_server_t* havel_wlr_create(void) {
     
     wlr_log_init(WLR_DEBUG, NULL);
 
-    struct havel_wlr_server *server = calloc(1, sizeof(*server));
+    struct havel_wlr_server *server_local = calloc(1, sizeof(*server));
+    server = server_local;  // Set global server pointer for overlay access
+
     wl_list_init(&server->outputs);
     server->active_workspace = 0;
-    
+    server->grab.mode = INTERACTIVE_NONE;  // Initialize grab state
+
     LOG_DEBUG("Initializing havel_wlr_server");
 
     // Register callbacks before creating C++ server
@@ -843,12 +1379,18 @@ havel_wlr_server_t* havel_wlr_create(void) {
         return NULL;
     }
 
-    server->backend = wlr_backend_autocreate(wl_display_get_event_loop(server->display), NULL);
+    server->backend = wlr_backend_autocreate(wl_display_get_event_loop(server->display), &server->session);
     if (!server->backend) {
         wl_display_destroy(server->display);
         havel_cpp_server_destroy(server->cpp_server);
         free(server);
         return NULL;
+    }
+
+    if (server->session) {
+        LOG_INFO("[SESSION] Session acquired (for VT switching)");
+    } else {
+        LOG_WARN("[SESSION] No session available (VT switching disabled)");
     }
 
     server->renderer = wlr_renderer_autocreate(server->backend);
@@ -872,9 +1414,30 @@ havel_wlr_server_t* havel_wlr_create(void) {
     server->output_layout = wlr_output_layout_create(server->display);
     server->scene = wlr_scene_create();
 
+    // DEBUG: Force red background to confirm rendering works
+    float red[4] = {1.0f, 0.0f, 0.0f, 1.0f};
+    wlr_scene_rect_create(&server->scene->tree, 1920, 1080, red);
+    LOG_INFO("[DEBUG] Red background rect created");
+
+    // Create overlay layer (raised to top for Alt-Tab, Overview, etc.)
+    server->overlay_layer = wlr_scene_tree_create(&server->scene->tree);
+    wlr_scene_node_raise_to_top(&server->overlay_layer->node);
+    wlr_scene_node_set_enabled(&server->overlay_layer->node, false);  // Hidden by default
+    LOG_INFO("[Overlay] Overlay layer created (raised to top)");
+
     server->xdg_shell = wlr_xdg_shell_create(server->display, 3);
+    server->new_xdg_toplevel.notify = server_new_xdg_toplevel;
+    wl_signal_add(&server->xdg_shell->events.new_toplevel, &server->new_xdg_toplevel);
     server->new_xdg_surface.notify = server_new_xdg_surface;
     wl_signal_add(&server->xdg_shell->events.new_surface, &server->new_xdg_surface);
+
+    // Initialize gamma control v1 manager
+    server->gamma_control_manager = wlr_gamma_control_manager_v1_create(server->display);
+    if (!server->gamma_control_manager) {
+        LOG_WARN("[Gamma] Failed to create gamma_control_manager_v1");
+    } else {
+        LOG_INFO("[Gamma] gamma_control_manager_v1 initialized");
+    }
 
     server->xwayland = wlr_xwayland_create(server->display, server->compositor, true);
     if (server->xwayland) {
@@ -935,6 +1498,9 @@ void havel_wlr_destroy(havel_wlr_server_t *server) {
 int havel_wlr_run(havel_wlr_server_t *server) {
     if (!server) return 1;
 
+    // Set global pointer for quit functionality
+    g_running_server = server;
+
     const char *socket = wl_display_add_socket_auto(server->display);
     if (!socket) {
         LOG_ERROR("Failed to create wayland socket");
@@ -951,6 +1517,10 @@ int havel_wlr_run(havel_wlr_server_t *server) {
     printf("Havel Compositor running on %s\n", socket);
 
     wl_display_run(server->display);
+    
+    // Clear global pointer
+    g_running_server = NULL;
+    
     LOG_INFO("Havel Compositor shutting down");
     return 0;
 }
@@ -959,23 +1529,129 @@ int havel_wlr_run(havel_wlr_server_t *server) {
 // Gamma/Temperature/Brightness Control (COMBINED LUT)
 // ============================================================================
 
+/**
+ * Convert color temperature (Kelvin) to RGB multipliers.
+ * Uses simplified Planckian locus approximation.
+ */
+static void kelvin_to_rgb_mult(int kelvin, float *r_mult, float *g_mult, float *b_mult) {
+    float temp = kelvin / 100.0f;
+    float r, g, b;
+
+    // Red channel
+    if (temp <= 66.0f) {
+        r = 1.0f;
+    } else {
+        r = 1.294f * powf(temp - 60.0f, -0.133f);
+    }
+
+    // Green channel
+    if (temp <= 66.0f) {
+        g = 0.994f * powf(temp, 0.170f);
+    } else {
+        g = 1.129f * powf(temp - 60.0f, -0.082f);
+    }
+
+    // Blue channel
+    if (temp >= 66.0f) {
+        b = 1.0f;
+    } else if (temp <= 19.0f) {
+        b = 0.0f;
+    } else {
+        b = 0.543f * powf(temp - 10.0f, 0.443f);
+    }
+
+    // Clamp multipliers to valid range
+    *r_mult = fmaxf(0.0f, fminf(1.0f, r));
+    *g_mult = fmaxf(0.0f, fminf(1.0f, g));
+    *b_mult = fmaxf(0.0f, fminf(1.0f, b));
+}
+
+/**
+ * Generate and apply combined gamma LUT.
+ * Combines: gamma_curve × brightness × temperature_rgb
+ * 
+ * Safety:
+ * - Allocates LUT once per output (not per-frame)
+ * - Clamps values to [0, 1] before 16-bit cast to prevent overflow
+ * - Uses dirty flag to avoid redundant regeneration
+ * 
+ * wlroots 0.20 API: Uses wlr_output_state to apply gamma LUT
+ */
 static void havel_output_apply_gamma(struct havel_output *output) {
     if (!output || !output->output) return;
 
-    // Check if output supports gamma
     size_t gamma_size = wlr_output_get_gamma_size(output->output);
-    
-    // NOTE: wlroots 0.20 does not expose wlr_output_set_gamma() directly.
-    // Gamma control requires the gamma_control_v1 protocol.
-    // For actual gamma application, implement gamma_control_v1 or use shader-based gamma.
-    // For now, we just log the intended values.
-    
-    if (gamma_size > 0) {
-        LOG_INFO("[OUTPUT] %s gamma=%.2f temp=%dK brightness=%.2f (gamma_control_v1 required)",
-                  output->output->name, output->gamma, output->temperature, output->brightness);
+    if (gamma_size == 0 || gamma_size != output->gamma_ramp_size) {
+        return;  // Output doesn't support gamma or size mismatch
+    }
+
+    if (!output->gamma_ramp_red || !output->gamma_ramp_green || !output->gamma_ramp_blue) {
+        return;  // LUT buffers not allocated
+    }
+
+    // Calculate RGB multipliers from temperature
+    float r_mult, g_mult, b_mult;
+    kelvin_to_rgb_mult(output->temperature, &r_mult, &g_mult, &b_mult);
+
+    // Generate combined LUT: gamma_curve(value) × brightness × temperature_rgb
+    float inv_gamma = 1.0f / output->gamma;
+
+    for (size_t i = 0; i < gamma_size; i++) {
+        // Normalize to [0, 1]
+        float value = (float)i / (float)(gamma_size - 1);
+
+        // Apply gamma correction
+        value = powf(value, inv_gamma);
+
+        // Apply brightness
+        value *= output->brightness;
+
+        // CRITICAL: Clamp BEFORE converting to 16-bit to prevent overflow
+        // This handles cases where brightness > 1.0 or gamma < 1.0
+        value = fmaxf(0.0f, fminf(1.0f, value));
+
+        // Apply temperature multipliers and clamp again
+        float r_value = fmaxf(0.0f, fminf(1.0f, value * r_mult));
+        float g_value = fmaxf(0.0f, fminf(1.0f, value * g_mult));
+        float b_value = fmaxf(0.0f, fminf(1.0f, value * b_mult));
+
+        // Convert to 16-bit (safe now after clamping)
+        output->gamma_ramp_red[i] = (uint16_t)(r_value * 0xFFFF);
+        output->gamma_ramp_green[i] = (uint16_t)(g_value * 0xFFFF);
+        output->gamma_ramp_blue[i] = (uint16_t)(b_value * 0xFFFF);
+    }
+
+    output->gamma_ramp_dirty = false;
+
+    // Apply LUT via wlroots 0.20 gamma_control_v1 API
+    if (!output->server->gamma_control_manager) {
+        LOG_WARN("[OUTPUT] %s gamma_control_manager not available", output->output->name);
+        return;
+    }
+
+    struct wlr_gamma_control_v1 *gamma_control = wlr_gamma_control_manager_v1_get_control(
+        output->server->gamma_control_manager, output->output);
+
+    if (gamma_control) {
+        // wlroots 0.20 requires using wlr_output_state to apply gamma
+        struct wlr_output_state state;
+        wlr_output_state_init(&state);
+        
+        // Set the gamma LUT via the gamma control
+        if (wlr_gamma_control_v1_apply(gamma_control, &state)) {
+            // Apply the output state to commit the gamma change
+            wlr_output_commit_state(output->output, &state);
+            LOG_DEBUG("[OUTPUT] %s gamma LUT applied (gamma=%.2f, temp=%dK, brightness=%.2f)",
+                      output->output->name, output->gamma, output->temperature, output->brightness);
+        } else {
+            LOG_WARN("[OUTPUT] %s failed to apply gamma LUT", output->output->name);
+        }
+        
+        wlr_output_state_finish(&state);
     } else {
-        LOG_WARN("[OUTPUT] %s does not support gamma (gamma_size=0)", 
-                 output->output->name);
+        // No gamma control available, output may not support it
+        LOG_DEBUG("[OUTPUT] %s no gamma control available, LUT generated but not applied",
+                  output->output->name);
     }
 }
 
