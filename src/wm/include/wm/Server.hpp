@@ -38,7 +38,7 @@ public:
 
     // View lifecycle (called from C bridge)
     // Returns raw pointer - C++ owns View, C stores opaque handle
-    View* createXdgView(void* c_view, uint32_t workspace_id);
+    View* createXdgView(void* c_view, uint32_t workspace_id, const char* appId, const char* title);
     View* createXwaylandView(void* xwaylandSurface);
     void onViewMapped(View* view);
     void onViewUnmapped(View* view);
@@ -48,6 +48,10 @@ public:
     bool handleKey(uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char);
     void handlePointerButton(uint32_t button, bool pressed, double x, double y);
     void handlePointerMotion(double x, double y);
+    
+    // Cursor position (for HotCorners, etc.)
+    double cursorX() const { return m_cursorX; }
+    double cursorY() const { return m_cursorY; }
 
     // Focus
     void focusView(View* view);
@@ -168,6 +172,10 @@ private:
         int startViewW = 0;
         int startViewH = 0;
     } m_grab;
+    
+    // Cursor position tracking (for HotCorners, etc.)
+    double m_cursorX = 0;
+    double m_cursorY = 0;
 
     // Animation state for views
     struct ViewAnimationState {

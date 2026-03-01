@@ -32,7 +32,11 @@ public:
     virtual std::vector<View*> getViewsInWorkspace(uint32_t workspaceId) = 0;
     virtual View* getViewById(uint64_t id) = 0;
     virtual void focusViewById(uint64_t id) = 0;
-    
+
+    // Window metadata (from XDG surface)
+    virtual std::string getViewAppId(View* view) = 0;
+    virtual std::string getViewTitle(View* view) = 0;
+
     // Workspace operations
     virtual uint32_t getActiveWorkspace() = 0;
     virtual void setActiveWorkspace(uint32_t id) = 0;
@@ -58,6 +62,10 @@ public:
     // Output info
     virtual int getOutputWidth() = 0;
     virtual int getOutputHeight() = 0;
+    
+    // Cursor position (for HotCorners, etc.)
+    virtual double getCursorX() = 0;
+    virtual double getCursorY() = 0;
     
     // Keybinding registration (future)
     // virtual void registerKeybinding(uint32_t mods, uint32_t key, Callback cb) = 0;

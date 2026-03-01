@@ -38,7 +38,7 @@ void havel_cpp_server_set_native_handle(struct havel_cpp_server* server, void* h
 
 // View lifecycle events (called from C bridge)
 // Returns opaque View pointer for C to store
-void* havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* c_view, uint32_t workspace_id);
+void* havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* c_view, uint32_t workspace_id, const char* appId, const char* title);
 void havel_cpp_on_view_mapped(struct havel_cpp_server* server, void* c_view);
 void havel_cpp_on_view_unmapped(struct havel_cpp_server* server, void* c_view);
 void havel_cpp_on_view_destroyed(struct havel_cpp_server* server, void* c_view);

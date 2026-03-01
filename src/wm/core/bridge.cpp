@@ -57,12 +57,12 @@ void havel_cpp_server_set_native_handle(struct havel_cpp_server* server, void* h
     server->server->setNativeHandle(handle);
 }
 
-void* havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* c_view, uint32_t workspace_id) {
+void* havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* c_view, uint32_t workspace_id, const char* appId, const char* title) {
     if (!server || !c_view) return nullptr;
     
     // C++ creates and owns the View object
     // workspace_id is passed from C so C++ owns the truth
-    auto* view = server->server->createXdgView(c_view, workspace_id);
+    auto* view = server->server->createXdgView(c_view, workspace_id, appId, title);
     
     // Return opaque pointer for C to store
     return static_cast<void*>(view);

@@ -570,11 +570,19 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
     // surface->initialized is false at this point - will crash!
     // Size/activation must be set AFTER first commit (handled by commit listener).
 
-    // Notify C++ layer - it creates the View object and owns all state
-    view->cpp_view = havel_cpp_on_xdg_surface_new(server->cpp_server, view, server->active_workspace);
+    // Get window metadata from XDG toplevel
+    const char* appId = NULL;
+    const char* title = NULL;
+    if (xdg_surface->toplevel) {
+        appId = xdg_surface->toplevel->app_id ? xdg_surface->toplevel->app_id : "";
+        title = xdg_surface->toplevel->title ? xdg_surface->toplevel->title : "";
+    }
 
-    LOG_INFO("[XDG] View setup complete for %p (cpp_view=%p, parent=%p)", 
-             (void*)view, view->cpp_view, (void*)parent);
+    // Notify C++ layer - it creates the View object and owns all state
+    view->cpp_view = havel_cpp_on_xdg_surface_new(server->cpp_server, view, server->active_workspace, appId, title);
+
+    LOG_INFO("[XDG] View setup complete for %p (cpp_view=%p, parent=%p, appId=%s, title=%s)",
+             (void*)view, view->cpp_view, (void*)parent, appId ? appId : "unknown", title ? title : "unknown");
 }
 
 static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
@@ -638,13 +646,18 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
         // Geometry stored in C++ View now, not in C struct
     }
 
+    // Get window metadata from XWayland surface
+    const char* appId = xsurface->class ? xsurface->class : "";
+    const char* title = xsurface->title ? xsurface->title : "";
+
     // Notify C++ layer - it creates the View object and owns all state
-    view->cpp_view = havel_cpp_on_xdg_surface_new(server->cpp_server, view, server->active_workspace);
+    view->cpp_view = havel_cpp_on_xdg_surface_new(server->cpp_server, view, server->active_workspace, appId, title);
 
     view->destroy.notify = xwayland_view_handle_destroy;
     wl_signal_add(&xsurface->events.destroy, &view->destroy);
-    
-    LOG_INFO("[XWayland] View setup complete for %p (cpp_view=%p)", (void*)view, view->cpp_view);
+
+    LOG_INFO("[XWayland] View setup complete for %p (cpp_view=%p, appId=%s, title=%s)", 
+             (void*)view, view->cpp_view, appId, title);
 }
 
 // ============================================================================

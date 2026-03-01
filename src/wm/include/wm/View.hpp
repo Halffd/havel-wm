@@ -2,6 +2,7 @@
 
 #include <wm/Types.hpp>
 #include <cstdint>
+#include <string>
 
 namespace havel {
 
@@ -43,6 +44,13 @@ public:
     // Window manager ID (for taskbar integration)
     uint64_t windowId() const { return m_windowId; }
     void setWindowId(uint64_t id) { m_windowId = id; }
+    
+    // Window metadata (from XDG surface)
+    const std::string& appId() const { return m_appId; }
+    void setAppId(const std::string& id) { m_appId = id; }
+    
+    const std::string& title() const { return m_title; }
+    void setTitle(const std::string& t) { m_title = t; }
 
 private:
     uint32_t m_workspaceId = 0;
@@ -53,6 +61,8 @@ private:
     bool m_mapped = false;
     void* m_nativeHandle = nullptr;
     uint64_t m_windowId = 0;
+    std::string m_appId;
+    std::string m_title;
 };
 
 } // namespace havel

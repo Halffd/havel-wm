@@ -52,6 +52,10 @@ public:
     View* getViewById(uint64_t id) override;
     void focusViewById(uint64_t id) override;
 
+    // Window metadata
+    std::string getViewAppId(View* view) override;
+    std::string getViewTitle(View* view) override;
+
     uint32_t getActiveWorkspace() override;
     void setActiveWorkspace(uint32_t id) override;
     uint32_t getWorkspaceCount() override;
@@ -68,6 +72,10 @@ public:
     
     int getOutputWidth() override;
     int getOutputHeight() override;
+    
+    // Cursor position (for HotCorners, etc.)
+    double getCursorX() override;
+    double getCursorY() override;
     
     // Get list of loaded plugins
     const std::vector<std::unique_ptr<Plugin>>& plugins() const { return m_plugins; }

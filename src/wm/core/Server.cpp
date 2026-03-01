@@ -89,7 +89,7 @@ void Server::workspaceToggleTiling() {
     }
 }
 
-View* Server::createXdgView(void* c_view, uint32_t workspace_id) {
+View* Server::createXdgView(void* c_view, uint32_t workspace_id, const char* appId, const char* title) {
     // Note: View is owned by C++ layer. C stores opaque pointer.
     // Return raw pointer - C stores it but never dereferences.
     auto* view = new View();
@@ -98,8 +98,12 @@ View* Server::createXdgView(void* c_view, uint32_t workspace_id) {
     view->setWorkspaceId(workspace_id);
     view->setNativeHandle(c_view);
     
-    LOG_INFO("[Server] createXdgView: View=%p, workspace=%u", 
-             (void*)view, view->workspaceId());
+    // Set window metadata from XDG surface
+    if (appId) view->setAppId(std::string(appId));
+    if (title) view->setTitle(std::string(title));
+    
+    LOG_INFO("[Server] createXdgView: View=%p, workspace=%u, appId=%s, title=%s", 
+             (void*)view, workspace_id, appId ? appId : "unknown", title ? title : "unknown");
 
     auto* ws = m_workspaces[workspace_id].get();
     if (ws) {
@@ -573,6 +577,10 @@ void Server::handlePointerButton(uint32_t button, bool pressed, double x, double
 }
 
 void Server::handlePointerMotion(double x, double y) {
+    // Update cursor position for HotCorners and other plugins
+    m_cursorX = x;
+    m_cursorY = y;
+    
     if (!m_grab.view) return;
     
     double dx = x - m_grab.startX;

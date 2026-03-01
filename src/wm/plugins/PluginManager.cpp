@@ -172,6 +172,16 @@ void PluginManager::focusViewById(uint64_t id) {
     }
 }
 
+std::string PluginManager::getViewAppId(View* view) {
+    if (!view) return "";
+    return view->appId();
+}
+
+std::string PluginManager::getViewTitle(View* view) {
+    if (!view) return "";
+    return view->title();
+}
+
 uint32_t PluginManager::getActiveWorkspace() {
     if (!m_server) return 0;
     auto* server = static_cast<Server*>(m_server);
@@ -243,6 +253,18 @@ int PluginManager::getOutputWidth() {
 
 int PluginManager::getOutputHeight() {
     return 1080;  // Would get from actual output
+}
+
+double PluginManager::getCursorX() {
+    if (!m_server) return 0.0;
+    auto* server = static_cast<Server*>(m_server);
+    return server->cursorX();
+}
+
+double PluginManager::getCursorY() {
+    if (!m_server) return 0.0;
+    auto* server = static_cast<Server*>(m_server);
+    return server->cursorY();
 }
 
 } // namespace havel
