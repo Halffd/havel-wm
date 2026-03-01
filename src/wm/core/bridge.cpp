@@ -57,29 +57,38 @@ void havel_cpp_server_set_native_handle(struct havel_cpp_server* server, void* h
     server->server->setNativeHandle(handle);
 }
 
-void havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* xdg_surface) {
-    if (!server || !xdg_surface) return;
-    server->server->createXdgView(xdg_surface);
+void* havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* c_view, uint32_t workspace_id) {
+    if (!server || !c_view) return nullptr;
+    
+    // C++ creates and owns the View object
+    // workspace_id is passed from C so C++ owns the truth
+    auto* view = server->server->createXdgView(c_view, workspace_id);
+    
+    // Return opaque pointer for C to store
+    return static_cast<void*>(view);
 }
 
-void havel_cpp_on_view_mapped(struct havel_cpp_server* server, void* view) {
-    if (!server || !view) return;
-    server->server->onViewMapped(static_cast<havel::View*>(view));
+void havel_cpp_on_view_mapped(struct havel_cpp_server* server, void* c_view) {
+    if (!server || !c_view) return;
+    auto* view = static_cast<havel::View*>(c_view);
+    server->server->onViewMapped(view);
 }
 
-void havel_cpp_on_view_unmapped(struct havel_cpp_server* server, void* view) {
-    if (!server || !view) return;
-    server->server->onViewUnmapped(static_cast<havel::View*>(view));
+void havel_cpp_on_view_unmapped(struct havel_cpp_server* server, void* c_view) {
+    if (!server || !c_view) return;
+    auto* view = static_cast<havel::View*>(c_view);
+    server->server->onViewUnmapped(view);
 }
 
-void havel_cpp_on_view_destroyed(struct havel_cpp_server* server, void* view) {
-    if (!server || !view) return;
-    server->server->onViewDestroyed(static_cast<havel::View*>(view));
+void havel_cpp_on_view_destroyed(struct havel_cpp_server* server, void* c_view) {
+    if (!server || !c_view) return;
+    auto* view = static_cast<havel::View*>(c_view);
+    server->server->onViewDestroyed(view);
 }
 
-bool havel_cpp_on_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers) {
+bool havel_cpp_on_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char) {
     if (!server) return false;
-    return server->server->handleKey(keycode, pressed, modifiers);
+    return server->server->handleKey(keycode, pressed, modifiers, keysym, key_char);
 }
 
 void havel_cpp_on_pointer_button(struct havel_cpp_server* server, uint32_t button, bool pressed, double x, double y) {
@@ -90,6 +99,16 @@ void havel_cpp_on_pointer_button(struct havel_cpp_server* server, uint32_t butto
 void havel_cpp_on_pointer_motion(struct havel_cpp_server* server, double x, double y) {
     if (!server) return;
     server->server->handlePointerMotion(x, y);
+}
+
+void havel_cpp_on_pointer_decoration_motion(struct havel_cpp_server* server, int x, int y) {
+    if (!server) return;
+    server->server->pluginManager().onMouseMotion(x, y);
+}
+
+void havel_cpp_on_pointer_decoration_button(struct havel_cpp_server* server, uint32_t button, bool pressed, int x, int y) {
+    if (!server) return;
+    server->server->pluginManager().onMouseButton(button, pressed, x, y);
 }
 
 void havel_cpp_set_output_geometry(struct havel_cpp_server* server, uint32_t workspace_id, int x, int y, int w, int h) {

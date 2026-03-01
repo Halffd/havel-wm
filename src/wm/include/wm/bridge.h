@@ -37,15 +37,18 @@ void* havel_cpp_server_get_native_handle(struct havel_cpp_server* server);
 void havel_cpp_server_set_native_handle(struct havel_cpp_server* server, void* handle);
 
 // View lifecycle events (called from C bridge)
-void havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* xdg_surface);
-void havel_cpp_on_view_mapped(struct havel_cpp_server* server, void* view);
-void havel_cpp_on_view_unmapped(struct havel_cpp_server* server, void* view);
-void havel_cpp_on_view_destroyed(struct havel_cpp_server* server, void* view);
+// Returns opaque View pointer for C to store
+void* havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* c_view, uint32_t workspace_id);
+void havel_cpp_on_view_mapped(struct havel_cpp_server* server, void* c_view);
+void havel_cpp_on_view_unmapped(struct havel_cpp_server* server, void* c_view);
+void havel_cpp_on_view_destroyed(struct havel_cpp_server* server, void* c_view);
 
 // Input events - returns true if consumed by compositor
-bool havel_cpp_on_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers);
+bool havel_cpp_on_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char);
 void havel_cpp_on_pointer_button(struct havel_cpp_server* server, uint32_t button, bool pressed, double x, double y);
 void havel_cpp_on_pointer_motion(struct havel_cpp_server* server, double x, double y);
+void havel_cpp_on_pointer_decoration_motion(struct havel_cpp_server* server, int x, int y);
+void havel_cpp_on_pointer_decoration_button(struct havel_cpp_server* server, uint32_t button, bool pressed, int x, int y);
 
 // Output/workspace events
 void havel_cpp_set_output_geometry(struct havel_cpp_server* server, uint32_t workspace_id, int x, int y, int w, int h);

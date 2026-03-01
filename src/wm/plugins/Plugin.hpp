@@ -40,6 +40,12 @@ public:
     // Overlay rendering (called during render pass)
     virtual void renderOverlay(void* renderer) { (void)renderer; }
     
+    // Mouse events (for decoration buttons, etc.)
+    virtual void onMouseMotion(int x, int y) { (void)x; (void)y; }
+    virtual void onMouseButton(uint32_t button, bool pressed, int x, int y) { 
+        (void)button; (void)pressed; (void)x; (void)y; 
+    }
+
     // Configuration
     virtual void loadConfig(const std::string& configPath) { (void)configPath; }
 };
@@ -67,6 +73,8 @@ struct KeyEvent {
     uint32_t keycode;
     uint32_t modifiers;
     bool pressed;
+    uint32_t keysym;    // XKB keysym (layout-aware)
+    char key_char;      // ASCII character from keysym (for text input)
 };
 
 /**
