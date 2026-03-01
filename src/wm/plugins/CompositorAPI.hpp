@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 namespace havel {
 
@@ -25,6 +26,12 @@ public:
     virtual View* getFocusedView() = 0;
     virtual void focusView(View* view) = 0;
     virtual void closeView(View* view) = 0;
+    
+    // Window enumeration (for Alt-Tab, Overview, etc.)
+    virtual std::vector<View*> getAllViews() = 0;
+    virtual std::vector<View*> getViewsInWorkspace(uint32_t workspaceId) = 0;
+    virtual View* getViewById(uint64_t id) = 0;
+    virtual void focusViewById(uint64_t id) = 0;
     
     // Workspace operations
     virtual uint32_t getActiveWorkspace() = 0;

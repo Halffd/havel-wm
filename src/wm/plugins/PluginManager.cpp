@@ -109,6 +109,20 @@ void PluginManager::renderOverlays(void* renderer) {
     }
 }
 
+void PluginManager::onMouseMotion(int x, int y) {
+    // Forward mouse motion to all plugins
+    for (auto& plugin : m_plugins) {
+        plugin->onMouseMotion(x, y);
+    }
+}
+
+void PluginManager::onMouseButton(uint32_t button, bool pressed, int x, int y) {
+    // Forward mouse button to all plugins
+    for (auto& plugin : m_plugins) {
+        plugin->onMouseButton(button, pressed, x, y);
+    }
+}
+
 // CompositorAPI implementation - delegates to Server
 View* PluginManager::getFocusedView() {
     if (!m_server) return nullptr;
@@ -128,6 +142,34 @@ void PluginManager::closeView(View* view) {
     // Would need closeFocusedWindow() in Server
     // For now, stub
     (void)view;
+}
+
+// Window enumeration - delegates to Server
+std::vector<View*> PluginManager::getAllViews() {
+    if (!m_server) return {};
+    auto* server = static_cast<Server*>(m_server);
+    return server->getAllViews();
+}
+
+std::vector<View*> PluginManager::getViewsInWorkspace(uint32_t workspaceId) {
+    if (!m_server) return {};
+    auto* server = static_cast<Server*>(m_server);
+    return server->getViewsInWorkspace(workspaceId);
+}
+
+View* PluginManager::getViewById(uint64_t id) {
+    if (!m_server) return nullptr;
+    auto* server = static_cast<Server*>(m_server);
+    return server->getViewById(id);
+}
+
+void PluginManager::focusViewById(uint64_t id) {
+    if (!m_server) return;
+    auto* server = static_cast<Server*>(m_server);
+    View* view = server->getViewById(id);
+    if (view) {
+        server->focusView(view);
+    }
 }
 
 uint32_t PluginManager::getActiveWorkspace() {

@@ -37,21 +37,27 @@ public:
     void workspaceToggleTiling();
 
     // View lifecycle (called from C bridge)
-    // Returns raw pointer - C layer owns and manages lifetime
-    View* createXdgView(void* xdgSurface);
+    // Returns raw pointer - C++ owns View, C stores opaque handle
+    View* createXdgView(void* c_view, uint32_t workspace_id);
     View* createXwaylandView(void* xwaylandSurface);
     void onViewMapped(View* view);
     void onViewUnmapped(View* view);
     void onViewDestroyed(View* view);
 
     // Input handling - returns true if consumed by compositor
-    bool handleKey(uint32_t keycode, bool pressed, uint32_t modifiers);
+    bool handleKey(uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char);
     void handlePointerButton(uint32_t button, bool pressed, double x, double y);
     void handlePointerMotion(double x, double y);
 
     // Focus
     void focusView(View* view);
     void focusNextMru(bool backwards = false);
+
+    // Window enumeration (for Alt-Tab, Overview, etc.)
+    std::vector<View*> getAllViews() const;
+    std::vector<View*> getViewsInWorkspace(uint32_t workspaceId) const;
+    View* getFocusedView() const;
+    View* getViewById(uint64_t id) const;
 
     // Layout
     void arrangeWorkspace(uint32_t id);

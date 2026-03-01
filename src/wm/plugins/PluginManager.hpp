@@ -37,11 +37,21 @@ public:
     // Overlay rendering
     void renderOverlays(void* renderer);
     
+    // Mouse events
+    void onMouseMotion(int x, int y);
+    void onMouseButton(uint32_t button, bool pressed, int x, int y);
+
     // CompositorAPI implementation
     View* getFocusedView() override;
     void focusView(View* view) override;
     void closeView(View* view) override;
     
+    // Window enumeration
+    std::vector<View*> getAllViews() override;
+    std::vector<View*> getViewsInWorkspace(uint32_t workspaceId) override;
+    View* getViewById(uint64_t id) override;
+    void focusViewById(uint64_t id) override;
+
     uint32_t getActiveWorkspace() override;
     void setActiveWorkspace(uint32_t id) override;
     uint32_t getWorkspaceCount() override;

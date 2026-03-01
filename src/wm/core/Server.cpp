@@ -33,6 +33,7 @@ Server::Server() {
     registerPlugin(std::unique_ptr<Plugin>(create_app_launcher_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_alt_tab_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_overview_plugin()));
+    registerPlugin(std::unique_ptr<Plugin>(create_server_decoration_plugin()));
 
     LOG_INFO("Plugins initialized (%d plugins)", m_pluginManager.plugins().size());
 }
@@ -88,14 +89,19 @@ void Server::workspaceToggleTiling() {
     }
 }
 
-View* Server::createXdgView(void* xdgSurface) {
-    // Note: View is owned by C layer. We create it but C manages lifetime.
-    // Return raw pointer - C will store and manage it.
+View* Server::createXdgView(void* c_view, uint32_t workspace_id) {
+    // Note: View is owned by C++ layer. C stores opaque pointer.
+    // Return raw pointer - C stores it but never dereferences.
     auto* view = new View();
-    view->setWorkspaceId(m_activeWorkspace);
-    view->setNativeHandle(xdgSurface);
+    
+    // C++ owns workspace_id - single source of truth
+    view->setWorkspaceId(workspace_id);
+    view->setNativeHandle(c_view);
+    
+    LOG_INFO("[Server] createXdgView: View=%p, workspace=%u", 
+             (void*)view, view->workspaceId());
 
-    auto* ws = m_workspaces[m_activeWorkspace].get();
+    auto* ws = m_workspaces[workspace_id].get();
     if (ws) {
         ws->addView(view);
     }
@@ -104,7 +110,7 @@ View* Server::createXdgView(void* xdgSurface) {
     uint64_t windowId = m_windowManager.registerWindow(view);
     view->setWindowId(windowId);
 
-    LOG_DEBUG("Created XDG view, workspace=%u windowId=%lu", m_activeWorkspace, windowId);
+    LOG_DEBUG("Created XDG view, workspace=%u windowId=%lu", workspace_id, windowId);
     return view;
 }
 
@@ -130,8 +136,11 @@ View* Server::createXwaylandView(void* xwaylandSurface) {
 void Server::onViewMapped(View* view) {
     if (!view) return;
 
+    LOG_INFO("[Server] onViewMapped: %p (workspace=%u, windowId=%lu)", 
+             (void*)view, view->workspaceId(), view->windowId());
+
     view->setMapped(true);
-    LOG_INFO("View mapped, workspace=%u", view->workspaceId());
+    LOG_INFO("[Server] View mapped=true");
 
     // Dispatch to plugins
     ViewEvent event;
@@ -141,8 +150,10 @@ void Server::onViewMapped(View* view) {
     event.workspace = view->workspaceId();
     event.x = 0; event.y = 0; event.width = 0; event.height = 0;
     m_pluginManager.dispatchViewMap(event);
+    LOG_INFO("[Server] Plugin dispatch complete");
 
     focusView(view);
+    LOG_INFO("[Server] focusView complete");
 
     auto* ws = activeWorkspace();
     if (ws && ws->isTilingEnabled()) {
@@ -211,7 +222,7 @@ void Server::onViewDestroyed(View* view) {
     }
 }
 
-bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
+bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char) {
     if (!pressed) return false;
 
     // First, give plugins a chance to handle the key
@@ -219,7 +230,9 @@ bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
     event.keycode = keycode;
     event.modifiers = modifiers;
     event.pressed = pressed;
-    
+    event.keysym = keysym;
+    event.key_char = key_char;
+
     if (m_pluginManager.dispatchKey(event)) {
         // Plugin consumed the event
         return true;
@@ -236,11 +249,13 @@ bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
     bool shift = (modifiers & MOD_SHIFT) != 0;
     bool ctrl = (modifiers & MOD_CTRL) != 0;
 
-    LOG_DEBUG("Key event: keycode=%u mod=%s%s%s%s", keycode,
-                    alt ? "Alt+" : "",
-                    meta ? "Meta+" : "",
-                    shift ? "Shift+" : "",
-                    ctrl ? "Ctrl+" : "");
+    // Deterministic logging: always log keycode, keysym, raw modifiers, and decoded flags
+    LOG_DEBUG("[KEY] keycode=%u keysym=0x%04X char='%c' raw_mods=0x%02X decoded=%s%s%s%s",
+              keycode, keysym, key_char ? key_char : ' ', modifiers,
+              alt ? "Alt+" : "",
+              meta ? "Meta+" : "",
+              shift ? "Shift+" : "",
+              ctrl ? "Ctrl+" : "");
 
     // ========================================================================
     // Ctrl+Meta combinations (highest priority)
@@ -528,7 +543,11 @@ bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
             launcherBackspace();
             return true;
         }
-        // Text input handled separately
+        // Text input using xkbcommon keysym (layout-aware)
+        if (key_char != 0 && key_char >= 32 && key_char <= 126) {
+            launcherInput(key_char);
+            return true;
+        }
         return true;
     }
 
@@ -593,6 +612,8 @@ void Server::handlePointerMotion(double x, double y) {
 void Server::focusView(View* view) {
     if (!view) return;
 
+    LOG_INFO("[Server] focusView: %p (windowId=%lu)", (void*)view, view->windowId());
+
     m_focusManager.promote(view);
 
     auto* ws = m_workspaces[view->workspaceId()].get();
@@ -617,6 +638,45 @@ void Server::focusNextMru(bool backwards) {
         LOG_DEBUG("Focus MRU view");
         focusView(next);
     }
+}
+
+// Window enumeration implementation
+std::vector<View*> Server::getAllViews() const {
+    std::vector<View*> allViews;
+    for (uint32_t ws = 0; ws < WORKSPACE_COUNT; ++ws) {
+        auto* workspace = m_workspaces[ws].get();
+        if (workspace) {
+            auto wsViews = workspace->views();
+            allViews.insert(allViews.end(), wsViews.begin(), wsViews.end());
+        }
+    }
+    return allViews;
+}
+
+std::vector<View*> Server::getViewsInWorkspace(uint32_t workspaceId) const {
+    if (workspaceId >= WORKSPACE_COUNT) return {};
+    auto* workspace = m_workspaces[workspaceId].get();
+    return workspace ? workspace->views() : std::vector<View*>{};
+}
+
+View* Server::getFocusedView() const {
+    auto* ws = activeWorkspace();
+    return ws ? ws->activeView() : nullptr;
+}
+
+View* Server::getViewById(uint64_t id) const {
+    // Search all workspaces for view with matching windowId
+    for (uint32_t ws = 0; ws < WORKSPACE_COUNT; ++ws) {
+        auto* workspace = m_workspaces[ws].get();
+        if (workspace) {
+            for (View* view : workspace->views()) {
+                if (view && view->windowId() == id) {
+                    return view;
+                }
+            }
+        }
+    }
+    return nullptr;
 }
 
 void Server::arrangeWorkspace(uint32_t id) {
@@ -1224,13 +1284,17 @@ void Server::setViewSize(View* view, int w, int h, bool animate) {
 }
 
 void Server::focusViewNative(View* view) {
+    LOG_INFO("[Server] focusViewNative: %p", (void*)view);
     if (!view || !g_view_focus) return;
     g_view_focus(view->nativeHandle());
+    LOG_INFO("[Server] g_view_focus called");
 }
 
 void Server::raiseView(View* view) {
+    LOG_INFO("[Server] raiseView: %p", (void*)view);
     if (!view || !g_view_raise) return;
     g_view_raise(view->nativeHandle());
+    LOG_INFO("[Server] g_view_raise called");
 }
 
 Rect Server::getViewGeometry(View* view) {
