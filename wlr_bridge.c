@@ -948,9 +948,16 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
         char key_char = 0;
         if (keyboard->xkb_state) {
             keysym = xkb_state_key_get_one_sym(keyboard->xkb_state, keycode);
-            // Try to get the ASCII character from keysym
-            if (keysym >= XKB_KEY_space && keysym <= XKB_KEY_asciitilde) {
-                key_char = (char)keysym;
+            
+            // Convert keysym to UTF-8 character (handles shift, layout, etc.)
+            char utf8[8] = {0};
+            int len = xkb_keysym_to_utf8(keysym, utf8, sizeof(utf8));
+            if (len > 0 && len <= 4) {
+                // For single-byte ASCII, use directly
+                if (len == 1 && utf8[0] >= 32 && utf8[0] <= 126) {
+                    key_char = utf8[0];
+                }
+                // Multi-byte UTF-8 characters would need wider support
             }
         }
 

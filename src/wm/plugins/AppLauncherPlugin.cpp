@@ -101,29 +101,30 @@ public:
                 handleBackspace();
                 return true;
         }
-        
-        // Text input (a-z, 0-9)
-        if (event.keycode >= 2 && event.keycode <= 11) {  // Number row
-            handleCharInput(getCharFromKeycode(event.keycode));
-            return true;
-        }
-        if (event.keycode >= 16 && event.keycode <= 26) {  // Q-P
-            handleCharInput(getCharFromKeycode(event.keycode));
-            return true;
-        }
-        if (event.keycode >= 30 && event.keycode <= 40) {  // A-L
-            handleCharInput(getCharFromKeycode(event.keycode));
-            return true;
-        }
-        if (event.keycode >= 43 && event.keycode <= 53) {  // Z-M
-            handleCharInput(getCharFromKeycode(event.keycode));
-            return true;
-        }
-        if (event.keycode == 57) {  // Space
-            handleCharInput(' ');
+
+        // Text input using xkbcommon (layout-aware)
+        // event.key_char is already converted from keysym in wlr_bridge.c
+        if (event.key_char >= 32 && event.key_char <= 126) {
+            // Printable ASCII character
+            handleCharInput(event.key_char);
             return true;
         }
         
+        // Handle special keys via keysym
+        switch (event.keysym) {
+            case 0xFF09:  // Tab
+                handleCharInput('\t');
+                return true;
+            case 0xFF0D:  // Enter
+                handleCharInput('\n');
+                return true;
+            case 0xFF1B:  // Escape - close launcher
+                if (m_visible) {
+                    toggleLauncher();
+                }
+                return true;
+        }
+
         return false;
     }
     
@@ -332,22 +333,7 @@ private:
         std::transform(result.begin(), result.end(), result.begin(), ::tolower);
         return result;
     }
-    
-    char getCharFromKeycode(uint32_t keycode) {
-        // Simple mapping (would need proper xkb for real implementation)
-        static const char keymap[] = {
-            0, 0, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=',
-            0, 0, 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']',
-            0, 0, 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`',
-            0, 0, '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0
-        };
 
-        if (keycode < sizeof(keymap)) {
-            return keymap[keycode];
-        }
-        return 0;
-    }
-    
     void renderOverlay(void* rendererPtr) override {
         if (!m_visible || !rendererPtr) return;
         
