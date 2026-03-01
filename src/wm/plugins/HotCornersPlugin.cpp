@@ -5,8 +5,15 @@
 #include <wm/plugins/CompositorAPI.hpp>
 #include <cstdio>
 #include <cstdint>
+#include <chrono>
 
-namespace havel {
+namespace havel     {
+
+// Get current time in milliseconds
+static uint64_t getMonotonicTimeMs() {
+    auto now = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+}
 
 /**
  * Hot Corners Plugin
@@ -62,9 +69,33 @@ public:
     void onOutputFrame(const OutputFrameEvent& event) override {
         if (!m_enabled) return;
         
-        // Get cursor position (would need API for this)
-        // For now, stub - actual implementation needs cursor tracking API
-        (void)event;
+        // Get cursor position from API
+        int cursorX = (int)m_api->getCursorX();
+        int cursorY = (int)m_api->getCursorY();
+        
+        // Get output dimensions
+        int width = m_api->getOutputWidth();
+        int height = m_api->getOutputHeight();
+        
+        // Detect which corner cursor is in
+        Corner corner = detectCorner(cursorX, cursorY, width, height);
+        
+        // If cursor moved to a new corner
+        if (corner != m_lastCorner) {
+            if (m_lastCorner >= 0) {
+                // Cursor left previous corner - reset
+                m_cornerEnterTime = 0;
+            }
+            m_lastCorner = corner;
+            m_cornerEnterTime = getMonotonicTimeMs();
+        } else if (m_cornerEnterTime > 0) {
+            // Check if we've been in the corner long enough to trigger
+            uint64_t elapsed = getMonotonicTimeMs() - m_cornerEnterTime;
+            if (elapsed >= m_triggerDelay) {
+                triggerAction(m_cornerActions[(int)corner]);
+                m_cornerEnterTime = 0;  // Reset to prevent repeated triggers
+            }
+        }
     }
     
     bool onKey(const KeyEvent& event) override {
@@ -137,7 +168,7 @@ private:
     }
     
     void triggerAction(CornerAction action) {
-        uint64_t currentTime = 0;  // Would get from chrono
+        uint64_t currentTime = getMonotonicTimeMs();
         if (currentTime - m_lastTriggerTime < 500) {
             return;  // Debounce
         }

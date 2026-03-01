@@ -4,6 +4,7 @@
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
+#include <wm/View.hpp>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -163,22 +164,32 @@ private:
             OverviewWorkspace ows;
             ows.id = ws;
             
-            // Would collect actual windows per workspace
-            // For now, create stub entries
+            // Get real windows for this workspace
+            std::vector<View*> views = m_api->getViewsInWorkspace(ws);
             
-            // Example stub window
-            if (ws == m_api->getActiveWorkspace()) {
+            for (View* view : views) {
                 OverviewWindow win;
-                win.viewPtr = m_api->getFocusedView();
-                win.appId = "foot";
-                win.title = "Terminal";
+                win.viewPtr = view;
+                // Get window metadata from API
+                win.appId = m_api->getViewAppId(view);
+                win.title = m_api->getViewTitle(view);
+                
+                // Use actual geometry from view
+                Rect geom = view->geom();
+                win.x = geom.x;
+                win.y = geom.y;
+                win.w = geom.w;
+                win.h = geom.h;
                 win.workspace = ws;
-                win.x = 100; win.y = 100; win.w = 800; win.h = 600;
+                
                 ows.windows.push_back(win);
             }
             
             m_workspaces.push_back(ows);
         }
+        
+        printf("[Overview] Collected %zu workspaces with real window data\n", 
+               m_workspaces.size());
     }
     
     void calculateGridLayout() {
