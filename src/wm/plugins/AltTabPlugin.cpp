@@ -4,11 +4,14 @@
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
+#include <wm/render/WindowTextureCapture.hpp>
+#include <wm/View.hpp>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
 #include <vector>
 #include <string>
+#include <memory>
 
 namespace havel {
 
@@ -23,6 +26,14 @@ struct WindowEntry {
     uint32_t workspace = 0;
     bool isFocused = false;
     int x = 0, y = 0, w = 0, h = 0;
+    
+    // Window thumbnail texture
+    std::unique_ptr<WindowTextureCapture> texture;
+    
+    // Move constructor (needed for vector with unique_ptr)
+    WindowEntry() = default;
+    WindowEntry(WindowEntry&&) = default;
+    WindowEntry& operator=(WindowEntry&&) = default;
 };
 
 /**
@@ -163,22 +174,33 @@ private:
         // Collect views - use opaque IDs, don't dereference View pointers
         for (View* view : allViews) {
             if (!view) continue;
-            
+
             WindowEntry entry;
             entry.viewPtr = view;  // Keep for internal use
-            entry.viewId = 0;  // Would get from API in real impl
-            entry.workspace = currentWorkspace;  // Assume current workspace
+            entry.viewId = view->windowId();
+            entry.workspace = view->workspaceId();
             entry.isFocused = (view == focused);
-            
-            // Get app ID and title (would get from XDG surface in real impl)
-            // For now use placeholder - real impl would query view metadata via API
-            entry.appId = "app";
-            entry.title = "Window";
-            
+
+            // Get app ID and title from View metadata
+            entry.appId = view->appId();
+            entry.title = view->title();
+            if (entry.appId.empty()) entry.appId = "app";
+            if (entry.title.empty()) entry.title = "Window";
+
             // Get geometry
-            entry.x = 0; entry.y = 0; entry.w = 800; entry.h = 600;
-            
-            m_windows.push_back(entry);
+            Rect geom = view->geom();
+            entry.x = geom.x;
+            entry.y = geom.y;
+            entry.w = geom.w;
+            entry.h = geom.h;
+
+            // Create texture capture for thumbnail
+            entry.texture = std::make_unique<WindowTextureCapture>();
+            // Note: Full implementation would capture from wlr_scene_surface
+            // This requires C layer to provide surface pointer
+            // For now, placeholder texture is created
+
+            m_windows.emplace_back(std::move(entry));
         }
 
         // If no windows, add placeholder
@@ -190,9 +212,9 @@ private:
             placeholder.title = "No windows";
             placeholder.workspace = currentWorkspace;
             placeholder.isFocused = false;
-            placeholder.x = 100; placeholder.y = 100; 
+            placeholder.x = 100; placeholder.y = 100;
             placeholder.w = 400; placeholder.h = 200;
-            m_windows.push_back(placeholder);
+            m_windows.emplace_back(std::move(placeholder));
         }
 
         // Sort: focused first, then by workspace, then by title
@@ -262,17 +284,17 @@ private:
     
     void renderOverlay(void* rendererPtr) override {
         if (!m_visible || !rendererPtr) return;
-        
+
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
-        
+
         int screenWidth = renderer->getScreenWidth();
         int screenHeight = renderer->getScreenHeight();
-        
+
         // Draw semi-transparent background
         renderer->drawRect(0, 0, screenWidth, screenHeight, Color(0.0f, 0.0f, 0.0f, 0.7f));
-        
+
         if (m_windows.empty()) return;
-        
+
         // Calculate thumbnail size and positions
         int thumbnailWidth = 200;
         int thumbnailHeight = 150;
@@ -280,25 +302,42 @@ private:
         int totalWidth = (int)m_windows.size() * (thumbnailWidth + spacing) - spacing;
         int startX = (screenWidth - totalWidth) / 2;
         int y = (screenHeight - thumbnailHeight) / 2;
-        
+
         // Draw each window thumbnail
         for (size_t i = 0; i < m_windows.size(); i++) {
             int x = startX + (int)i * (thumbnailWidth + spacing);
             bool isSelected = ((int)i == m_selectedIndex);
-            
-            // Draw thumbnail background
+            const WindowEntry& win = m_windows[i];
+
+            // Draw thumbnail background (behind texture)
             Color bgColor = isSelected ? Color(0.3f, 0.4f, 0.5f, 0.9f) : Color(0.2f, 0.2f, 0.2f, 0.8f);
             renderer->drawRect((float)x, (float)y, (float)thumbnailWidth, (float)thumbnailHeight, bgColor);
-            
+
+            // Draw window texture if available
+            if (win.texture && win.texture->isValid()) {
+                // TODO: Use renderer->drawTexture() with captured texture
+                // For now, placeholder gradient is drawn as background
+                // Full implementation would render actual window content
+            }
+
             // Draw border
             Color borderColor = isSelected ? Color(1.0f, 1.0f, 1.0f, 1.0f) : Color(0.5f, 0.5f, 0.5f, 0.5f);
-            renderer->drawBorder(FloatRect((float)x, (float)y, (float)thumbnailWidth, (float)thumbnailHeight), borderColor, isSelected ? 3.0f : 2.0f);
-            
+            renderer->drawBorder(FloatRect((float)x, (float)y, (float)thumbnailWidth, (float)thumbnailHeight), 
+                                borderColor, isSelected ? 3.0f : 2.0f);
+
             // Draw app name
-            const std::string& name = m_windows[i].appId;
-            renderer->drawText(name.c_str(), (float)(x + 10), (float)(y + thumbnailHeight - 25), 16.0f, Color(1.0f, 1.0f, 1.0f, 1.0f));
+            renderer->drawText(win.appId.c_str(), (float)(x + 10), (float)(y + thumbnailHeight - 25), 
+                              16.0f, Color(1.0f, 1.0f, 1.0f, 1.0f));
+            
+            // Draw window title (truncated if too long)
+            std::string title = win.title;
+            if (title.length() > 20) {
+                title = title.substr(0, 17) + "...";
+            }
+            renderer->drawText(title.c_str(), (float)(x + 10), (float)(y + thumbnailHeight - 10), 
+                              12.0f, Color(0.8f, 0.8f, 0.8f, 1.0f));
         }
-        
+
         // Draw instruction text
         const char* instruction = "Alt+Tab: Cycle | Enter: Select | Esc: Cancel";
         float textWidth = strlen(instruction) * 10.0f;
