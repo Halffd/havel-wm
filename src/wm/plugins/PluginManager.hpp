@@ -2,11 +2,9 @@
 
 #include "Plugin.hpp"
 #include "CompositorAPI.hpp"
-#include "Config.hpp"
 #include <vector>
 #include <memory>
 #include <string>
-#include <unordered_map>
 
 namespace havel {
 
@@ -28,11 +26,6 @@ public:
     // Plugin management
     void registerPlugin(std::unique_ptr<Plugin> plugin);
     void unregisterPlugin(const char* name);
-    
-    // Plugin configuration
-    bool loadConfig(const std::string& configPath);
-    bool isPluginEnabled(const std::string& name) const;
-    void setPluginEnabled(const std::string& name, bool enabled);
     
     // Event dispatch
     void dispatchOutputFrame(const OutputFrameEvent& event);
@@ -86,15 +79,11 @@ public:
     
     // Get list of loaded plugins
     const std::vector<std::unique_ptr<Plugin>>& plugins() const { return m_plugins; }
-
+    
 private:
     std::vector<std::unique_ptr<Plugin>> m_plugins;
     void* m_server = nullptr;  // Server* - opaque to plugins
     bool m_initialized = false;
-    
-    // Configuration
-    Config m_config;
-    std::unordered_map<std::string, bool> m_pluginEnabled;
 };
 
 } // namespace havel

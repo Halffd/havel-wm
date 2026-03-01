@@ -75,8 +75,6 @@ set(WM_CORE_SOURCES
     src/wm/render/OverlayRenderer.cpp
     src/wm/render/OverlayRenderer.hpp
     src/wm/render/OverlayRendering.cpp
-    src/wm/render/WindowTextureCapture.cpp
-    src/wm/render/WindowTextureCapture.hpp
     src/wm/render/BitmapFont.cpp
     src/wm/render/BitmapFont.hpp
     src/wm/render/FreeTypeFont.cpp
@@ -136,7 +134,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${PROTOCOL_HEADERS_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/render
     ${CMAKE_CURRENT_SOURCE_DIR}/src/shell/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
     ${WAYLAND_SERVER_INCLUDE_DIRS}
