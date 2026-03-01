@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find required packages
 find_package(PkgConfig REQUIRED)
+set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g")
 
 # Find Wayland and wlroots
 pkg_check_modules(WAYLAND_SERVER REQUIRED wayland-server)
@@ -98,6 +99,7 @@ set(WM_CORE_SOURCES
     src/wm/plugins/AppLauncherPlugin.cpp
     src/wm/plugins/AltTabPlugin.cpp
     src/wm/plugins/OverviewPlugin.cpp
+    src/wm/plugins/ServerDecorationPlugin.cpp
     # VulkanRenderer.cpp - disabled, wlroots handles rendering
 )
 
@@ -187,7 +189,8 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
     OUTPUT_NAME "havel-wm"
 )
-
+target_compile_options(${PROJECT_NAME}  PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+target_link_options(${PROJECT_NAME} PRIVATE -fsanitize=address,undefined)
 # Install targets
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
