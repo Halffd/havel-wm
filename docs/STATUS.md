@@ -90,32 +90,35 @@ Overlay Layer (raised to top)
 ---
 
 ### ⏳ Alt-Tab Plugin
-**Status:** UI works, window list is FAKE
+**Status:** ✅ **REAL** - Uses actual window list from `getAllViews()`
 
-**ARCHITECTURE BUG:** Stores `void* viewPtr` → breaks abstraction layer
+**Architecture:** Now uses opaque `viewId` instead of raw `View*` pointers
 
 ```cpp
-// CURRENT (BREAKS ENCAPSULATION):
-m_api->focusView((View*)win.viewPtr);  // ← Plugin sees View*
+// CURRENT (GOOD - uses opaque ID):
+m_api->focusViewById(selected.viewId);  // ← No raw pointers!
 
-// SHOULD BE:
-m_api->focusViewById(win.id);  // ← Opaque ID only
+// Window collection:
+auto allViews = m_api->getAllViews();  // ← Real windows!
 ```
 
 **What works:**
-- Overlay renders
-- Keyboard navigation
-- Selection highlighting
-- Text rendering
+- ✅ Overlay renders
+- ✅ Keyboard navigation
+- ✅ Selection highlighting
+- ✅ Text rendering
+- ✅ **Real window list** from compositor
+- ✅ Proper sorting (focused first, then workspace, then title)
+- ✅ Focus via opaque ID
 
-**What's fake:**
-- Window list is hardcoded
-- No actual window switching
-- No focus tracking
+**What's still stubbed:**
+- Window thumbnails (shows colored boxes, not textures)
+- Window titles (shows "Window" placeholder)
+- App IDs (shows "app" placeholder)
 
-**To fix:** 
-1. Add `focusViewById(uint64_t)` to CompositorAPI
-2. Add `Server::getAllViews()` API
+**To fix:**
+1. Add window metadata API (query XDG surface for appId/title)
+2. Add texture capture for thumbnails (`wlr_scene_surface` → texture)
 
 ---
 
@@ -204,41 +207,30 @@ havel_render_pipeline_draw_overlays(...);  // ← After commit?
 
 ## What's MISSING
 
-### ❌ Real Window Enumeration
-No API to get all views from Server.
+### ❌ Window Metadata API
+Need to query XDG surface for appId and title.
 
 **Need:**
 ```cpp
-class Server {
-    std::vector<View*> getAllViews() const;
-    View* getFocusedView() const;
-};
-```
-
-### ❌ xkbcommon Text Input
-Hardcoded keycode→char mapping.
-
-**Need:**
-```cpp
-class TextInput {
-    xkb_state* m_state;
-    char getKeyChar(uint32_t keycode);
+class CompositorAPI {
+    std::string getViewAppId(View* view) const;
+    std::string getViewTitle(View* view) const;
 };
 ```
 
 ### ❌ Window Texture Capture
-Alt-Tab shows colored rects, not thumbnails.
+Alt-Tab shows colored boxes, not window thumbnails.
 
 **Need:**
 - wlr_scene_surface capture
-- Texture upload
-- Mipmap generation
+- Texture upload to GPU
+- Mipmap generation for scaling
 
 ### ❌ Plugin Configuration
 No way to disable/reconfigure plugins.
 
 **Need:**
-- Config file format
+- Config file format (JSON/YAML)
 - Plugin enable/disable
 - Keybinding remapping
 
@@ -266,17 +258,20 @@ launcherInput(key_char);
 
 ---
 
-### 🟢 P0: View* Leak in Plugins (PARTIALLY ADDRESSED)
+### 🟢 P0: View* Leak in Plugins (PARTIALLY FIXED)
 
-**Was:** AltTab/Overview store raw `View*` pointers
+**Was:** AltTab/Overview store raw `View*` pointers and dereference them
 
-**Status:** Still stores View* but now uses keysym-based input
+**Fixed:** 
+- Alt-Tab now uses opaque `viewId` for focus operations
+- `focusViewById(id)` doesn't require View* dereference
+- View* still stored for internal bookkeeping but not dereferenced
 
-**Impact:** ABI break risk remains if View changes
+**Impact:** ABI break risk reduced - plugins don't depend on View internals
 
-**Fix needed:**
-1. Add `focusViewById(uint64_t)` to CompositorAPI
-2. Plugins store IDs only
+**Remaining work:**
+- Overview plugin still needs migration
+- Window metadata API would eliminate need for View* entirely
 
 ---
 
@@ -301,7 +296,7 @@ launcherInput(key_char);
 
 ---
 
-### 🟢 P1: HotCorners Debounce Broken
+### 🟡 P1: HotCorners Debounce Broken
 
 **Problem:** `currentTime = 0` means debounce never triggers
 
@@ -337,8 +332,8 @@ uint64_t currentTime = getMonotonicTimeMs();
 6. ✅ ~~Quit/Exit functionality~~ DONE
 7. ✅ ~~Window enumeration API~~ DONE - `getAllViews()`, `getViewById()`, etc.
 8. ✅ ~~Alt-Tab uses real windows~~ DONE - calls `getAllViews()`
-9. ⏳ KeybindingManager integration into Server
-10. ⏳ Fix View* leak in AltTab/Overview plugins (partially fixed - uses viewId now)
+9. ✅ ~~View* leak (critical part)~~ DONE - uses `viewId` not raw pointers
+10. ⏳ KeybindingManager integration into Server
 
 ### P1 (High)
 11. ⏳ Fix Overview to use real workspace data
@@ -626,6 +621,8 @@ If compositor never sends configure → client waits forever.
 - **Real window enumeration** (`getAllViews()`, `getViewById()`, etc.)
 - **Alt-Tab shows real windows** (no more fake data)
 - **Server-side decorations** (title bars, buttons, borders)
+- **Meta+click move/resize** (compositor-driven, no protocol issues)
+- **Startup command support** (`-s 'foot'`)
 
 **What we don't have:**
 - Window metadata API (appId/title from XDG surface)
@@ -633,6 +630,7 @@ If compositor never sends configure → client waits forever.
 - View* pointer fully removed (still stored but not dereferenced)
 - Window texture capture for thumbnails
 - Plugin configuration
+- Overview plugin real data
 
 **Honest assessment:**
 The compositor is **architecturally complete** and now has **real window awareness**. The foundation is solid—what's needed now is connecting remaining stubs to real compositor state.
@@ -648,6 +646,8 @@ The compositor is **architecturally complete** and now has **real window awarene
 8. **Alt-Tab uses real window list** - no more hardcoded fakes
 9. **Opaque ID system** - plugins use `viewId` not raw pointers
 10. **Server-side decorations** - title bars with clickable buttons
+11. **Meta+click move/resize** - intuitive window management
+12. **Startup commands** - auto-launch apps on compositor start
 
 **Next sprint priorities:**
 1. Fix Overview plugin to use real workspace data
