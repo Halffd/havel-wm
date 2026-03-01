@@ -17,10 +17,7 @@ Server::Server() {
         m_workspaces[i] = std::make_unique<Workspace>(i);
     }
 
-    // Initialize plugin manager
-    m_pluginManager.initialize(this);
-
-    // Register built-in plugins
+    // Register built-in plugins first
     registerPlugin(std::unique_ptr<Plugin>(create_example_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_blur_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_scale_plugin()));
@@ -34,6 +31,9 @@ Server::Server() {
     registerPlugin(std::unique_ptr<Plugin>(create_alt_tab_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_overview_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_server_decoration_plugin()));
+
+    // Initialize plugin manager (loads config and initializes plugins)
+    m_pluginManager.initialize(this);
 
     LOG_INFO("Plugins initialized (%d plugins)", m_pluginManager.plugins().size());
 }

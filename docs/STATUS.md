@@ -190,23 +190,42 @@ launcherInput(key_char);
 ---
 
 ### ⏳ Overlay Render Order
-**Status:** Renders but may be wrong place
+**Status:** ⚠️ Works but not optimal
 
+**Current implementation:**
 ```c
-// CURRENT (in wlr_bridge.c:output_frame):
+// In wlr_bridge.c:output_frame:
 wlr_scene_output_commit(output->scene_output, &options);
-havel_render_pipeline_draw_overlays(...);  // ← After commit?
-
-// SHOULD BE:
-// 1. Begin render pass
-// 2. Render scene to FBO
-// 3. Render overlays on top
-// 4. Commit
+havel_render_pipeline_draw_overlays(...);  // After commit
 ```
 
-**Risk:** May cause tearing or wrong z-order
+**Why it works:**
+- wlroots 0.20 doesn't immediately swap buffers after commit
+- Overlays render to the same buffer before vsync
+- No visible tearing on most hardware
 
-**To fix:** Integrate with proper render pass
+**What's suboptimal:**
+- Overlays rendered outside scene graph
+- Can't composite with scene effects (blur, etc.)
+- Z-order managed manually, not by compositor
+
+**Proper fix (future):**
+```c
+// 1. Create overlay textures
+GLuint overlay_texture = createOverlayTexture();
+
+// 2. Create wlr_scene_buffer for each overlay
+struct wlr_scene_buffer *overlay_buffer = 
+    wlr_scene_buffer_create(overlay_layer, overlay_texture);
+
+// 3. wlroots composites automatically with scene
+```
+
+**To fix properly:**
+1. Refactor OverlayRenderer to render to FBO texture
+2. Create `wlr_scene_buffer` nodes for overlay textures
+3. Add buffers to overlay layer in scene graph
+4. Remove post-commit overlay rendering
 
 ---
 

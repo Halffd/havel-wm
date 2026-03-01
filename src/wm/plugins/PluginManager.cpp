@@ -15,14 +15,21 @@ void PluginManager::initialize(void* server) {
     if (m_initialized) {
         return;
     }
-    
+
     m_server = server;
     m_initialized = true;
     
+    // Load configuration (optional - uses defaults if not found)
+    loadConfig("config.json");
+
     printf("[PluginManager] Initialized with %zu plugins\n", m_plugins.size());
-    
+
     // Initialize all registered plugins
     for (auto& plugin : m_plugins) {
+        if (!isPluginEnabled(plugin->name())) {
+            printf("[PluginManager] Skipping disabled plugin: %s\n", plugin->name());
+            continue;
+        }
         printf("[PluginManager] Initializing plugin: %s\n", plugin->name());
         plugin->init(this);
     }
@@ -32,16 +39,55 @@ void PluginManager::shutdown() {
     if (!m_initialized) {
         return;
     }
-    
+
     // Finalize all plugins in reverse order
     for (auto it = m_plugins.rbegin(); it != m_plugins.rend(); ++it) {
         printf("[PluginManager] Finalizing plugin: %s\n", (*it)->name());
         (*it)->fini();
     }
-    
+
     m_plugins.clear();
     m_server = nullptr;
     m_initialized = false;
+}
+
+bool PluginManager::loadConfig(const std::string& configPath) {
+    if (!m_config.loadFromFile(configPath)) {
+        printf("[PluginManager] Failed to load config from %s, using defaults\n", configPath.c_str());
+        return false;
+    }
+    
+    printf("[PluginManager] Config loaded from %s\n", configPath.c_str());
+    
+    // Read plugin enabled state from config
+    const char* pluginNames[] = {
+        "example", "blur", "scale", "wallpaper", "notifications",
+        "custom_layouts", "window_snap", "hot_corners", "gamma",
+        "app_launcher", "alt_tab", "overview", "server_decoration",
+        nullptr
+    };
+    
+    for (int i = 0; pluginNames[i] != nullptr; ++i) {
+        std::string key = std::string("plugins.") + pluginNames[i] + ".enabled";
+        bool enabled = m_config.getBool(key, true);  // Default to enabled
+        m_pluginEnabled[pluginNames[i]] = enabled;
+        printf("[PluginManager] Plugin '%s' %s\n", pluginNames[i], enabled ? "enabled" : "disabled");
+    }
+    
+    return true;
+}
+
+bool PluginManager::isPluginEnabled(const std::string& name) const {
+    auto it = m_pluginEnabled.find(name);
+    if (it == m_pluginEnabled.end()) {
+        return true;  // Default to enabled
+    }
+    return it->second;
+}
+
+void PluginManager::setPluginEnabled(const std::string& name, bool enabled) {
+    m_pluginEnabled[name] = enabled;
+    printf("[PluginManager] Plugin '%s' %s\n", name.c_str(), enabled ? "enabled" : "disabled");
 }
 
 void PluginManager::registerPlugin(std::unique_ptr<Plugin> plugin) {
@@ -72,30 +118,35 @@ void PluginManager::unregisterPlugin(const char* name) {
 // Event dispatch
 void PluginManager::dispatchOutputFrame(const OutputFrameEvent& event) {
     for (auto& plugin : m_plugins) {
+        if (!isPluginEnabled(plugin->name())) continue;
         plugin->onOutputFrame(event);
     }
 }
 
 void PluginManager::dispatchViewMap(const ViewEvent& event) {
     for (auto& plugin : m_plugins) {
+        if (!isPluginEnabled(plugin->name())) continue;
         plugin->onViewMap(event);
     }
 }
 
 void PluginManager::dispatchViewUnmap(const ViewEvent& event) {
     for (auto& plugin : m_plugins) {
+        if (!isPluginEnabled(plugin->name())) continue;
         plugin->onViewUnmap(event);
     }
 }
 
 void PluginManager::dispatchViewDestroy(const ViewEvent& event) {
     for (auto& plugin : m_plugins) {
+        if (!isPluginEnabled(plugin->name())) continue;
         plugin->onViewDestroy(event);
     }
 }
 
 bool PluginManager::dispatchKey(const KeyEvent& event) {
     for (auto& plugin : m_plugins) {
+        if (!isPluginEnabled(plugin->name())) continue;
         if (plugin->onKey(event)) {
             return true;  // Event consumed by plugin
         }
@@ -105,6 +156,7 @@ bool PluginManager::dispatchKey(const KeyEvent& event) {
 
 void PluginManager::renderOverlays(void* renderer) {
     for (auto& plugin : m_plugins) {
+        if (!isPluginEnabled(plugin->name())) continue;
         plugin->renderOverlay(renderer);
     }
 }
@@ -112,6 +164,7 @@ void PluginManager::renderOverlays(void* renderer) {
 void PluginManager::onMouseMotion(int x, int y) {
     // Forward mouse motion to all plugins
     for (auto& plugin : m_plugins) {
+        if (!isPluginEnabled(plugin->name())) continue;
         plugin->onMouseMotion(x, y);
     }
 }
