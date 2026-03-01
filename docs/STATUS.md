@@ -123,8 +123,19 @@ auto allViews = m_api->getAllViews();  // ← Real windows!
 ---
 
 ### ⏳ Overview Plugin
-**Status:** UI works, workspace data is FAKE
+**Status:** ⏳ Stub - UI works, workspace data is FAKE
 
+**What works:**
+- Grid layout rendering
+- Keyboard navigation
+- Workspace selection
+
+**What's fake:**
+- Window counts are zero
+- No actual window data
+- Doesn't use `getViewsInWorkspace()` API
+
+**To fix:**
 ```cpp
 // CURRENT (FAKE):
 for (uint32_t ws = 0; ws < WORKSPACE_COUNT; ws++) {
@@ -135,52 +146,46 @@ for (uint32_t ws = 0; ws < WORKSPACE_COUNT; ws++) {
 }
 
 // NEEDS:
-for (auto* ws : server->getWorkspaces()) {
-    ows.windows = ws->getViews();
+auto views = m_api->getViewsInWorkspace(ws);
+for (View* view : views) {
+    ows.windows.push_back({
+        .title = "Window",  // Would get from metadata API
+        .appId = "app"      // Would get from metadata API
+    });
 }
 ```
-
-**What works:**
-- Grid layout rendering
-- Keyboard navigation
-- Workspace selection
-
-**What's fake:**
-- Window counts are zero
-- No actual window data
-
-**To fix:** Need workspace view enumeration
 
 ---
 
 ### ⏳ App Launcher Plugin
-**Status:** UI works, input is BROKEN
-
-```cpp
-// CURRENT (BROKEN - hardcoded US keycodes):
-static const char keymap[] = {
-    0, 0, '1', '2', '3', ...  // US layout only
-};
-
-// NEEDS (use xkbcommon):
-struct xkb_state* xkb_state = seat->xkb_state;
-xkb_keysym_t keysym = xkb_state_key_get_one_sym(xkb_state, keycode);
-char keysym_name[256];
-xkb_keysym_get_name(keysym, keysym_name, sizeof(keysym_name));
-```
+**Status:** ⏳ Stub - UI works, input PARTIALLY FIXED
 
 **What works:**
 - Search box UI
 - Results list rendering
 - Fuzzy matching logic
 - App launching (stub)
+- **XKB-based text input** (layout-aware)
 
-**What's BROKEN:**
-- Only works with US keyboard layout
-- Shift/caps don't work
-- International layouts broken
+**What's still broken:**
+- Shift/caps handling incomplete
+- Special characters not fully supported
+- No IME support
 
-**To fix:** Use xkbcommon (already linked!)
+**Fixed:**
+```cpp
+// NOW WORKS (layout-aware):
+keysym = xkb_state_key_get_one_sym(keyboard->xkb_state, keycode);
+if (keysym >= XKB_KEY_space && keysym <= XKB_KEY_asciitilde) {
+    key_char = (char)keysym;
+}
+launcherInput(key_char);
+```
+
+**To fix:**
+- Add proper shift modifier handling
+- Add IME support via text-input protocol
+- Add dead key handling for international input
 
 ---
 
@@ -233,6 +238,14 @@ No way to disable/reconfigure plugins.
 - Config file format (JSON/YAML)
 - Plugin enable/disable
 - Keybinding remapping
+
+### ❌ KeybindingManager Integration
+Keybindings still handled in Server::handleKey() instead of central manager.
+
+**Need:**
+- Migrate all hotkeys to KeybindingManager
+- Add config file for keybindings
+- Support chord keybindings (e.g., Ctrl+Alt+T)
 
 ---
 
@@ -339,11 +352,12 @@ uint64_t currentTime = getMonotonicTimeMs();
 11. ⏳ Fix Overview to use real workspace data
 12. ⏳ Fix HotCorners debounce/time source
 13. ⏳ Add window metadata API (appId, title from XDG surface)
+14. ⏳ Add App Launcher shift/special char handling
 
 ### P2 (Medium)
-14. Fix overlay render pass order
-15. Add window texture capture for thumbnails
-16. Add plugin configuration system
+15. Fix overlay render pass order
+16. Add window texture capture for thumbnails
+17. Add plugin configuration system
 
 ---
 
@@ -626,11 +640,12 @@ If compositor never sends configure → client waits forever.
 
 **What we don't have:**
 - Window metadata API (appId/title from XDG surface)
-- Plugin keybinding migration (still uses keycodes)
+- Plugin keybinding migration (still uses hardcoded keycodes in Server)
 - View* pointer fully removed (still stored but not dereferenced)
 - Window texture capture for thumbnails
-- Plugin configuration
+- Plugin configuration system
 - Overview plugin real data
+- App Launcher full text input (shift/special chars)
 
 **Honest assessment:**
 The compositor is **architecturally complete** and now has **real window awareness**. The foundation is solid—what's needed now is connecting remaining stubs to real compositor state.
@@ -648,9 +663,11 @@ The compositor is **architecturally complete** and now has **real window awarene
 10. **Server-side decorations** - title bars with clickable buttons
 11. **Meta+click move/resize** - intuitive window management
 12. **Startup commands** - auto-launch apps on compositor start
+13. **Documentation** - STATUS.md reflects actual feature state
 
 **Next sprint priorities:**
 1. Fix Overview plugin to use real workspace data
 2. Add window metadata API (query XDG surface for appId/title)
 3. Fix HotCorners debounce
 4. Add window texture capture for Alt-Tab thumbnails
+5. Add App Launcher shift/special character handling
