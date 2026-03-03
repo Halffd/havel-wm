@@ -75,6 +75,7 @@ struct KeyEvent {
     bool pressed;
     uint32_t keysym;    // XKB keysym (layout-aware)
     char key_char;      // ASCII character from keysym (for text input)
+    char utf8[8];       // UTF-8 encoded character (multi-byte support)
 };
 
 /**

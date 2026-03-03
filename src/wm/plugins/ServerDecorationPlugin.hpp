@@ -4,6 +4,7 @@
 #include <wm/render/OverlayRenderer.hpp>
 #include <unordered_map>
 #include <string>
+#include <array>
 
 namespace havel {
 
@@ -20,7 +21,7 @@ struct WindowDecoration {
     int x = 0, y = 0;                  // Window position
     int width = 0, height = 0;         // Window size
     uint32_t workspace = 0;            // Workspace ID
-    
+
     // For maximize restore
     int view_start_x = 0, view_start_y = 0;
     int view_start_w = 0, view_start_h = 0;
@@ -29,25 +30,35 @@ struct WindowDecoration {
     static constexpr int TITLE_BAR_HEIGHT = 32;
     static constexpr int BORDER_WIDTH = 1;
 
-    // Colors
-    static constexpr float FOCUSED_BG[] = {0.2f, 0.3f, 0.4f, 1.0f};
-    static constexpr float UNFOCUSED_BG[] = {0.15f, 0.15f, 0.2f, 1.0f};
-    static constexpr float TEXT_COLOR[] = {1.0f, 1.0f, 1.0f, 1.0f};
-    static constexpr float BUTTON_HOVER[] = {0.4f, 0.4f, 0.5f, 1.0f};
+    // Colors (inline constexpr to avoid linker errors)
+    static inline constexpr std::array<float, 4> FOCUSED_BG   = {0.2f, 0.3f, 0.4f, 1.0f};
+    static inline constexpr std::array<float, 4> UNFOCUSED_BG = {0.15f, 0.15f, 0.2f, 1.0f};
+    static inline constexpr std::array<float, 4> TEXT_COLOR   = {1.0f, 1.0f, 1.0f, 1.0f};
+    static inline constexpr std::array<float, 4> BUTTON_HOVER = {0.4f, 0.4f, 0.5f, 1.0f};
+};
+
+/**
+ * Button types for window decorations
+ */
+enum class DecoButton {
+    None = 0,
+    Close,
+    Maximize,
+    Minimize
 };
 
 /**
  * Server-Side Decoration Plugin
- * 
+ *
  * Implements server-side window decorations using the
  * xdg_decoration or wlr_server_decoration protocol.
- * 
+ *
  * Features:
  * - Title bar with window title
  * - Close, maximize, minimize buttons
  * - Visual focus indication
  * - Border around windows
- * 
+ *
  * Keybindings:
  * - None (decorations are always visible)
  */
@@ -59,7 +70,7 @@ public:
     void init(CompositorAPI* api) override;
     void fini() override;
     void loadConfig(const std::string& configPath) override;
-    
+
     bool onKey(const KeyEvent& event) override;
     void onOutputFrame(const OutputFrameEvent& event) override;
     void onViewMap(const ViewEvent& event) override;
@@ -72,10 +83,10 @@ public:
 private:
     CompositorAPI* m_api = nullptr;
     std::unordered_map<void*, WindowDecoration> m_decorations;
-    void* m_hoveredView = nullptr;     // View under mouse
-    void* m_hoveredButton = nullptr;   // Currently hovered button (1=close, 2=max, 3=min)
-    int m_mouseX = 0, m_mouseY = 0;    // Last mouse position
-    
+    void* m_hoveredView = nullptr;           // View under mouse
+    DecoButton m_hoveredButton = DecoButton::None;  // Currently hovered button
+    int m_mouseX = 0, m_mouseY = 0;          // Last mouse position
+
     // Decoration manager global (for protocol)
     void* m_decorationManager = nullptr;
 
@@ -88,7 +99,7 @@ private:
     void handleMaximizeClick(void* view);
     void handleMinimizeClick(void* view);
 
-    void* buttonAtPosition(const WindowDecoration& deco, int mx, int my);
+    DecoButton buttonAtPosition(const WindowDecoration& deco, int mx, int my);
 };
 
 // Plugin factory

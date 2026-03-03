@@ -17,7 +17,15 @@ Server::Server() {
         m_workspaces[i] = std::make_unique<Workspace>(i);
     }
 
-    // Initialize plugin manager
+    // Load plugin configuration
+    const char* home = getenv("HOME");
+    if (home) {
+        char configPath[512];
+        snprintf(configPath, sizeof(configPath), "%s/.config/havel-wm/plugins.json", home);
+        m_pluginManager.loadConfig(configPath);
+    }
+
+    // Initialize plugin manager (will skip disabled plugins)
     m_pluginManager.initialize(this);
 
     // Register built-in plugins
@@ -35,12 +43,21 @@ Server::Server() {
     registerPlugin(std::unique_ptr<Plugin>(create_overview_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_server_decoration_plugin()));
 
+    // Register built-in keybindings
+    registerKeybindings();
+
+    // Initialize text input manager (IME support)
+    // This must be done after wl_display is created
+    // Will be initialized in wlr_bridge.c after display creation
+    m_textInputManager = nullptr;
+
     LOG_INFO("Plugins initialized (%d plugins)", m_pluginManager.plugins().size());
 }
 
 Server::~Server() {
     LOG_INFO("Server destructor");
     m_pluginManager.shutdown();
+    // TextInputManager is owned by C layer, don't delete here
 }
 
 void Server::registerPlugin(std::unique_ptr<Plugin> plugin) {
@@ -226,16 +243,29 @@ void Server::onViewDestroyed(View* view) {
     }
 }
 
-bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char) {
+bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char, const char* utf8) {
     if (!pressed) return false;
 
-    // First, give plugins a chance to handle the key
+    // First, check registered keybindings (highest priority)
+    if (m_keybindingManager.handleKey(keycode, pressed, modifiers)) {
+        return true;
+    }
+
+    // Then, give plugins a chance to handle the key
     KeyEvent event;
     event.keycode = keycode;
     event.modifiers = modifiers;
     event.pressed = pressed;
     event.keysym = keysym;
     event.key_char = key_char;
+
+    // Copy UTF-8 string (up to 7 bytes + null terminator)
+    if (utf8) {
+        strncpy(event.utf8, utf8, 7);
+        event.utf8[7] = '\0';
+    } else {
+        event.utf8[0] = '\0';
+    }
 
     if (m_pluginManager.dispatchKey(event)) {
         // Plugin consumed the event
@@ -261,301 +291,7 @@ bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers, uint3
               shift ? "Shift+" : "",
               ctrl ? "Ctrl+" : "");
 
-    // ========================================================================
-    // Ctrl+Meta combinations (highest priority)
-    // ========================================================================
-    
-    // Ctrl+Meta+F4: Quit compositor
-    if (ctrl && meta && keycode == 111) {  // F4
-        LOG_INFO("Quit requested (Ctrl+Meta+F4)");
-        quit();
-        return true;
-    }
-    
-    // Ctrl+Meta+Return: Show rofi
-    if (ctrl && meta && keycode == 28) {  // Return
-        LOG_INFO("Launching rofi (Ctrl+Meta+Return)");
-        spawnRofi();
-        return true;
-    }
-
-    // ========================================================================
-    // Meta (Super/Windows key) combinations
-    // ========================================================================
-    
-    if (meta) {
-        // Meta+Tab or Meta+PgUp/PgDn: Workspace switch
-        if (keycode == 23) {  // Tab
-            LOG_INFO("Workspace switch (Meta+Tab)");
-            workspaceStep(shift);
-            return true;
-        }
-        if (keycode == 104) {  // PgUp
-            LOG_INFO("Workspace switch (Meta+PgUp)");
-            workspaceStep(false);
-            return true;
-        }
-        if (keycode == 105) {  // PgDn
-            LOG_INFO("Workspace switch (Meta+PgDn)");
-            workspaceStep(true);
-            return true;
-        }
-
-        // Meta+W: Show workspace overview
-        if (keycode == 32) {  // w
-            LOG_INFO("Show overview (Meta+W)");
-            showOverview();
-            return true;
-        }
-
-        // Meta+D: Show app launcher
-        if (keycode == 33) {  // d
-            LOG_INFO("Show launcher (Meta+D)");
-            showLauncher();
-            return true;
-        }
-
-        // Meta+1/2/3/4/5/6/7/8/9/0: Direct workspace switch
-        if (keycode >= 10 && keycode <= 19) {
-            uint32_t ws = (keycode == 19) ? 9 : (keycode - 10);  // 0 = workspace 9
-            LOG_INFO("Switch to workspace %u (Meta+%u)", ws, keycode - 9);
-            workspaceStepTo(ws);
-            return true;
-        }
-
-        // Meta+Shift+1/2/3/4/5/6/7/8/9/0: Move window to workspace
-        if (shift && keycode >= 10 && keycode <= 19) {
-            uint32_t ws = (keycode == 19) ? 9 : (keycode - 10);
-            LOG_INFO("Move view to workspace %u (Meta+Shift+%u)", ws, keycode - 9);
-            moveViewToWorkspace(ws);
-            return true;
-        }
-        
-        // Meta+y: Toggle tiling
-        if (keycode == 21) {  // y
-            LOG_INFO("Toggle tiling (Meta+y)");
-            workspaceToggleTiling();
-            return true;
-        }
-
-        // Meta+g: Toggle grayscale effect
-        if (keycode == 34) {  // g
-            LOG_INFO("Toggle grayscale (Meta+g)");
-            toggleGrayscale();
-            return true;
-        }
-
-        // Meta+n: Toggle negative/invert effect
-        if (keycode == 39) {  // n
-            LOG_INFO("Toggle negative (Meta+n)");
-            toggleNegative();
-            return true;
-        }
-
-        // Meta+Return: Spawn terminal (alacritty/foot)
-        if (keycode == 28) {  // Return
-            LOG_INFO("Spawn terminal (Meta+Return)");
-            spawnTerminal();
-            return true;
-        }
-        
-        // Meta+h/l: Focus first/last view
-        if (keycode == 35) {  // h
-            LOG_DEBUG("Focus first view (Meta+h)");
-            focusFirstLastView(true);
-            return true;
-        }
-        if (keycode == 38) {  // l
-            LOG_DEBUG("Focus last view (Meta+l)");
-            focusFirstLastView(false);
-            return true;
-        }
-        
-        // Meta+b: Open default browser
-        if (keycode == 30) {  // b
-            LOG_INFO("Open browser (Meta+b)");
-            spawnBrowser();
-            return true;
-        }
-        
-        // Meta+e: Open default file explorer
-        if (keycode == 18) {  // e
-            LOG_INFO("Open file explorer (Meta+e)");
-            spawnFileManager();
-            return true;
-        }
-        
-        // Meta+q: Close window
-        if (keycode == 16) {  // q
-            LOG_INFO("Close window (Meta+q)");
-            closeFocusedWindow();
-            return true;
-        }
-        
-        // Meta+m: Toggle maximize
-        if (keycode == 31) {  // m
-            LOG_INFO("Toggle maximize (Meta+m)");
-            toggleMaximize();
-            return true;
-        }
-        
-        // Meta+j/k: Focus next/prev view
-        if (keycode == 30) {  // j
-            LOG_DEBUG("Focus next view (Meta+j)");
-            focusNextMru(false);
-            return true;
-        }
-        if (keycode == 31) {  // k
-            LOG_DEBUG("Focus prev view (Meta+k)");
-            focusNextMru(true);
-            return true;
-        }
-        
-        // Meta+space: Toggle floating
-        if (keycode == 57) {  // space
-            LOG_INFO("Toggle floating (Meta+space)");
-            toggleFloating();
-            return true;
-        }
-        
-        // Meta+Insert: Minimize window
-        if (keycode == 118) {  // Insert
-            LOG_INFO("Minimize window (Meta+Insert)");
-            minimizeWindow();
-            return true;
-        }
-        
-        // Meta+F: Toggle fullscreen
-        if (keycode == 33) {  // F
-            LOG_INFO("Toggle fullscreen (Meta+F)");
-            toggleFullscreen();
-            return true;
-        }
-        
-        // Meta+A: Toggle always-on-top
-        if (keycode == 30) {  // A
-            LOG_INFO("Toggle always-on-top (Meta+A)");
-            toggleAlwaysOnTop();
-            return true;
-        }
-    }
-
-    // ========================================================================
-    // Alt combinations
-    // ========================================================================
-
-    if (alt) {
-        // Alt+Tab: Show overlay or navigate
-        if (keycode == 23) {  // Tab
-            if (isAltTabVisible()) {
-                altTabNext();
-            } else {
-                showAltTab(shift);  // Shift reverses direction
-            }
-            return true;
-        }
-
-        // Alt+PgUp/PgDn: Move window to next/previous workspace
-        if (keycode == 104) {  // PgUp
-            LOG_INFO("Move view to prev workspace (Alt+PgUp)");
-            moveViewToWorkspaceRelative(false);
-            return true;
-        }
-        if (keycode == 105) {  // PgDn
-            LOG_INFO("Move view to next workspace (Alt+PgDn)");
-            moveViewToWorkspaceRelative(true);
-            return true;
-        }
-
-        // Alt+Return: Spawn terminal (fallback)
-        if (keycode == 28) {  // Return
-            LOG_INFO("Spawn terminal (Alt+Return)");
-            spawnTerminal();
-            return true;
-        }
-
-        // Alt+F4: Close window (standard WM binding)
-        if (keycode == 111) {  // F4
-            LOG_INFO("Close window (Alt+F4)");
-            closeFocusedWindow();
-            return true;
-        }
-    }
-
-    // ========================================================================
-    // Overlay navigation (when visible)
-    // ========================================================================
-
-    // Alt-Tab overlay navigation
-    if (isAltTabVisible()) {
-        if (keycode == 111) {  // Escape - cancel
-            altTabCancel();
-            return true;
-        }
-        // Tab already handled above for cycling
-        return true;  // Consume other keys while overlay visible
-    }
-
-    // Overview overlay navigation
-    if (isOverviewVisible()) {
-        if (keycode == 111) {  // Escape
-            hideOverview();
-            return true;
-        }
-        if (keycode == 115) {  // Up
-            overviewNavigate(0, -1);
-            return true;
-        }
-        if (keycode == 116) {  // Down
-            overviewNavigate(0, 1);
-            return true;
-        }
-        if (keycode == 113) {  // Left
-            overviewNavigate(-1, 0);
-            return true;
-        }
-        if (keycode == 114) {  // Right
-            overviewNavigate(1, 0);
-            return true;
-        }
-        if (keycode == 28) {  // Enter - select
-            overviewSelect();
-            return true;
-        }
-        return true;
-    }
-
-    // Launcher overlay navigation
-    if (isLauncherVisible()) {
-        if (keycode == 111) {  // Escape
-            hideLauncher();
-            return true;
-        }
-        if (keycode == 115) {  // Up
-            launcherNavigate(-1);
-            return true;
-        }
-        if (keycode == 116) {  // Down
-            launcherNavigate(1);
-            return true;
-        }
-        if (keycode == 28) {  // Enter - select
-            launcherSelect();
-            return true;
-        }
-        if (keycode == 14) {  // Backspace
-            launcherBackspace();
-            return true;
-        }
-        // Text input using xkbcommon keysym (layout-aware)
-        if (key_char != 0 && key_char >= 32 && key_char <= 126) {
-            launcherInput(key_char);
-            return true;
-        }
-        return true;
-    }
-
-    // Key not consumed by compositor, forward to client
+    // Key not consumed by keybindings or plugins, return false
     return false;
 }
 
@@ -1356,13 +1092,167 @@ void Server::animateViewResize(View* view, int fromW, int fromH, int toW, int to
 
 void Server::animateViewScale(View* view, float from, float to) {
     auto& state = m_viewAnimState[view];
-    
+
     m_animator.scale(from, to,
         [this, view, &state](float scale) {
             state.currentScale = scale;
             // Scale would be applied via surface transformation
             // Placeholder for future implementation
         });
+}
+
+// ============================================================================
+// Keybinding Registration
+// ============================================================================
+
+void Server::registerKeybindings() {
+    using namespace std::placeholders;
+
+    // Ctrl+Meta+F4: Quit compositor
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_CTRL | KeybindingManager::MOD_LOGO, 111,
+        "quit", [this]() { quit(); }
+    );
+
+    // Ctrl+Meta+Return: Show rofi
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_CTRL | KeybindingManager::MOD_LOGO, 28,
+        "show_rofi", [this]() { spawnRofi(); }
+    );
+
+    // Meta+Tab: Workspace switch forward
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, 23,
+        "workspace_next", [this]() { workspaceStep(false); }
+    );
+
+    // Meta+Shift+Tab: Workspace switch backward
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 23,
+        "workspace_prev", [this]() { workspaceStep(true); }
+    );
+
+    // Meta+PgUp: Workspace switch backward
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, 104,
+        "workspace_prev_pgup", [this]() { workspaceStep(false); }
+    );
+
+    // Meta+PgDn: Workspace switch forward
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, 105,
+        "workspace_next_pgdn", [this]() { workspaceStep(true); }
+    );
+
+    // Meta+W: Show workspace overview
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, 32,
+        "show_overview", [this]() { showOverview(); }
+    );
+
+    // Meta+D: Show app launcher
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, 33,
+        "show_launcher", [this]() { showLauncher(); }
+    );
+
+    // Meta+Y: Toggle tiling
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, 21,
+        "toggle_tiling", [this]() { workspaceToggleTiling(); }
+    );
+
+    // Meta+G: Toggle grayscale
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, 34,
+        "toggle_grayscale", [this]() { toggleGrayscale(); }
+    );
+
+    // Meta+N: Toggle negative
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, 39,
+        "toggle_negative", [this]() { toggleNegative(); }
+    );
+
+    // Meta+Shift+Q: Close focused window
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 16,
+        "close_window", [this]() { closeFocusedWindow(); }
+    );
+
+    // Meta+F: Toggle fullscreen
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, 35,
+        "toggle_fullscreen", [this]() { toggleFullscreen(); }
+    );
+
+    // Meta+Space: Toggle floating
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, 57,
+        "toggle_floating", [this]() { toggleFloating(); }
+    );
+
+    // Meta+Shift+F: Toggle always on top
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 35,
+        "toggle_always_on_top", [this]() { toggleAlwaysOnTop(); }
+    );
+
+    // Meta+0: Minimize window
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, 11,
+        "minimize_window", [this]() { minimizeWindow(); }
+    );
+
+    // Meta+Shift+G: Gamma night mode
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 34,
+        "gamma_night_mode", [this]() {
+            // Would toggle gamma plugin night mode
+            LOG_INFO("Night mode toggle (stub)");
+        }
+    );
+
+    // Meta+Shift+R: Reload configuration (hot-reload)
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 19,
+        "reload_config", [this]() {
+            LOG_INFO("Reloading configuration...");
+            m_pluginManager.reloadConfig();
+        }
+    );
+
+    // Meta+1 through Meta+9: Direct workspace switch
+    for (uint32_t i = 0; i < 9; i++) {
+        m_keybindingManager.registerKeybinding(
+            KeybindingManager::MOD_LOGO, 10 + i,
+            ("workspace_" + std::to_string(i + 1)).c_str(),
+            [this, i]() { workspaceStepTo(i); }
+        );
+    }
+
+    // Meta+0: Workspace 10
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, 19,
+        "workspace_10", [this]() { workspaceStepTo(9); }
+    );
+
+    // Meta+Shift+1 through Meta+Shift+9: Move window to workspace
+    for (uint32_t i = 0; i < 9; i++) {
+        m_keybindingManager.registerKeybinding(
+            KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 10 + i,
+            ("move_to_workspace_" + std::to_string(i + 1)).c_str(),
+            [this, i]() { moveViewToWorkspace(i); }
+        );
+    }
+
+    // Meta+Shift+0: Move window to workspace 10
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 19,
+        "move_to_workspace_10", [this]() { moveViewToWorkspace(9); }
+    );
+
+    LOG_INFO("Keybindings registered");
 }
 
 } // namespace havel

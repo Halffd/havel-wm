@@ -86,9 +86,9 @@ void havel_cpp_on_view_destroyed(struct havel_cpp_server* server, void* c_view) 
     server->server->onViewDestroyed(view);
 }
 
-bool havel_cpp_on_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char) {
+bool havel_cpp_on_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char, const char* utf8) {
     if (!server) return false;
-    return server->server->handleKey(keycode, pressed, modifiers, keysym, key_char);
+    return server->server->handleKey(keycode, pressed, modifiers, keysym, key_char, utf8);
 }
 
 void havel_cpp_on_pointer_button(struct havel_cpp_server* server, uint32_t button, bool pressed, double x, double y) {

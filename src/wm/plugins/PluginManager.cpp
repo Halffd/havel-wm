@@ -1,5 +1,6 @@
 #include "PluginManager.hpp"
 #include <wm/Server.hpp>
+#include <wm/bridge.h>
 #include <cstring>
 #include <cstdio>
 
@@ -11,19 +12,81 @@ PluginManager::~PluginManager() {
     shutdown();
 }
 
+bool PluginManager::loadConfig(const std::string& path) {
+    m_configPath = path;  // Store for hot-reload
+    bool loaded = m_config.load(path);
+    if (loaded) {
+        printf("[PluginManager] Configuration loaded from %s\n", path.c_str());
+    } else {
+        printf("[PluginManager] No configuration file found at %s\n", path.c_str());
+    }
+    return loaded;
+}
+
+bool PluginManager::reloadConfig() {
+    if (m_configPath.empty()) {
+        printf("[PluginManager] No config path stored, cannot reload\n");
+        return false;
+    }
+
+    printf("[PluginManager] Reloading configuration from %s\n", m_configPath.c_str());
+    
+    // Store currently enabled plugins
+    std::vector<std::string> previouslyEnabled;
+    for (const auto& plugin : m_plugins) {
+        if (m_config.isEnabled(plugin->name())) {
+            previouslyEnabled.push_back(plugin->name());
+        }
+    }
+
+    // Reload config
+    bool loaded = m_config.load(m_configPath);
+    if (!loaded) {
+        printf("[PluginManager] Failed to reload config, keeping previous settings\n");
+        return false;
+    }
+
+    // Check for plugins that need to be enabled/disabled
+    for (const auto& plugin : m_plugins) {
+        std::string name = plugin->name();
+        bool shouldBeEnabled = m_config.isEnabled(name);
+        bool wasEnabled = std::find(previouslyEnabled.begin(), previouslyEnabled.end(), name) != previouslyEnabled.end();
+
+        if (shouldBeEnabled && !wasEnabled) {
+            printf("[PluginManager] Enabling plugin: %s\n", name.c_str());
+            plugin->init(this);
+        } else if (!shouldBeEnabled && wasEnabled) {
+            printf("[PluginManager] Disabling plugin: %s\n", name.c_str());
+            plugin->fini();
+        }
+    }
+
+    printf("[PluginManager] Configuration reloaded successfully\n");
+    return true;
+}
+
+bool PluginManager::isPluginEnabled(const std::string& name) const {
+    return m_config.isEnabled(name);
+}
+
 void PluginManager::initialize(void* server) {
     if (m_initialized) {
         return;
     }
-    
+
     m_server = server;
     m_initialized = true;
-    
+
     printf("[PluginManager] Initialized with %zu plugins\n", m_plugins.size());
-    
-    // Initialize all registered plugins
+
+    // Initialize all registered plugins (check if enabled)
     for (auto& plugin : m_plugins) {
-        printf("[PluginManager] Initializing plugin: %s\n", plugin->name());
+        std::string name = plugin->name();
+        if (!isPluginEnabled(name)) {
+            printf("[PluginManager] Skipping disabled plugin: %s\n", name.c_str());
+            continue;
+        }
+        printf("[PluginManager] Initializing plugin: %s\n", name.c_str());
         plugin->init(this);
     }
 }
@@ -48,13 +111,19 @@ void PluginManager::registerPlugin(std::unique_ptr<Plugin> plugin) {
     if (!plugin) {
         return;
     }
-    
+
     printf("[PluginManager] Registered plugin: %s\n", plugin->name());
     m_plugins.push_back(std::move(plugin));
-    
-    // If already initialized, init the new plugin immediately
+
+    // If already initialized, init the new plugin immediately (if enabled)
     if (m_initialized && m_server) {
-        m_plugins.back()->init(this);
+        std::string name = m_plugins.back()->name();
+        if (isPluginEnabled(name)) {
+            printf("[PluginManager] Initializing newly registered plugin: %s\n", name.c_str());
+            m_plugins.back()->init(this);
+        } else {
+            printf("[PluginManager] Skipping disabled plugin: %s\n", name.c_str());
+        }
     }
 }
 
@@ -104,9 +173,25 @@ bool PluginManager::dispatchKey(const KeyEvent& event) {
 }
 
 void PluginManager::renderOverlays(void* renderer) {
+    // Scene graph based overlay rendering
+    // Plugins add/update nodes in the overlay layer
+    // The overlay layer is rendered by wlroots during scene commit
+    
+    // Get overlay layer from Server
+    if (!m_server) return;
+    auto* server = static_cast<havel::Server*>(m_server);
+    void* overlayLayer = server->overlayLayer();
+    
+    if (!overlayLayer) return;
+    
+    // Render overlays using scene graph
+    // Each plugin adds its overlay nodes to the overlay layer
+    // Alt-Tab, Overview, App Launcher all use this layer
     for (auto& plugin : m_plugins) {
-        plugin->renderOverlay(renderer);
+        plugin->renderOverlay(overlayLayer);
     }
+    
+    (void)renderer;  // Not used for scene graph rendering
 }
 
 void PluginManager::onMouseMotion(int x, int y) {
@@ -180,6 +265,22 @@ std::string PluginManager::getViewAppId(View* view) {
 std::string PluginManager::getViewTitle(View* view) {
     if (!view) return "";
     return view->title();
+}
+
+uint32_t PluginManager::getViewTextureId(View* view) {
+    if (!view) return 0;
+    void* native = view->nativeHandle();
+    return havel_get_view_texture_id(native);
+}
+
+int PluginManager::getViewTextureWidth(View* view) {
+    if (!view) return 0;
+    return havel_get_view_texture_width(view->nativeHandle());
+}
+
+int PluginManager::getViewTextureHeight(View* view) {
+    if (!view) return 0;
+    return havel_get_view_texture_height(view->nativeHandle());
 }
 
 uint32_t PluginManager::getActiveWorkspace() {

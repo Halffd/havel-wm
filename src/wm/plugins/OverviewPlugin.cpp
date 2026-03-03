@@ -288,24 +288,24 @@ private:
     
     void renderOverlay(void* rendererPtr) override {
         if (!m_visible || !rendererPtr) return;
-        
+
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
-        
+
         int screenWidth = renderer->getScreenWidth();
         int screenHeight = renderer->getScreenHeight();
-        
+
         // Draw semi-transparent background
         renderer->drawRect(0, 0, screenWidth, screenHeight, Color(0.0f, 0.0f, 0.0f, 0.8f));
-        
+
         // Calculate workspace grid layout
         int wsCount = (int)m_workspaces.size();
         int gridCols = 3;
         int gridRows = (wsCount + gridCols - 1) / gridCols;
-        
+
         int wsWidth = (screenWidth - 100) / gridCols;
         int wsHeight = (screenHeight - 100) / gridRows;
         int spacing = 20;
-        
+
         // Draw each workspace
         for (size_t i = 0; i < m_workspaces.size(); i++) {
             OverviewWorkspace& ws = m_workspaces[i];
@@ -313,22 +313,49 @@ private:
             int row = ws.gridY;
             int x = 50 + col * (wsWidth + spacing);
             int y = 50 + row * (wsHeight + spacing);
-            
+
             bool isSelected = ((int)i == m_selectedWorkspace);
-            
+
             // Draw workspace background
             Color bgColor = isSelected ? Color(0.2f, 0.3f, 0.4f, 0.9f) : Color(0.15f, 0.15f, 0.15f, 0.8f);
             renderer->drawRect((float)x, (float)y, (float)wsWidth, (float)wsHeight, bgColor);
-            
+
             // Draw border
             Color borderColor = isSelected ? Color(1.0f, 1.0f, 1.0f, 1.0f) : Color(0.4f, 0.4f, 0.4f, 0.5f);
             renderer->drawBorder(FloatRect((float)x, (float)y, (float)wsWidth, (float)wsHeight), borderColor, isSelected ? 3.0f : 2.0f);
-            
+
             // Draw workspace number
             char wsLabel[16];
             snprintf(wsLabel, sizeof(wsLabel), "Workspace %d", ws.id + 1);
             renderer->drawTextCentered(wsLabel, (float)(x + wsWidth/2), (float)(y + 20), 16.0f, Color(0.8f, 0.8f, 0.8f, 1.0f));
-            
+
+            // Draw window thumbnails (miniature rectangles)
+            if (!ws.windows.empty()) {
+                int winCols = 3;
+                int winRows = (ws.windows.size() + winCols - 1) / winCols;
+                int winWidth = (wsWidth - 20) / winCols;
+                int winHeight = (wsHeight - 60) / winRows;
+                int winSpacing = 5;
+
+                for (size_t j = 0; j < ws.windows.size(); j++) {
+                    OverviewWindow& win = ws.windows[j];
+                    int winCol = win.gridX;
+                    int winRow = win.gridY;
+                    int winX = x + 10 + winCol * (winWidth + winSpacing);
+                    int winY = y + 40 + winRow * (winHeight + winSpacing);
+
+                    bool isWinSelected = ((int)j == m_selectedWindow && isSelected);
+
+                    // Draw window thumbnail
+                    Color winColor = isWinSelected ? Color(0.4f, 0.5f, 0.6f, 0.9f) : Color(0.3f, 0.3f, 0.35f, 0.8f);
+                    renderer->drawRect((float)winX, (float)winY, (float)winWidth, (float)winHeight, winColor);
+
+                    // Draw window border
+                    Color winBorder = isWinSelected ? Color(1.0f, 1.0f, 1.0f, 1.0f) : Color(0.5f, 0.5f, 0.5f, 0.5f);
+                    renderer->drawBorder(FloatRect((float)winX, (float)winY, (float)winWidth, (float)winHeight), winBorder, isWinSelected ? 2.0f : 1.0f);
+                }
+            }
+
             // Draw window count
             if (!ws.windows.empty()) {
                 char winLabel[32];
@@ -336,7 +363,7 @@ private:
                 renderer->drawTextCentered(winLabel, (float)(x + wsWidth/2), (float)(y + wsHeight - 20), 12.0f, Color(0.6f, 0.6f, 0.6f, 1.0f));
             }
         }
-        
+
         // Draw instruction text
         const char* instruction = "Arrows: Navigate | Enter: Select | Esc: Cancel";
         float textWidth = strlen(instruction) * 10.0f;

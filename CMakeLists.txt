@@ -54,9 +54,34 @@ execute_process(
     ${PROTOCOL_HEADERS_DIR}/xdg-shell-protocol.c
 )
 
+# Generate layer-shell protocol (unstable) - download from wlroots if not present
+if(NOT EXISTS ${WAYLAND_PROTOCOLS_DIR}/unstable/wlr-layer-shell/unstable-v1/wlr-layer-shell-unstable-v1.xml)
+    file(DOWNLOAD
+        https://gitlab.freedesktop.org/wlroots/wlroots/-/raw/master/protocol/wlr-layer-shell-unstable-v1.xml
+        ${CMAKE_BINARY_DIR}/wlr-layer-shell-unstable-v1.xml
+        SHOW_PROGRESS
+    )
+    set(LAYER_SHELL_XML ${CMAKE_BINARY_DIR}/wlr-layer-shell-unstable-v1.xml)
+else()
+    set(LAYER_SHELL_XML ${WAYLAND_PROTOCOLS_DIR}/unstable/wlr-layer-shell/unstable-v1/wlr-layer-shell-unstable-v1.xml)
+endif()
+
+execute_process(
+    COMMAND ${WAYLAND_SCANNER} server-header
+    ${LAYER_SHELL_XML}
+    ${PROTOCOL_HEADERS_DIR}/wlr-layer-shell-unstable-v1-protocol.h
+)
+
+execute_process(
+    COMMAND ${WAYLAND_SCANNER} private-code
+    ${LAYER_SHELL_XML}
+    ${PROTOCOL_HEADERS_DIR}/wlr-layer-shell-unstable-v1-protocol.c
+)
+
 # Add the generated protocol source
 set(PROTOCOL_SOURCES
     ${PROTOCOL_HEADERS_DIR}/xdg-shell-protocol.c
+    ${PROTOCOL_HEADERS_DIR}/wlr-layer-shell-unstable-v1-protocol.c
 )
 
 # C++ WM core sources
@@ -146,6 +171,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${FREETYPE_INCLUDE_DIRS}
     # UI framework include (for future use)
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/include
+    # Protocol headers for wlroots unstable headers
+    ${PROTOCOL_HEADERS_DIR}
 )
 
 # Link libraries

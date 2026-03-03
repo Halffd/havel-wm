@@ -37,6 +37,11 @@ public:
     virtual std::string getViewAppId(View* view) = 0;
     virtual std::string getViewTitle(View* view) = 0;
 
+    // Window texture for thumbnails (returns OpenGL texture ID, 0 if not available)
+    virtual uint32_t getViewTextureId(View* view) = 0;
+    virtual int getViewTextureWidth(View* view) = 0;
+    virtual int getViewTextureHeight(View* view) = 0;
+
     // Workspace operations
     virtual uint32_t getActiveWorkspace() = 0;
     virtual void setActiveWorkspace(uint32_t id) = 0;

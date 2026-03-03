@@ -16,7 +16,7 @@ cd "${BUILD_DIR}"
 # Configure
 echo "Configuring..."
 cmake .. \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_TYPE=Debug \
     -DCMAKE_INSTALL_PREFIX=/usr/local \
     "$@"
 

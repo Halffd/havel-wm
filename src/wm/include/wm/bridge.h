@@ -44,7 +44,7 @@ void havel_cpp_on_view_unmapped(struct havel_cpp_server* server, void* c_view);
 void havel_cpp_on_view_destroyed(struct havel_cpp_server* server, void* c_view);
 
 // Input events - returns true if consumed by compositor
-bool havel_cpp_on_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char);
+bool havel_cpp_on_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char, const char* utf8);
 void havel_cpp_on_pointer_button(struct havel_cpp_server* server, uint32_t button, bool pressed, double x, double y);
 void havel_cpp_on_pointer_motion(struct havel_cpp_server* server, double x, double y);
 void havel_cpp_on_pointer_decoration_motion(struct havel_cpp_server* server, int x, int y);
@@ -76,6 +76,11 @@ void* havel_cpp_get_plugin_manager(struct havel_cpp_server* server);
 void havel_wlr_set_gamma(havel_wlr_server_t* server, float gamma);
 void havel_wlr_set_temperature(havel_wlr_server_t* server, int kelvin);
 void havel_wlr_set_brightness(havel_wlr_server_t* server, float brightness);
+
+// Texture access for Alt-Tab thumbnails (called from C++ PluginManager)
+uint32_t havel_get_view_texture_id(void* c_view);
+int havel_get_view_texture_width(void* c_view);
+int havel_get_view_texture_height(void* c_view);
 
 // Callback registration (called from C during initialization)
 void havel_cpp_register_view_callbacks(

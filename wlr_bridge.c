@@ -1,3 +1,6 @@
+// Enable unstable wlroots features (layer-shell, etc.)
+#define WLR_USE_UNSTABLE
+
 #include <wm/wlr_bridge.h>
 #include <Logger.h>
 #include <wm/render_c.h>
@@ -29,6 +32,11 @@
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_shell.h>
+#include <wlr/types/wlr_layer_shell_v1.h>
+#include <wlr/types/wlr_xdg_output_v1.h>
+#include <wlr/types/wlr_server_decoration.h>
+#include <wlr/types/wlr_xdg_activation_v1.h>
+#include <wlr/types/wlr_primary_selection_v1.h>
 #include <wlr/util/log.h>
 #include <wlr/xwayland.h>
 
@@ -128,6 +136,10 @@ struct havel_wlr_server {
     struct wlr_xwayland *xwayland;
     struct wl_listener new_xwayland_surface;
 
+    // Layer-shell v1 (for waybar, notifications, etc.)
+    struct wlr_layer_shell_v1 *layer_shell;
+    struct wl_listener new_layer_surface;
+
     struct wlr_seat *seat;
     struct wlr_cursor *cursor;
     struct wlr_xcursor_manager *cursor_mgr;
@@ -143,6 +155,9 @@ struct havel_wlr_server {
 
     uint32_t active_workspace;
     struct wl_list outputs; // havel_output::link
+
+    // Global workspace trees (shared across all outputs)
+    struct wlr_scene_tree *workspaces[HAVEL_WORKSPACE_COUNT];
 
     // Gamma control v1 manager
     struct wlr_gamma_control_manager_v1 *gamma_control_manager;
@@ -178,10 +193,8 @@ struct havel_output {
     bool is_primary;
     struct wl_list link;
 
-    struct wlr_scene_tree *workspaces[HAVEL_WORKSPACE_COUNT];
-
-    // Render pipeline for this output
-    havel_render_pipeline_t* render_pipeline;
+    // Gamma control v1 manager
+    struct wlr_gamma_control_manager_v1 *gamma_control_manager;
 
     // Gamma/temperature/brightness state
     float gamma;
@@ -217,7 +230,7 @@ struct havel_xdg_view {
     // NO workspace_id - C++ owns this
     // NO mapped flag - C++ owns this
     // NO geometry - C++ owns this
-    
+
     // Only wlroots handles and C++ opaque pointer
     void *cpp_view;  // Opaque pointer to C++ View object
 
@@ -225,6 +238,8 @@ struct havel_xdg_view {
     struct wl_listener unmap;
     struct wl_listener destroy;
     struct wl_listener surface_commit;  // Waits for first commit before sending configure
+    struct wl_listener set_app_id;      // Called when app_id is set
+    struct wl_listener set_title;       // Called when title is set
 };
 
 struct havel_xwayland_view {
@@ -445,16 +460,16 @@ static void xdg_view_handle_map(struct wl_listener *listener, void *data) {
         struct wlr_box geo = view->xdg_surface->current.geometry;
         int win_w = geo.width > 0 ? geo.width : 800;
         int win_h = geo.height > 0 ? geo.height : 600;
-        
+
         // Get output position in layout (for multi-monitor support)
         struct wlr_box output_box;
         wlr_output_layout_get_box(view->server->output_layout, wlr_out, &output_box);
-        
-        // Center window in output, accounting for output position in layout
-        int x = output_box.x + (wlr_out->width - win_w) / 2;
-        int y = output_box.y + (wlr_out->height - win_h) / 2;
+
+        // Center window in output using output_box dimensions (accounts for scale)
+        int x = output_box.x + (output_box.width - win_w) / 2;
+        int y = output_box.y + (output_box.height - win_h) / 2;
         wlr_scene_node_set_position(&view->scene_tree->node, x, y);
-        LOG_INFO("[XDG] Positioned window at (%d, %d) size (%dx%d) on output %s", 
+        LOG_INFO("[XDG] Positioned window at (%d, %d) size (%dx%d) on output %s",
                  x, y, win_w, win_h, wlr_out->name);
     }
     
@@ -472,11 +487,34 @@ static void xdg_view_handle_map(struct wl_listener *listener, void *data) {
 
 static void xdg_view_handle_unmap(struct wl_listener *listener, void *data) {
     struct havel_xdg_view *view = wl_container_of(listener, view, unmap);
-    
+
     if (!view || !view->cpp_view) return;
-    
+
     // Notify C++ layer - C++ owns mapped state
     havel_cpp_on_view_unmapped(view->server->cpp_server, view->cpp_view);
+}
+
+static void xdg_handle_app_id(struct wl_listener *listener, void *data) {
+    struct havel_xdg_view *view = wl_container_of(listener, view, set_app_id);
+    
+    if (!view || !view->cpp_view || !view->xdg_surface->toplevel) return;
+    
+    const char *app_id = view->xdg_surface->toplevel->app_id;
+    LOG_INFO("[XDG] App ID set: %s", app_id ? app_id : "(null)");
+    
+    // C++ layer owns View metadata - it will query via CompositorAPI
+    // The View object stores appId, we just need to ensure it's available
+}
+
+static void xdg_handle_title(struct wl_listener *listener, void *data) {
+    struct havel_xdg_view *view = wl_container_of(listener, view, set_title);
+    
+    if (!view || !view->cpp_view || !view->xdg_surface->toplevel) return;
+    
+    const char *title = view->xdg_surface->toplevel->title;
+    LOG_INFO("[XDG] Title set: %s", title ? title : "(null)");
+    
+    // C++ layer owns View metadata - it will query via CompositorAPI
 }
 
 static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
@@ -484,13 +522,18 @@ static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
 
     LOG_INFO("[XDG] DESTROY: %p (cpp_view=%p)", (void*)view, view->cpp_view);
 
-    // Remove listeners (map/unmap/destroy are always valid)
+    // CRITICAL: Remove set_app_id and set_title listeners FIRST
+    // These are on toplevel->events which wlroots cleans up during destroy
+    // wlroots asserts that these lists are empty
+    wl_list_remove(&view->set_app_id.link);
+    wl_list_remove(&view->set_title.link);
+
+    // Remove remaining listeners
     wl_list_remove(&view->map.link);
     wl_list_remove(&view->unmap.link);
     wl_list_remove(&view->destroy.link);
-    
+
     // surface_commit may have already been removed by the commit handler
-    // Check if notify is NULL (set by commit handler after removal)
     if (view->surface_commit.notify != NULL) {
         wl_list_remove(&view->surface_commit.link);
     }
@@ -525,15 +568,11 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
     xdg_surface->data = view;
     // NO workspace_id in C - C++ owns this
     // NO mapped in C - C++ owns this
-    
-    // Find workspace tree for proper output assignment BEFORE creating scene
-    struct havel_output *out = NULL;
+
+    // Use global workspace tree for this workspace
     struct wlr_scene_tree *parent = &server->scene->tree;  // Default to root
-    wl_list_for_each(out, &server->outputs, link) {
-        if (out->is_primary && server->active_workspace < HAVEL_WORKSPACE_COUNT) {
-            parent = out->workspaces[server->active_workspace];
-            break;
-        }
+    if (server->active_workspace < HAVEL_WORKSPACE_COUNT) {
+        parent = server->workspaces[server->active_workspace];
     }
     LOG_INFO("[XDG] Using parent=%p (workspace %d tree)", (void*)parent, server->active_workspace);
 
@@ -555,6 +594,15 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
     LOG_INFO("[XDG] Adding commit listener (will send configure after first commit)");
     view->surface_commit.notify = xdg_surface_handle_commit;
     wl_signal_add(&xdg_surface->surface->events.commit, &view->surface_commit);
+
+    // Add app_id and title listeners - these fire when client sets window metadata
+    LOG_INFO("[XDG] Adding set_app_id listener");
+    view->set_app_id.notify = xdg_handle_app_id;
+    wl_signal_add(&toplevel->events.set_app_id, &view->set_app_id);
+
+    LOG_INFO("[XDG] Adding set_title listener");
+    view->set_title.notify = xdg_handle_title;
+    wl_signal_add(&toplevel->events.set_title, &view->set_title);
 
     // NOW create scene surface attached to workspace tree (SINGLE CALL)
     LOG_INFO("[XDG] Calling wlr_scene_xdg_surface_create (parent=%p)...", (void*)parent);
@@ -656,8 +704,118 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
     view->destroy.notify = xwayland_view_handle_destroy;
     wl_signal_add(&xsurface->events.destroy, &view->destroy);
 
-    LOG_INFO("[XWayland] View setup complete for %p (cpp_view=%p, appId=%s, title=%s)", 
+    LOG_INFO("[XWayland] View setup complete for %p (cpp_view=%p, appId=%s, title=%s)",
              (void*)view, view->cpp_view, appId, title);
+}
+
+// ============================================================================
+// Layer-Shell v1 Handlers (for waybar, notifications, etc.)
+// ============================================================================
+
+struct havel_layer_surface {
+    struct wlr_scene_layer_surface_v1 *scene_layer_surface;
+    struct wlr_scene_tree *scene_tree;
+    struct havel_wlr_server *server;
+    struct wlr_output *output;
+
+    struct wl_listener destroy;
+    struct wl_listener map;
+    struct wl_listener unmap;
+};
+
+static void layer_surface_handle_destroy(struct wl_listener *listener, void *data) {
+    struct havel_layer_surface *lsurface = wl_container_of(listener, lsurface, destroy);
+
+    LOG_INFO("[LayerShell] Surface destroyed");
+
+    wl_list_remove(&lsurface->destroy.link);
+    wl_list_remove(&lsurface->map.link);
+    wl_list_remove(&lsurface->unmap.link);
+
+    if (lsurface->scene_tree) {
+        wlr_scene_node_destroy(&lsurface->scene_tree->node);
+    }
+
+    free(lsurface);
+}
+
+static void layer_surface_handle_map(struct wl_listener *listener, void *data) {
+    struct havel_layer_surface *lsurface = wl_container_of(listener, lsurface, map);
+
+    LOG_INFO("[LayerShell] Surface mapped: namespace=%s, layer=%d",
+             lsurface->scene_layer_surface->layer_surface->namespace,
+             lsurface->scene_layer_surface->layer_surface->current.layer);
+
+    // Raise to top when mapped
+    wlr_scene_node_raise_to_top(&lsurface->scene_tree->node);
+}
+
+static void layer_surface_handle_unmap(struct wl_listener *listener, void *data) {
+    struct havel_layer_surface *lsurface = wl_container_of(listener, lsurface, unmap);
+
+    LOG_INFO("[LayerShell] Surface unmapped");
+}
+
+static void server_new_layer_surface(struct wl_listener *listener, void *data) {
+    struct havel_wlr_server *server = wl_container_of(listener, server, new_layer_surface);
+    struct wlr_layer_surface_v1 *layer_surface = data;
+
+    LOG_INFO("[LayerShell] New surface: namespace=%s", layer_surface->namespace);
+
+    // Create layer surface wrapper
+    struct havel_layer_surface *lsurface = calloc(1, sizeof(*lsurface));
+    lsurface->server = server;
+
+    // If no output assigned, use primary output
+    struct wlr_output *output = layer_surface->output;
+    if (!output && !wl_list_empty(&server->outputs)) {
+        struct havel_output *havel_out = wl_container_of(server->outputs.next, havel_out, link);
+        output = havel_out->output;
+        layer_surface->output = output;  // Assign output to layer surface
+    }
+    lsurface->output = output;
+
+    // Create scene tree for this layer surface
+    lsurface->scene_tree = wlr_scene_tree_create(&server->scene->tree);
+
+    // Create scene layer surface - this handles all the layer-shell protocol details
+    lsurface->scene_layer_surface = wlr_scene_layer_surface_v1_create(
+        lsurface->scene_tree, layer_surface);
+
+    if (!lsurface->scene_layer_surface) {
+        LOG_ERROR("[LayerShell] Failed to create scene layer surface");
+        wlr_scene_node_destroy(&lsurface->scene_tree->node);
+        free(lsurface);
+        return;
+    }
+
+    // Add listeners
+    lsurface->destroy.notify = layer_surface_handle_destroy;
+    wl_signal_add(&layer_surface->events.destroy, &lsurface->destroy);
+
+    lsurface->map.notify = layer_surface_handle_map;
+    wl_signal_add(&layer_surface->surface->events.map, &lsurface->map);
+
+    lsurface->unmap.notify = layer_surface_handle_unmap;
+    wl_signal_add(&layer_surface->surface->events.unmap, &lsurface->unmap);
+
+    // Configure with output size - MUST do this to complete layer-shell handshake
+    if (output) {
+        struct wlr_box full_area = {0, 0, output->width, output->height};
+        struct wlr_box usable_area = {0, 0, output->width, output->height};
+        wlr_scene_layer_surface_v1_configure(lsurface->scene_layer_surface, &full_area, &usable_area);
+    } else {
+        // Fallback for when output isn't ready yet
+        struct wlr_box full_area = {0, 0, 1920, 1080};
+        struct wlr_box usable_area = {0, 0, 1920, 1080};
+        wlr_scene_layer_surface_v1_configure(lsurface->scene_layer_surface, &full_area, &usable_area);
+    }
+
+    // Raise to top
+    wlr_scene_node_raise_to_top(&lsurface->scene_tree->node);
+
+    LOG_INFO("[LayerShell] Surface setup complete: %p (output=%s)",
+             (void*)lsurface, output ? output->name : "none");
 }
 
 // ============================================================================
@@ -701,25 +859,18 @@ static void output_frame(struct wl_listener *listener, void *data) {
         return;
     }
 
+    // Render overlays BEFORE committing scene
+    // This ensures overlays are composited into the frame
+    havel_cpp_draw_overlays(server->cpp_server, output->output->width, output->output->height);
+
     LOG_INFO("[FRAME] %s: calling wlr_scene_output_commit", output->output->name);
-    
-    // TODO: Overlay rendering integration
-    // Current OverlayRenderer uses raw GLES which renders outside wlroots control.
-    // Proper fix: Use wlr_scene_buffer nodes with textures, added to overlay layer.
-    // See: docs/STATUS.md "Overlay Render Order" for details.
-    // For now, overlay rendering is disabled to prevent undefined behavior.
-    
+
     wlr_scene_output_commit(output->scene_output, &options);
     LOG_INFO("[FRAME] %s: <<< COMMIT COMPLETE", output->output->name);
 }
 
 static void output_destroy(struct wl_listener *listener, void *data) {
     struct havel_output *output = wl_container_of(listener, output, destroy);
-
-    // Destroy render pipeline
-    if (output->render_pipeline) {
-        havel_render_pipeline_destroy(output->render_pipeline);
-    }
 
     // Free gamma LUT buffers
     if (output->gamma_ramp_red) {
@@ -787,24 +938,10 @@ static void server_new_output(struct wl_listener *listener, void *data) {
         LOG_WARN("[OUTPUT] %s does not support gamma control", wlr_output->name);
     }
 
-    wl_list_insert(&server->outputs, &output->link);
-    output->is_primary = (server->outputs.next == &output->link);
+    wl_list_insert(server->outputs.prev, &output->link);  // Append to list (not prepend)
+    output->is_primary = wl_list_empty(&server->outputs) || (server->outputs.next == &output->link);
 
     LOG_DEBUG("[OUTPUT] %s is %s", wlr_output->name, output->is_primary ? "primary" : "secondary");
-
-    // Create output-specific tree, then workspace trees as children
-    // This ensures windows only render on their assigned output
-    struct wlr_scene_tree *output_tree = wlr_scene_tree_create(&server->scene->tree);
-    wlr_scene_node_set_position(&output_tree->node, 0, 0);
-    
-    // Create workspace trees for this output (as children of output_tree)
-    for (uint32_t i = 0; i < HAVEL_WORKSPACE_COUNT; ++i) {
-        output->workspaces[i] = wlr_scene_tree_create(output_tree);
-        // Enable only active workspace on primary output
-        bool should_enable = (!output->is_primary) || (i == server->active_workspace);
-        wlr_scene_node_set_enabled(&output->workspaces[i]->node, should_enable);
-        LOG_INFO("[DEBUG] Workspace %u tree created, enabled=%d", i, should_enable);
-    }
 
     output->frame.notify = output_frame;
     wl_signal_add(&wlr_output->events.frame, &output->frame);
@@ -813,17 +950,15 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     output->destroy.notify = output_destroy;
     wl_signal_add(&wlr_output->events.destroy, &output->destroy);
 
-    // Create render pipeline for this output
-    output->render_pipeline = havel_render_pipeline_create(wlr_output, server->renderer);
-    if (output->render_pipeline) {
-        LOG_INFO("[OUTPUT] Render pipeline created for %s", wlr_output->name);
-    }
-
     wlr_output_layout_add_auto(server->output_layout, wlr_output);
-    
-    // Verify output state
-    LOG_INFO("[OUTPUT] %s setup COMPLETE (enabled=%d)", 
+
+    // Verify output state and scene graph
+    LOG_INFO("[OUTPUT] %s setup COMPLETE (enabled=%d)",
              wlr_output->name, wlr_output->enabled);
+    LOG_INFO("[SCENE] Scene root: %p, enabled=%d",
+             (void*)&server->scene->tree, server->scene->tree.node.enabled);
+    LOG_INFO("[SCENE_OUTPUT] %s: scene_output=%p",
+             wlr_output->name, (void*)output->scene_output);
 }
 
 // ============================================================================
@@ -946,18 +1081,35 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
         // Get keysym from XKB state (layout-aware)
         xkb_keysym_t keysym = 0;
         char key_char = 0;
+        char utf8_buffer[8] = {0};  // Buffer for UTF-8 character
         if (keyboard->xkb_state) {
             keysym = xkb_state_key_get_one_sym(keyboard->xkb_state, keycode);
-            
+
             // Convert keysym to UTF-8 character (handles shift, layout, etc.)
-            char utf8[8] = {0};
-            int len = xkb_keysym_to_utf8(keysym, utf8, sizeof(utf8));
+            int len = xkb_keysym_to_utf8(keysym, utf8_buffer, sizeof(utf8_buffer));
             if (len > 0 && len <= 4) {
                 // For single-byte ASCII, use directly
-                if (len == 1 && utf8[0] >= 32 && utf8[0] <= 126) {
-                    key_char = utf8[0];
+                if (len == 1 && utf8_buffer[0] >= 32 && utf8_buffer[0] <= 126) {
+                    key_char = utf8_buffer[0];
                 }
-                // Multi-byte UTF-8 characters would need wider support
+                // For multi-byte UTF-8, key_char stays 0 and AppLauncher should use utf8_buffer
+            }
+        }
+
+        // Handle shift-modified symbols for common keys
+        // This ensures shift+number produces correct symbols (!@#$%^&*() etc.)
+        if (keyboard->xkb_state && key_char == 0) {
+            // Check if shift is pressed
+            xkb_mod_index_t shift_idx = xkb_keymap_mod_get_index(keyboard->keymap, XKB_MOD_NAME_SHIFT);
+            bool shift_pressed = (shift_idx != XKB_MOD_INVALID) &&
+                               (xkb_state_mod_index_is_active(keyboard->xkb_state, shift_idx, XKB_STATE_MODS_DEPRESSED) > 0);
+
+            if (shift_pressed && keysym >= XKB_KEY_exclam && keysym <= XKB_KEY_asciitilde) {
+                // Shift-modified symbol keys (! " # $ % & ' ( ) * + , - . / : ; < = > ? @ [ \ ] ^ _ ` { | } ~)
+                int len = xkb_keysym_to_utf8(keysym, utf8_buffer, sizeof(utf8_buffer));
+                if (len == 1) {
+                    key_char = utf8_buffer[0];
+                }
             }
         }
 
@@ -1047,8 +1199,8 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
 
         // Forward to C++ layer for policy decisions
         // Returns true if event was consumed (e.g., keybinding matched)
-        bool consumed = havel_cpp_on_key(server->cpp_server, keycode, true, modifiers, keysym, key_char);
-        
+        bool consumed = havel_cpp_on_key(server->cpp_server, keycode, true, modifiers, keysym, key_char, utf8_buffer);
+
         LOG_INFO("[DEBUG] Key consumed=%d", consumed);
 
         // Only forward to seat if not consumed by compositor
@@ -1424,6 +1576,10 @@ havel_wlr_server_t* havel_wlr_create(void) {
 
     wlr_renderer_init_wl_display(server->renderer, server->display);
 
+    // Initialize text input manager (IME support)
+    // This requires wl_display to be created
+    havel_cpp_server_init_text_input(server->cpp_server, server->display);
+
     server->allocator = wlr_allocator_autocreate(server->backend, server->renderer);
     server->compositor = wlr_compositor_create(server->display, 5, server->renderer);
     struct wlr_subcompositor *sub = wlr_subcompositor_create(server->display);
@@ -1434,10 +1590,16 @@ havel_wlr_server_t* havel_wlr_create(void) {
     server->output_layout = wlr_output_layout_create(server->display);
     server->scene = wlr_scene_create();
 
-    // DEBUG: Force red background to confirm rendering works
-    float red[4] = {1.0f, 0.0f, 0.0f, 1.0f};
-    wlr_scene_rect_create(&server->scene->tree, 1920, 1080, red);
-    LOG_INFO("[DEBUG] Red background rect created");
+    // Background color is now handled by wallpaper plugin via output_frame handler
+    // No static background rect needed - plugin draws per-output backgrounds
+
+    // Create global workspace trees (shared across all outputs)
+    for (uint32_t i = 0; i < HAVEL_WORKSPACE_COUNT; ++i) {
+        server->workspaces[i] = wlr_scene_tree_create(&server->scene->tree);
+        // Enable only active workspace initially
+        wlr_scene_node_set_enabled(&server->workspaces[i]->node, (i == server->active_workspace));
+        LOG_INFO("[WORKSPACE] Global workspace %u tree created, enabled=%d", i, (i == server->active_workspace));
+    }
 
     // Create overlay layer (raised to top for Alt-Tab, Overview, etc.)
     server->overlay_layer = wlr_scene_tree_create(&server->scene->tree);
@@ -1445,11 +1607,40 @@ havel_wlr_server_t* havel_wlr_create(void) {
     wlr_scene_node_set_enabled(&server->overlay_layer->node, false);  // Hidden by default
     LOG_INFO("[Overlay] Overlay layer created (raised to top)");
 
+    // Pass overlay layer to C++ server for plugin rendering
+    havel_cpp_server_set_overlay_layer(server->cpp_server, server->overlay_layer);
+
+    // Create XDG output manager (required by waybar and other clients)
+    wlr_xdg_output_manager_v1_create(server->display, server->output_layout);
+    LOG_INFO("[XDG Output] xdg_output_manager_v1 created");
+
     server->xdg_shell = wlr_xdg_shell_create(server->display, 3);
     server->new_xdg_toplevel.notify = server_new_xdg_toplevel;
     wl_signal_add(&server->xdg_shell->events.new_toplevel, &server->new_xdg_toplevel);
     server->new_xdg_surface.notify = server_new_xdg_surface;
     wl_signal_add(&server->xdg_shell->events.new_surface, &server->new_xdg_surface);
+
+    // Initialize layer-shell v1 (for waybar, notifications, etc.)
+    server->layer_shell = wlr_layer_shell_v1_create(server->display, 4);
+    if (!server->layer_shell) {
+        LOG_WARN("[LayerShell] Failed to create layer_shell_v1");
+    } else {
+        LOG_INFO("[LayerShell] layer_shell_v1 initialized");
+        server->new_layer_surface.notify = server_new_layer_surface;
+        wl_signal_add(&server->layer_shell->events.new_surface, &server->new_layer_surface);
+    }
+
+    // Create XDG decoration manager (for server-side window decorations)
+    wlr_server_decoration_manager_create(server->display);
+    LOG_INFO("[Decoration] server_decoration_manager created");
+
+    // Create XDG activation manager (for window activation/urgency hints)
+    wlr_xdg_activation_v1_create(server->display);
+    LOG_INFO("[Activation] xdg_activation_v1 created");
+
+    // Create primary selection device manager (for clipboard)
+    wlr_primary_selection_v1_device_manager_create(server->display);
+    LOG_INFO("[Primary Selection] primary_selection_v1_device_manager created");
 
     // Initialize gamma control v1 manager
     server->gamma_control_manager = wlr_gamma_control_manager_v1_create(server->display);
@@ -1709,4 +1900,38 @@ void havel_wlr_set_brightness(havel_wlr_server_t *server, float brightness) {
     }
 
     LOG_INFO("[Brightness] Set to %.2f on all outputs", brightness);
+}
+
+// ============================================================================
+// Texture Access for Alt-Tab Thumbnails
+// ============================================================================
+
+#include <wlr/render/gles2.h>
+
+uint32_t havel_get_view_texture_id(void* c_view) {
+    struct havel_xdg_view* view = (struct havel_xdg_view*)c_view;
+    if (!view) return 0;
+    
+    struct wlr_surface* surface = view->xdg_surface->surface;
+    if (!surface || !wlr_surface_has_buffer(surface)) return 0;
+    
+    struct wlr_texture* texture = wlr_surface_get_texture(surface);
+    if (!texture) return 0;
+    
+    // Get GL texture ID from wlr_gles2_texture
+    struct wlr_gles2_texture_attribs attribs;
+    wlr_gles2_texture_get_attribs(texture, &attribs);
+    return attribs.tex;
+}
+
+int havel_get_view_texture_width(void* c_view) {
+    struct havel_xdg_view* view = (struct havel_xdg_view*)c_view;
+    if (!view) return 0;
+    return view->xdg_surface->surface->current.width;
+}
+
+int havel_get_view_texture_height(void* c_view) {
+    struct havel_xdg_view* view = (struct havel_xdg_view*)c_view;
+    if (!view) return 0;
+    return view->xdg_surface->surface->current.height;
 }

@@ -23,6 +23,9 @@ struct WindowEntry {
     uint32_t workspace = 0;
     bool isFocused = false;
     int x = 0, y = 0, w = 0, h = 0;
+    uint32_t textureId = 0;   // OpenGL texture ID for thumbnail
+    int textureWidth = 0;
+    int textureHeight = 0;
 };
 
 /**
@@ -163,21 +166,25 @@ private:
         // Collect views - use opaque IDs, don't dereference View pointers
         for (View* view : allViews) {
             if (!view) continue;
-            
+
             WindowEntry entry;
             entry.viewPtr = view;  // Keep for internal use
             entry.viewId = 0;  // Would get from API in real impl
             entry.workspace = currentWorkspace;  // Assume current workspace
             entry.isFocused = (view == focused);
-            
-            // Get app ID and title (would get from XDG surface in real impl)
-            // For now use placeholder - real impl would query view metadata via API
-            entry.appId = "app";
-            entry.title = "Window";
-            
+
+            // Get app ID and title via CompositorAPI
+            entry.appId = m_api->getViewAppId(view);
+            entry.title = m_api->getViewTitle(view);
+
+            // Get texture for thumbnail rendering
+            entry.textureId = m_api->getViewTextureId(view);
+            entry.textureWidth = m_api->getViewTextureWidth(view);
+            entry.textureHeight = m_api->getViewTextureHeight(view);
+
             // Get geometry
             entry.x = 0; entry.y = 0; entry.w = 800; entry.h = 600;
-            
+
             m_windows.push_back(entry);
         }
 
@@ -190,8 +197,11 @@ private:
             placeholder.title = "No windows";
             placeholder.workspace = currentWorkspace;
             placeholder.isFocused = false;
-            placeholder.x = 100; placeholder.y = 100; 
+            placeholder.x = 100; placeholder.y = 100;
             placeholder.w = 400; placeholder.h = 200;
+            placeholder.textureId = 0;
+            placeholder.textureWidth = 0;
+            placeholder.textureHeight = 0;
             m_windows.push_back(placeholder);
         }
 
@@ -262,17 +272,17 @@ private:
     
     void renderOverlay(void* rendererPtr) override {
         if (!m_visible || !rendererPtr) return;
-        
+
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
-        
+
         int screenWidth = renderer->getScreenWidth();
         int screenHeight = renderer->getScreenHeight();
-        
+
         // Draw semi-transparent background
         renderer->drawRect(0, 0, screenWidth, screenHeight, Color(0.0f, 0.0f, 0.0f, 0.7f));
-        
+
         if (m_windows.empty()) return;
-        
+
         // Calculate thumbnail size and positions
         int thumbnailWidth = 200;
         int thumbnailHeight = 150;
@@ -280,25 +290,34 @@ private:
         int totalWidth = (int)m_windows.size() * (thumbnailWidth + spacing) - spacing;
         int startX = (screenWidth - totalWidth) / 2;
         int y = (screenHeight - thumbnailHeight) / 2;
-        
+
         // Draw each window thumbnail
         for (size_t i = 0; i < m_windows.size(); i++) {
             int x = startX + (int)i * (thumbnailWidth + spacing);
             bool isSelected = ((int)i == m_selectedIndex);
-            
-            // Draw thumbnail background
+            const WindowEntry& entry = m_windows[i];
+
+            // Draw thumbnail background (fallback if no texture)
             Color bgColor = isSelected ? Color(0.3f, 0.4f, 0.5f, 0.9f) : Color(0.2f, 0.2f, 0.2f, 0.8f);
             renderer->drawRect((float)x, (float)y, (float)thumbnailWidth, (float)thumbnailHeight, bgColor);
-            
+
+            // Draw window texture if available
+            if (entry.textureId != 0) {
+                renderer->drawTexture(entry.textureId,
+                                      (float)x, (float)y,
+                                      (float)thumbnailWidth, (float)thumbnailHeight,
+                                      1.0f);
+            }
+
             // Draw border
             Color borderColor = isSelected ? Color(1.0f, 1.0f, 1.0f, 1.0f) : Color(0.5f, 0.5f, 0.5f, 0.5f);
             renderer->drawBorder(FloatRect((float)x, (float)y, (float)thumbnailWidth, (float)thumbnailHeight), borderColor, isSelected ? 3.0f : 2.0f);
-            
+
             // Draw app name
-            const std::string& name = m_windows[i].appId;
+            const std::string& name = entry.appId;
             renderer->drawText(name.c_str(), (float)(x + 10), (float)(y + thumbnailHeight - 25), 16.0f, Color(1.0f, 1.0f, 1.0f, 1.0f));
         }
-        
+
         // Draw instruction text
         const char* instruction = "Alt+Tab: Cycle | Enter: Select | Esc: Cancel";
         float textWidth = strlen(instruction) * 10.0f;

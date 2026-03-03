@@ -1,0 +1,75 @@
+{
+  // Plugin Configuration for Havel WM
+  // Place this file at ~/.config/havel-wm/plugins.json
+
+  "blur": {
+    "enabled": false,
+    "blur_radius": 10,
+    "blur_passes": 3
+  },
+
+  "scale": {
+    "enabled": true,
+    "keybinding": "Meta+Shift+S"
+  },
+
+  "wallpaper": {
+    "enabled": true,
+    "color": "#1a1a2e"
+  },
+
+  "notifications": {
+    "enabled": true,
+    "timeout": 5000,
+    "position": "top-right"
+  },
+
+  "custom_layouts": {
+    "enabled": false
+  },
+
+  "window_snap": {
+    "enabled": true,
+    "snap_distance": 20
+  },
+
+  "hot_corners": {
+    "enabled": true,
+    "delay": 250,
+    "top_left": "overview",
+    "top_right": "windows",
+    "bottom_left": "desktop",
+    "bottom_right": "none"
+  },
+
+  "gamma": {
+    "enabled": true,
+    "keybinding": "Meta+Shift+G"
+  },
+
+  "app_launcher": {
+    "enabled": true,
+    "keybinding": "Meta+Space"
+  },
+
+  "alt_tab": {
+    "enabled": true,
+    "keybinding": "Alt+Tab",
+    "thumbnail_size": 160
+  },
+
+  "overview": {
+    "enabled": true,
+    "keybinding": "Meta+W"
+  },
+
+  "server_decoration": {
+    "enabled": true,
+    "border_width": 1,
+    "title_bar_height": 32
+  },
+
+  "example": {
+    "enabled": false
+  }
+}
