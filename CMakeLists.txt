@@ -130,6 +130,7 @@ set(WM_CORE_SOURCES
     src/wm/render/BitmapFont.hpp
     src/wm/render/FreeTypeFont.cpp
     src/wm/render/FreeTypeFont.hpp
+    src/wm/render/AppIconLoader.cpp
     src/wm/input/InputManager.cpp
     src/wm/input/KeybindingManager.cpp
     src/wm/input/KeybindingManager.hpp

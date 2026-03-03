@@ -4,7 +4,7 @@
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
-#include <GLES2/gl2.h>
+#include <wm/render/AppIconLoader.hpp>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
@@ -152,53 +152,10 @@ private:
     }
     
     void hide() {
-        // Clean up icon textures
-        for (auto& entry : m_windows) {
-            if (entry.iconTextureId != 0) {
-                glDeleteTextures(1, &entry.iconTextureId);
-            }
-        }
-        
         m_visible = false;
         m_windows.clear();
         m_selectedIndex = 0;
         printf("[AltTab] Hidden\n");
-    }
-
-    // Load or generate app icon (simple colored square based on appId hash)
-    uint32_t loadAppIcon(const std::string& appId) {
-        if (appId.empty()) return 0;
-
-        // Generate a simple colored icon based on appId hash
-        // In a real implementation, this would load from icon theme
-        GLuint iconTexture;
-        glGenTextures(1, &iconTexture);
-        glBindTexture(GL_TEXTURE_2D, iconTexture);
-
-        // Generate color from appId hash
-        unsigned int hash = 0;
-        for (char c : appId) {
-            hash = hash * 31 + c;
-        }
-        float r = ((hash >> 16) & 0xFF) / 255.0f;
-        float g = ((hash >> 8) & 0xFF) / 255.0f;
-        float b = (hash & 0xFF) / 255.0f;
-
-        // Create 32x32 solid color texture
-        unsigned char pixels[32 * 32 * 4];
-        for (int i = 0; i < 32 * 32; i++) {
-            pixels[i * 4 + 0] = (unsigned char)(r * 255);
-            pixels[i * 4 + 1] = (unsigned char)(g * 255);
-            pixels[i * 4 + 2] = (unsigned char)(b * 255);
-            pixels[i * 4 + 3] = 255;  // Alpha
-        }
-
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 32, 32, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glBindTexture(GL_TEXTURE_2D, 0);
-
-        return iconTexture;
     }
 
     void collectWindows() {
@@ -228,9 +185,9 @@ private:
             entry.textureWidth = m_api->getViewTextureWidth(view);
             entry.textureHeight = m_api->getViewTextureHeight(view);
 
-            // Load app icon (generated colored square)
-            entry.iconTextureId = loadAppIcon(entry.appId);
-            entry.iconSize = 32;
+            // Load app icon from system theme (with caching)
+            entry.iconTextureId = havel::AppIconLoader::getInstance()->loadIcon(entry.appId);
+            entry.iconSize = havel::AppIconLoader::getInstance()->getIconSize();
 
             // Get geometry
             entry.x = 0; entry.y = 0; entry.w = 800; entry.h = 600;
