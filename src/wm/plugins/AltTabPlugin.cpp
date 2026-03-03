@@ -4,6 +4,7 @@
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
+#include <GLES2/gl2.h>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
@@ -26,6 +27,8 @@ struct WindowEntry {
     uint32_t textureId = 0;   // OpenGL texture ID for thumbnail
     int textureWidth = 0;
     int textureHeight = 0;
+    uint32_t iconTextureId = 0;  // OpenGL texture ID for app icon
+    int iconSize = 32;  // Icon display size
 };
 
 /**
@@ -149,12 +152,55 @@ private:
     }
     
     void hide() {
+        // Clean up icon textures
+        for (auto& entry : m_windows) {
+            if (entry.iconTextureId != 0) {
+                glDeleteTextures(1, &entry.iconTextureId);
+            }
+        }
+        
         m_visible = false;
         m_windows.clear();
         m_selectedIndex = 0;
         printf("[AltTab] Hidden\n");
     }
-    
+
+    // Load or generate app icon (simple colored square based on appId hash)
+    uint32_t loadAppIcon(const std::string& appId) {
+        if (appId.empty()) return 0;
+
+        // Generate a simple colored icon based on appId hash
+        // In a real implementation, this would load from icon theme
+        GLuint iconTexture;
+        glGenTextures(1, &iconTexture);
+        glBindTexture(GL_TEXTURE_2D, iconTexture);
+
+        // Generate color from appId hash
+        unsigned int hash = 0;
+        for (char c : appId) {
+            hash = hash * 31 + c;
+        }
+        float r = ((hash >> 16) & 0xFF) / 255.0f;
+        float g = ((hash >> 8) & 0xFF) / 255.0f;
+        float b = (hash & 0xFF) / 255.0f;
+
+        // Create 32x32 solid color texture
+        unsigned char pixels[32 * 32 * 4];
+        for (int i = 0; i < 32 * 32; i++) {
+            pixels[i * 4 + 0] = (unsigned char)(r * 255);
+            pixels[i * 4 + 1] = (unsigned char)(g * 255);
+            pixels[i * 4 + 2] = (unsigned char)(b * 255);
+            pixels[i * 4 + 3] = 255;  // Alpha
+        }
+
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 32, 32, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        return iconTexture;
+    }
+
     void collectWindows() {
         m_windows.clear();
 
@@ -181,6 +227,10 @@ private:
             entry.textureId = m_api->getViewTextureId(view);
             entry.textureWidth = m_api->getViewTextureWidth(view);
             entry.textureHeight = m_api->getViewTextureHeight(view);
+
+            // Load app icon (generated colored square)
+            entry.iconTextureId = loadAppIcon(entry.appId);
+            entry.iconSize = 32;
 
             // Get geometry
             entry.x = 0; entry.y = 0; entry.w = 800; entry.h = 600;
@@ -312,6 +362,16 @@ private:
             // Draw border
             Color borderColor = isSelected ? Color(1.0f, 1.0f, 1.0f, 1.0f) : Color(0.5f, 0.5f, 0.5f, 0.5f);
             renderer->drawBorder(FloatRect((float)x, (float)y, (float)thumbnailWidth, (float)thumbnailHeight), borderColor, isSelected ? 3.0f : 2.0f);
+
+            // Draw app icon at bottom-right corner (small, 32x32)
+            if (entry.iconTextureId != 0) {
+                int iconX = x + thumbnailWidth - entry.iconSize - 8;  // 8px padding from right
+                int iconY = y + thumbnailHeight - entry.iconSize - 8;  // 8px padding from bottom
+                renderer->drawTexture(entry.iconTextureId,
+                                      (float)iconX, (float)iconY,
+                                      (float)entry.iconSize, (float)entry.iconSize,
+                                      1.0f);
+            }
 
             // Draw app name
             const std::string& name = entry.appId;
