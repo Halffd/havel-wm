@@ -14,6 +14,71 @@ TextInputManager* TextInputManager::s_instance = nullptr;
 // Text Input Object Implementation
 // ============================================================================
 
+// Protocol request handlers
+static void text_input_destroy(struct wl_client* client, struct wl_resource* resource) {
+    wl_resource_destroy(resource);
+    (void)client;
+}
+
+static void text_input_enable(struct wl_client* client, struct wl_resource* resource) {
+    auto* textInput = static_cast<TextInput*>(wl_resource_get_user_data(resource));
+    if (textInput) {
+        textInput->enable(0);
+        LOG_DEBUG("[TextInput] Enabled for resource %p", (void*)resource);
+    }
+    (void)client;
+}
+
+static void text_input_disable(struct wl_client* client, struct wl_resource* resource) {
+    auto* textInput = static_cast<TextInput*>(wl_resource_get_user_data(resource));
+    if (textInput) {
+        textInput->disable(0);
+        LOG_DEBUG("[TextInput] Disabled for resource %p", (void*)resource);
+    }
+    (void)client;
+}
+
+static void text_input_set_surrounding_text(struct wl_client* client, struct wl_resource* resource,
+                                             const char* text, int32_t cursor, int32_t anchor) {
+    LOG_DEBUG("[TextInput] Set surrounding text: cursor=%d, anchor=%d", cursor, anchor);
+    (void)client; (void)resource; (void)text; (void)cursor; (void)anchor;
+}
+
+static void text_input_set_text_change_cause(struct wl_client* client, struct wl_resource* resource,
+                                              uint32_t cause) {
+    LOG_DEBUG("[TextInput] Text change cause: %u", cause);
+    (void)client; (void)resource; (void)cause;
+}
+
+static void text_input_set_content_type(struct wl_client* client, struct wl_resource* resource,
+                                         uint32_t hint, uint32_t purpose) {
+    LOG_DEBUG("[TextInput] Content type: hint=%u, purpose=%u", hint, purpose);
+    (void)client; (void)resource; (void)hint; (void)purpose;
+}
+
+static void text_input_set_cursor_rectangle(struct wl_client* client, struct wl_resource* resource,
+                                             int32_t x, int32_t y, int32_t width, int32_t height) {
+    LOG_DEBUG("[TextInput] Cursor rectangle: x=%d, y=%d, w=%d, h=%d", x, y, width, height);
+    (void)client; (void)resource; (void)x; (void)y; (void)width; (void)height;
+}
+
+static void text_input_commit(struct wl_client* client, struct wl_resource* resource) {
+    LOG_DEBUG("[TextInput] Commit for resource %p", (void*)resource);
+    (void)client; (void)resource;
+}
+
+// Vtable implementation for zwp_text_input_v3
+static const struct zwp_text_input_v3_interface s_text_input_impl = {
+    .destroy = text_input_destroy,
+    .enable = text_input_enable,
+    .disable = text_input_disable,
+    .set_surrounding_text = text_input_set_surrounding_text,
+    .set_text_change_cause = text_input_set_text_change_cause,
+    .set_content_type = text_input_set_content_type,
+    .set_cursor_rectangle = text_input_set_cursor_rectangle,
+    .commit = text_input_commit,
+};
+
 TextInput::TextInput(struct wl_client* client, uint32_t id, uint32_t version)
     : m_client(client)
     , m_version(version)
@@ -24,7 +89,10 @@ TextInput::TextInput(struct wl_client* client, uint32_t id, uint32_t version)
         wl_client_post_no_memory(client);
         return;
     }
-    
+
+    // Set the implementation vtable - THIS IS THE CRITICAL FIX
+    wl_resource_set_implementation(m_resource, &s_text_input_impl, this, nullptr);
+
     LOG_DEBUG("[TextInput] Created text_input object for client %p", (void*)client);
 }
 
