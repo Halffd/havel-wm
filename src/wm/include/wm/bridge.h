@@ -36,6 +36,13 @@ void havel_cpp_server_destroy(struct havel_cpp_server* server);
 void* havel_cpp_server_get_native_handle(struct havel_cpp_server* server);
 void havel_cpp_server_set_native_handle(struct havel_cpp_server* server, void* handle);
 
+// Set overlay layer for plugin rendering
+void havel_cpp_server_set_overlay_layer(struct havel_cpp_server* server, void* overlay_layer);
+
+// Initialize text input manager (IME)
+struct wl_display;
+void havel_cpp_server_init_text_input(struct havel_cpp_server* server, struct wl_display* display);
+
 // View lifecycle events (called from C bridge)
 // Returns opaque View pointer for C to store
 void* havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* c_view, uint32_t workspace_id, const char* appId, const char* title);

@@ -76,42 +76,46 @@ public:
     
     bool onKey(const KeyEvent& event) override {
         constexpr uint32_t MOD_LOGO = 1 << 6;
-        
+
         // Meta+W toggles overview
         if (event.pressed && (event.modifiers & MOD_LOGO) && event.keycode == 32) {
             toggle();
             return true;
         }
-        
+
         if (!m_visible) return false;
         if (!event.pressed) return false;
-        
+
         switch (event.keycode) {
             case 111:  // Escape - cancel
                 hide();
                 return true;
-                
+
             case 28:   // Enter - select
                 select();
                 return true;
-                
+
             case 103:  // Up
                 navigate(0, -1);
                 return true;
-                
+
             case 108:  // Down
                 navigate(0, 1);
                 return true;
-                
+
             case 105:  // Left
                 navigate(-1, 0);
                 return true;
-                
+
             case 106:  // Right
                 navigate(1, 0);
                 return true;
+
+            case 57:   // Space - toggle between workspace and window selection
+                toggleSelectionLevel();
+                return true;
         }
-        
+
         return false;
     }
     
@@ -153,6 +157,22 @@ private:
         m_selectedWorkspace = 0;
         m_selectedWindow = -1;
         printf("[Overview] Hidden\n");
+    }
+
+    void toggleSelectionLevel() {
+        // Toggle between workspace and window selection
+        OverviewWorkspace& ws = m_workspaces[m_selectedWorkspace];
+        if (!ws.windows.empty()) {
+            if (m_selectedWindow < 0) {
+                // Enter window selection - select first window
+                m_selectedWindow = 0;
+                printf("[Overview] Entered window selection\n");
+            } else {
+                // Exit to workspace selection
+                m_selectedWindow = -1;
+                printf("[Overview] Exited to workspace selection\n");
+            }
+        }
     }
     
     void collectWorkspaces() {
@@ -215,15 +235,20 @@ private:
     
     void navigate(int dx, int dy) {
         if (m_workspaces.empty()) return;
-        
-        if (m_selectedWindow >= 0 && m_selectedWindow < (int)m_workspaces[m_selectedWorkspace].windows.size()) {
-            // Navigate windows within workspace
-            OverviewWorkspace& ws = m_workspaces[m_selectedWorkspace];
+
+        OverviewWorkspace& ws = m_workspaces[m_selectedWorkspace];
+
+        // If workspace has windows and we're navigating within it
+        if (!ws.windows.empty() && m_selectedWindow >= 0) {
             OverviewWindow& win = ws.windows[m_selectedWindow];
-            
+
             int newCol = win.gridX + dx;
             int newRow = win.gridY + dy;
-            
+
+            // Clamp to valid range
+            if (newCol < 0) newCol = 0;
+            if (newRow < 0) newRow = 0;
+
             // Find window at new position
             int newIndex = -1;
             for (size_t i = 0; i < ws.windows.size(); i++) {
@@ -232,24 +257,28 @@ private:
                     break;
                 }
             }
-            
+
             if (newIndex >= 0) {
                 m_selectedWindow = newIndex;
                 printf("[Overview] Window: %s\n", ws.windows[m_selectedWindow].title.c_str());
                 return;
             }
         }
-        
-        // Navigate workspaces
+
+        // Navigate workspaces (or enter workspace if no window selected)
         OverviewWorkspace& current = m_workspaces[m_selectedWorkspace];
         int newCol = current.gridX + dx;
         int newRow = current.gridY + dy;
-        
+
+        // Clamp to valid range
+        if (newCol < 0) newCol = 0;
+        if (newRow < 0) newRow = 0;
+
         // Find workspace at new position
         for (size_t i = 0; i < m_workspaces.size(); i++) {
             if (m_workspaces[i].gridX == newCol && m_workspaces[i].gridY == newRow) {
                 m_selectedWorkspace = (int)i;
-                m_selectedWindow = -1;  // Reset window selection
+                m_selectedWindow = -1;  // Reset window selection when changing workspace
                 printf("[Overview] Workspace: %d\n", m_selectedWorkspace + 1);
                 return;
             }
@@ -347,12 +376,30 @@ private:
                     bool isWinSelected = ((int)j == m_selectedWindow && isSelected);
 
                     // Draw window thumbnail
-                    Color winColor = isWinSelected ? Color(0.4f, 0.5f, 0.6f, 0.9f) : Color(0.3f, 0.3f, 0.35f, 0.8f);
+                    Color winColor;
+                    if (isWinSelected) {
+                        winColor = Color(0.4f, 0.5f, 0.6f, 0.9f);  // Bright blue for selected
+                    } else if (isSelected) {
+                        winColor = Color(0.35f, 0.4f, 0.45f, 0.85f);  // Lighter when workspace selected
+                    } else {
+                        winColor = Color(0.3f, 0.3f, 0.35f, 0.8f);  // Normal
+                    }
                     renderer->drawRect((float)winX, (float)winY, (float)winWidth, (float)winHeight, winColor);
 
                     // Draw window border
-                    Color winBorder = isWinSelected ? Color(1.0f, 1.0f, 1.0f, 1.0f) : Color(0.5f, 0.5f, 0.5f, 0.5f);
-                    renderer->drawBorder(FloatRect((float)winX, (float)winY, (float)winWidth, (float)winHeight), winBorder, isWinSelected ? 2.0f : 1.0f);
+                    Color winBorder;
+                    float borderWidth;
+                    if (isWinSelected) {
+                        winBorder = Color(1.0f, 1.0f, 1.0f, 1.0f);  // White border for selected
+                        borderWidth = 3.0f;
+                    } else if (isSelected) {
+                        winBorder = Color(0.7f, 0.7f, 0.7f, 0.7f);  // Light border when workspace selected
+                        borderWidth = 2.0f;
+                    } else {
+                        winBorder = Color(0.5f, 0.5f, 0.5f, 0.5f);  // Dim border
+                        borderWidth = 1.0f;
+                    }
+                    renderer->drawBorder(FloatRect((float)winX, (float)winY, (float)winWidth, (float)winHeight), winBorder, borderWidth);
                 }
             }
 
@@ -365,7 +412,7 @@ private:
         }
 
         // Draw instruction text
-        const char* instruction = "Arrows: Navigate | Enter: Select | Esc: Cancel";
+        const char* instruction = "Arrows: Navigate | Space: Window/Workspace | Enter: Select | Esc: Cancel";
         float textWidth = strlen(instruction) * 10.0f;
         float textX = (screenWidth - textWidth) / 2.0f;
         renderer->drawText(instruction, textX, (float)(screenHeight - 40), 14.0f, Color(0.8f, 0.8f, 0.8f, 1.0f));
