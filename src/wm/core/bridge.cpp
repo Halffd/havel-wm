@@ -57,6 +57,21 @@ void havel_cpp_server_set_native_handle(struct havel_cpp_server* server, void* h
     server->server->setNativeHandle(handle);
 }
 
+void havel_cpp_server_set_overlay_layer(struct havel_cpp_server* server, void* overlay_layer) {
+    if (!server) return;
+    server->server->setOverlayLayer(overlay_layer);
+}
+
+void havel_cpp_server_init_text_input(struct havel_cpp_server* server, struct wl_display* display) {
+    if (!server || !display) return;
+    
+    // Create TextInputManager and register with Server
+    auto* textInputManager = new havel::TextInputManager(display);
+    server->server->setTextInputManager(textInputManager);
+    
+    printf("[TextInput] IME support initialized\n");
+}
+
 void* havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* c_view, uint32_t workspace_id, const char* appId, const char* title) {
     if (!server || !c_view) return nullptr;
     
@@ -174,6 +189,15 @@ void havel_cpp_set_brightness(struct havel_cpp_server* server, float brightness)
 
 void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int height) {
     if (!server || !server->server) return;
+    
+    // Get plugin manager and render overlays
+    auto& pluginManager = server->server->pluginManager();
+    
+    // Overlays are now rendered via scene graph nodes in the overlay layer
+    // This function is called before wlr_scene_output_commit
+    // Plugins render by adding/updating nodes in the overlay layer
+    pluginManager.renderOverlays(nullptr);  // nullptr - plugins use scene graph directly
+    
     (void)width;
     (void)height;
 }

@@ -9,6 +9,8 @@
 #include <wm/overlay/OverviewOverlay.hpp>
 #include <wm/overlay/AppLauncherOverlay.hpp>
 #include <wm/plugins/PluginManager.hpp>
+#include <input/KeybindingManager.hpp>
+#include <input/TextInputManager.hpp>
 #include <shell/WindowManager.hpp>
 #include <memory>
 #include <array>
@@ -73,6 +75,14 @@ public:
     // Native server handle for C bridge
     void setNativeHandle(void* handle) { m_nativeHandle = handle; }
     void* nativeHandle() const { return m_nativeHandle; }
+
+    // Overlay layer for plugin rendering
+    void setOverlayLayer(void* layer) { m_overlayLayer = layer; }
+    void* overlayLayer() const { return m_overlayLayer; }
+
+    // Text Input Manager (IME)
+    void setTextInputManager(void* manager) { m_textInputManager = static_cast<TextInputManager*>(manager); }
+    TextInputManager* textInputManager() const { return m_textInputManager; }
 
     // Animation control
     void setAnimationsEnabled(bool enabled);
@@ -140,12 +150,21 @@ private:
     uint32_t m_activeWorkspace = 0;
     FocusManager m_focusManager;
     WindowManager m_windowManager;
-    
+
+    // Keybindings
+    KeybindingManager m_keybindingManager;
+
+    // Text Input (IME)
+    TextInputManager* m_textInputManager = nullptr;
+
     // Overlays
     AltTabOverlay m_altTabOverlay;
     OverviewOverlay m_overviewOverlay;
     AppLauncherOverlay m_launcherOverlay;
     PluginManager m_pluginManager;
+
+    // Overlay scene layer (for Alt-Tab, Overview, etc.)
+    void* m_overlayLayer = nullptr;  // wlr_scene_tree*
 
     void* m_nativeHandle = nullptr;
     std::unordered_map<uint32_t, Rect> m_outputGeoms;
@@ -201,6 +220,9 @@ private:
     void moveViewToWorkspace(uint32_t ws);
     void moveViewToWorkspaceRelative(bool next);
     void quit();
+
+    // Keybinding registration
+    void registerKeybindings();
 
     // View manipulation through C callbacks (with optional animation)
     // Note: setViewPosition and setViewOpacity are public for CompositorAPI

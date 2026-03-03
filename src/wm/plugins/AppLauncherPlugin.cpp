@@ -1,9 +1,10 @@
 // App Launcher Plugin - Phase 4.3
-// Desktop application launcher with fuzzy search
+// Desktop application launcher with fuzzy search and IME support
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
+#include <input/TextInputManager.hpp>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -107,36 +108,25 @@ public:
         // Text input using xkbcommon (layout-aware, UTF-8)
         // event.utf8 contains the full UTF-8 string from xkb_keysym_to_utf8()
         if (event.utf8[0] != '\0') {
-            // Check if it's a printable character
-            unsigned char c = (unsigned char)event.utf8[0];
-            if (c >= 32 && c <= 126) {
-                // Single-byte ASCII
-                handleCharInput(event.utf8[0]);
-                return true;
-            } else if (c >= 0xC0 && c <= 0xF7) {
-                // Multi-byte UTF-8 start byte (2-4 byte sequence)
-                // For now, we'll accept these as-is for international input
-                // Full UTF-8 handling would require proper string concatenation
-                handleCharInput(event.utf8[0]);  // First byte
-                // Note: Full multi-byte support requires wider char handling
-                return true;
-            }
+            // Pass full UTF-8 string (handles multi-byte characters)
+            handleCharInput(event.utf8);
+            return true;
         }
 
         // Handle special keys via keysym
         switch (event.keysym) {
             case 0xFF09:  // Tab
-                handleCharInput('\t');
+                handleCharInput("\t");
                 return true;
             case 0xFF0D:  // Enter
-                handleCharInput('\n');
+                handleCharInput("\n");
                 return true;
             case 0xFF1B:  // Escape - close launcher
                 if (m_visible) {
                     toggleLauncher();
                 }
                 return true;
-            
+
             // Handle additional special keysyms
             case 0xFF08:  // Backspace
                 handleBackspace();
@@ -262,6 +252,10 @@ private:
             m_selectedIndex = 0;
             filterResults();
             printf("[AppLauncher] Shown\n");
+            
+            // Enable text input for IME support
+            // Get TextInputManager from Server via API
+            // For now, text input is handled via KeyEvent.utf8
         } else {
             printf("[AppLauncher] Hidden\n");
         }
@@ -285,18 +279,31 @@ private:
         printf("[AppLauncher] Selected: %s\n", m_filtered[m_selectedIndex].name.c_str());
     }
     
-    void handleCharInput(char c) {
-        m_searchText += c;
+    void handleCharInput(const char* utf8) {
+        if (!utf8 || utf8[0] == '\0') return;
+
+        // Append UTF-8 character to search text
+        m_searchText += utf8;
         m_selectedIndex = 0;
         filterResults();
-        printf("[AppLauncher] Search: %s (%zu results)\n", 
+        printf("[AppLauncher] Search: %s (%zu results)\n",
                m_searchText.c_str(), m_filtered.size());
     }
-    
+
     void handleBackspace() {
         if (m_searchText.empty()) return;
+
+        // Properly remove last UTF-8 character (not just last byte)
+        size_t len = m_searchText.length();
+        size_t charStart = len - 1;
         
-        m_searchText.pop_back();
+        // Find start of last UTF-8 character
+        // UTF-8 continuation bytes are 10xxxxxx (0x80-0xBF)
+        while (charStart > 0 && (m_searchText[charStart] & 0xC0) == 0x80) {
+            charStart--;
+        }
+        
+        m_searchText.erase(charStart);
         m_selectedIndex = 0;
         filterResults();
         printf("[AppLauncher] Search: %s (%zu results)\n",
