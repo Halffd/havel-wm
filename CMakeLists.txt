@@ -66,6 +66,18 @@ else()
     set(LAYER_SHELL_XML ${WAYLAND_PROTOCOLS_DIR}/unstable/wlr-layer-shell/unstable-v1/wlr-layer-shell-unstable-v1.xml)
 endif()
 
+# Download text-input protocol if not present
+if(NOT EXISTS ${WAYLAND_PROTOCOLS_DIR}/unstable/text-input/text-input-unstable-v3.xml)
+    file(DOWNLOAD
+        https://gitlab.freedesktop.org/wayland/wayland-protocols/-/raw/main/unstable/text-input/text-input-unstable-v3.xml
+        ${CMAKE_BINARY_DIR}/text-input-unstable-v3.xml
+        SHOW_PROGRESS
+    )
+    set(TEXT_INPUT_XML ${CMAKE_BINARY_DIR}/text-input-unstable-v3.xml)
+else()
+    set(TEXT_INPUT_XML ${WAYLAND_PROTOCOLS_DIR}/unstable/text-input/text-input-unstable-v3.xml)
+endif()
+
 execute_process(
     COMMAND ${WAYLAND_SCANNER} server-header
     ${LAYER_SHELL_XML}
@@ -78,10 +90,24 @@ execute_process(
     ${PROTOCOL_HEADERS_DIR}/wlr-layer-shell-unstable-v1-protocol.c
 )
 
+# Generate text-input protocol headers
+execute_process(
+    COMMAND ${WAYLAND_SCANNER} server-header
+    ${TEXT_INPUT_XML}
+    ${PROTOCOL_HEADERS_DIR}/text-input-unstable-v3-protocol.h
+)
+
+execute_process(
+    COMMAND ${WAYLAND_SCANNER} private-code
+    ${TEXT_INPUT_XML}
+    ${PROTOCOL_HEADERS_DIR}/text-input-unstable-v3-protocol.c
+)
+
 # Add the generated protocol source
 set(PROTOCOL_SOURCES
     ${PROTOCOL_HEADERS_DIR}/xdg-shell-protocol.c
     ${PROTOCOL_HEADERS_DIR}/wlr-layer-shell-unstable-v1-protocol.c
+    ${PROTOCOL_HEADERS_DIR}/text-input-unstable-v3-protocol.c
 )
 
 # C++ WM core sources
@@ -107,6 +133,7 @@ set(WM_CORE_SOURCES
     src/wm/input/InputManager.cpp
     src/wm/input/KeybindingManager.cpp
     src/wm/input/KeybindingManager.hpp
+    src/wm/input/TextInputManager.cpp
     src/wm/overlay/OverlayScene.cpp
     src/wm/overlay/AltTabOverlay.cpp
     src/wm/overlay/OverviewOverlay.cpp
@@ -159,6 +186,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${PROTOCOL_HEADERS_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm
     ${CMAKE_CURRENT_SOURCE_DIR}/src/shell/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
     ${WAYLAND_SERVER_INCLUDE_DIRS}
