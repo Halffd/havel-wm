@@ -30,7 +30,11 @@ public:
     
     // Enable/disable effect
     void setEnabled(bool enabled) { m_enabled = enabled; }
-    
+
+    // Effect intensity (0.0 = off, 1.0 = full)
+    float intensity() const { return m_intensity; }
+    void setIntensity(float intensity) { m_intensity = intensity; }
+
     // Get shader program handle
     GLuint program() const { return m_program; }
     
@@ -57,7 +61,9 @@ protected:
     GLint m_uniformTexture = -1;
     GLint m_uniformIntensity = -1;
     GLint m_uniformResolution = -1;
-    
+
+    float m_intensity = 1.0f;
+
     bool m_enabled = true;
     bool m_initialized = false;
 };

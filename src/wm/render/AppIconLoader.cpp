@@ -71,46 +71,66 @@ GLuint AppIconLoader::loadIcon(const std::string& appId) {
 }
 
 GLuint AppIconLoader::loadIconFromFile(const std::string& appId) {
-    // Try common icon names
+    // Try common icon names and extensions
     std::vector<std::string> iconNames = {
         appId,
         appId + ".png",
         appId + ".svg",
         appId + ".xpm",
     };
+
+    // Also try with common replacements
+    std::vector<std::string> altNames;
+    std::string lowerId = appId;
+    std::transform(lowerId.begin(), lowerId.end(), lowerId.begin(), ::tolower);
     
-    // Search through icon paths
+    // Try lowercase
+    if (lowerId != appId) {
+        altNames.push_back(lowerId);
+        altNames.push_back(lowerId + ".png");
+        altNames.push_back(lowerId + ".svg");
+    }
+    
+    // Try replacing dashes with underscores
+    std::string underscoreId = appId;
+    std::replace(underscoreId.begin(), underscoreId.end(), '-', '_');
+    if (underscoreId != appId) {
+        altNames.push_back(underscoreId);
+        altNames.push_back(underscoreId + ".png");
+        altNames.push_back(underscoreId + ".svg");
+    }
+
+    // Combine all names to try
+    iconNames.insert(iconNames.end(), altNames.begin(), altNames.end());
+
+    // Search through icon paths with size subdirectories
     for (const auto& iconPath : m_iconPaths) {
         for (const auto& iconName : iconNames) {
+            // Try direct path first
             std::string fullPath = iconPath + iconName;
-            
-            // Try exact path first
             GLuint texture = loadIconFromPath(fullPath);
             if (texture != 0) {
                 LOG_DEBUG("[AppIconLoader] Loaded icon: %s", fullPath.c_str());
                 return texture;
             }
-            
+
             // Try with common sizes
-            std::vector<std::string> sizes = {"32x32", "48x48", "64x64", "128x128", "scalable"};
+            std::vector<std::string> sizes = {"32x32", "48x48", "64x64", "128x128", "256x256", "scalable"};
+            std::vector<std::string> categories = {"apps", "applications", "mimetypes", "places", "devices"};
+            
             for (const auto& size : sizes) {
-                fullPath = iconPath + size + "/apps/" + iconName;
-                texture = loadIconFromPath(fullPath);
-                if (texture != 0) {
-                    LOG_DEBUG("[AppIconLoader] Loaded icon: %s", fullPath.c_str());
-                    return texture;
-                }
-                
-                fullPath = iconPath + size + "/apps/" + appId + ".png";
-                texture = loadIconFromPath(fullPath);
-                if (texture != 0) {
-                    LOG_DEBUG("[AppIconLoader] Loaded icon: %s", fullPath.c_str());
-                    return texture;
+                for (const auto& cat : categories) {
+                    fullPath = iconPath + size + "/" + cat + "/" + iconName;
+                    texture = loadIconFromPath(fullPath);
+                    if (texture != 0) {
+                        LOG_DEBUG("[AppIconLoader] Loaded icon: %s", fullPath.c_str());
+                        return texture;
+                    }
                 }
             }
         }
     }
-    
+
     // Fallback: generate colored placeholder
     LOG_DEBUG("[AppIconLoader] Using placeholder for: %s", appId.c_str());
     return generatePlaceholderIcon(appId);

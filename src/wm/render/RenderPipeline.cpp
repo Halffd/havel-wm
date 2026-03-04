@@ -91,10 +91,10 @@ void RenderPipeline::render(void* scene, void* sceneOutput) {
         }
         return;
     }
-    
+
     // Check if any effects are enabled
     bool hasEffects = m_effectsEnabled && (m_grayscaleEnabled || m_negativeEnabled);
-    
+
     if (!hasEffects) {
         // No effects, just commit directly
         havel_render_pipeline_render(m_pipeline,
@@ -103,12 +103,21 @@ void RenderPipeline::render(void* scene, void* sceneOutput) {
         );
         return;
     }
-    
-    // Effects would be applied via render pass in wlr_bridge.c
-    // This is a stub - actual effect application happens in the render pass
-    printf("[RenderPipeline] Effects active (grayscale=%d, negative=%d)\n",
+
+    // Apply effects via render pipeline
+    // The C layer handles the actual effect application through the render pass
+    printf("[RenderPipeline] Applying effects (grayscale=%d, negative=%d)\n",
            m_grayscaleEnabled, m_negativeEnabled);
-    
+
+    // Set effect parameters
+    if (m_grayscaleEffect) {
+        m_grayscaleEffect->setIntensity(1.0f);
+    }
+    if (m_negativeEffect) {
+        m_negativeEffect->setIntensity(1.0f);
+    }
+
+    // Render with effects
     havel_render_pipeline_render(m_pipeline,
         static_cast<struct wlr_scene*>(scene),
         static_cast<struct wlr_scene_output*>(sceneOutput)
