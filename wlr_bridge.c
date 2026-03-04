@@ -1349,7 +1349,12 @@ static void server_cursor_motion(struct wl_listener *listener, void *data) {
     struct wlr_pointer_motion_event *event = data;
 
     wlr_cursor_move(server->cursor, &event->pointer->base, event->delta_x, event->delta_y);
-    
+
+    // Process gesture recognition
+    havel_cpp_process_gesture_motion(server->cpp_server, 
+                                      server->cursor->x, server->cursor->y,
+                                      event->time_msec);
+
     // Handle interactive move/resize
     if (server->grab.mode != INTERACTIVE_NONE && server->grab.view) {
         if (server->grab.mode == INTERACTIVE_MOVE) {
@@ -1400,6 +1405,12 @@ static void server_cursor_motion_absolute(struct wl_listener *listener, void *da
 static void server_cursor_button(struct wl_listener *listener, void *data) {
     struct havel_wlr_server *server = wl_container_of(listener, server, cursor_button);
     struct wlr_pointer_button_event *event = data;
+
+    // Process gesture recognition
+    havel_cpp_process_gesture_button(server->cpp_server, event->button, 
+                                      event->state == WL_POINTER_BUTTON_STATE_PRESSED,
+                                      server->cursor->x, server->cursor->y,
+                                      event->time_msec);
 
     wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
 
@@ -1592,6 +1603,9 @@ havel_wlr_server_t* havel_wlr_create(void) {
     // Initialize text input manager (IME support)
     // This requires wl_display to be created
     havel_cpp_server_init_text_input(server->cpp_server, server->display);
+
+    // Initialize gesture recognition
+    havel_cpp_init_gestures(server->cpp_server);
 
     // Initialize screen capture (PipeWire/screencopy)
     // This requires wl_display and output_layout to be created

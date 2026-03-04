@@ -153,6 +153,10 @@ public:
     void* screenCapture() const { return m_screenCapture; }
     void setScreenCapture(void* capture) { m_screenCapture = capture; }
 
+    // Gesture recognition
+    void* gestureRecognizer() const { return m_gestureRecognizer; }
+    void setGestureRecognizer(void* recognizer) { m_gestureRecognizer = recognizer; }
+
 private:
     std::array<std::unique_ptr<Workspace>, WORKSPACE_COUNT> m_workspaces;
     uint32_t m_activeWorkspace = 0;
@@ -185,6 +189,9 @@ private:
 
     // Screen capture (PipeWire)
     void* m_screenCapture = nullptr;
+
+    // Gesture recognition
+    void* m_gestureRecognizer = nullptr;
 
     // Gamma/temperature (for gamma plugin)
     float m_gamma = 1.0f;

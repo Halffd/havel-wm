@@ -85,6 +85,11 @@ void havel_cpp_alt_tab_select(struct havel_cpp_server* server, int index);
 // Application spawning (for App Launcher)
 void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command);
 
+// Gesture recognition
+void havel_cpp_init_gestures(struct havel_cpp_server* server);
+void havel_cpp_process_gesture_motion(struct havel_cpp_server* server, double x, double y, uint64_t timestamp);
+void havel_cpp_process_gesture_button(struct havel_cpp_server* server, int button, bool pressed, double x, double y, uint64_t timestamp);
+
 // C layer gamma application
 void havel_wlr_set_gamma(havel_wlr_server_t* server, float gamma);
 void havel_wlr_set_temperature(havel_wlr_server_t* server, int kelvin);

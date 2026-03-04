@@ -165,6 +165,8 @@ set(WM_CORE_SOURCES
     src/wm/input/KeybindingManager.cpp
     src/wm/input/KeybindingManager.hpp
     src/wm/input/TextInputManager.cpp
+    src/wm/input/GestureRecognizer.cpp
+    src/wm/input/GestureRecognizer.hpp
     src/wm/overlay/OverlayScene.cpp
     src/wm/overlay/AltTabOverlay.cpp
     src/wm/overlay/OverviewOverlay.cpp

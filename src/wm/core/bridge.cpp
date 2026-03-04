@@ -1,6 +1,7 @@
 #include <wm/bridge.h>
 #include <wm/Server.hpp>
 #include <wm/plugins/Plugin.hpp>
+#include "../input/GestureRecognizer.hpp"
 #include <Logger.h>
 #include <cstdint>
 #include <unistd.h>
@@ -240,6 +241,60 @@ void havel_cpp_alt_tab_select(struct havel_cpp_server* server, int index) {
                      selectedView->title().c_str());
             pluginManager.focusView(selectedView);
         }
+    }
+}
+
+void havel_cpp_init_gestures(struct havel_cpp_server* server) {
+    if (!server || !server->server) return;
+    
+    // Create gesture recognizer
+    auto* recognizer = new havel::GestureRecognizer();
+    recognizer->initialize(50.0f, 100.0f, 300);
+    
+    // Set up gesture callback
+    recognizer->setGestureCallback([server](const havel::GestureResult& result) {
+        LOG_INFO("[Gesture] Recognized: %s (confidence: %.2f)", 
+                 result.name.c_str(), result.confidence);
+        
+        // Trigger gesture action via GestureManager
+        havel::GestureManager::getInstance().triggerGesture(result);
+    });
+    
+    // Set up shake callback
+    recognizer->setShakeCallback([server](float intensity) {
+        LOG_INFO("[Gesture] Shake detected! Intensity: %.2f", intensity);
+        // Could trigger shake action here
+    });
+    
+    // Set up combo callback
+    recognizer->setComboCallback([server](int clickCount) {
+        LOG_INFO("[Gesture] Combo: %d clicks", clickCount);
+        // Could trigger combo action here
+    });
+    
+    server->server->setGestureRecognizer(recognizer);
+    
+    // Initialize gesture manager with default mappings
+    havel::GestureManager::getInstance().initialize();
+    
+    LOG_INFO("[Bridge] Gesture recognition initialized");
+}
+
+void havel_cpp_process_gesture_motion(struct havel_cpp_server* server, double x, double y, uint64_t timestamp) {
+    if (!server || !server->server) return;
+    
+    auto* recognizer = static_cast<havel::GestureRecognizer*>(server->server->gestureRecognizer());
+    if (recognizer && recognizer->isGesturesEnabled()) {
+        recognizer->processMotion(static_cast<float>(x), static_cast<float>(y), timestamp);
+    }
+}
+
+void havel_cpp_process_gesture_button(struct havel_cpp_server* server, int button, bool pressed, double x, double y, uint64_t timestamp) {
+    if (!server || !server->server) return;
+    
+    auto* recognizer = static_cast<havel::GestureRecognizer*>(server->server->gestureRecognizer());
+    if (recognizer && recognizer->isGesturesEnabled()) {
+        recognizer->processButton(button, pressed, static_cast<float>(x), static_cast<float>(y), timestamp);
     }
 }
 
