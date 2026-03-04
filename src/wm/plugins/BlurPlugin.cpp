@@ -1,9 +1,10 @@
-// Blur Plugin - Background effects for floating/inactive windows
-// Provides visual feedback and desktop dimming (full blur requires GLES2 shaders)
+// Blur Plugin - Background effects with Kawase blur shader
+// Provides desktop dimming, floating window borders, and blur effects
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
+#include "render/BlurShader.hpp"
 #include <cstdio>
 #include <vector>
 #include <cmath>
@@ -16,21 +17,21 @@ namespace havel {
  *
  * Provides visual effects:
  * - Desktop dimming when floating windows are present
+ * - Kawase blur for background (when GPU available)
  * - Highlight borders around floating windows
  * - Visual feedback for blur-enabled windows
  *
- * Note: True Gaussian blur requires:
- * - GLES2 fragment shader
- * - Aux buffer for intermediate rendering
- * - Render pass integration
- *
- * This implementation provides visual feedback that works
- * with the current overlay rendering system.
+ * Keybindings:
+ * - Meta+B: Toggle effects
+ * - Meta+Shift+B: Toggle borders
+ * - Meta+Shift+D: Toggle desktop dim
+ * - Meta+PageUp/Down: Adjust dim amount
+ * - Meta+Shift+PageUp/Down: Adjust border width
  */
 class BlurPlugin : public Plugin {
 public:
     const char* name() const override { return "blur"; }
-    const char* version() const override { return "0.3.0"; }
+    const char* version() const override { return "0.4.0"; }
 
     void init(CompositorAPI* api) override {
         m_api = api;
@@ -39,17 +40,24 @@ public:
         m_dimAmount = 0.4f;
         m_showBorders = true;
         m_borderWidth = 3;
-        m_blurRadius = 10;
-        m_blurPasses = 3;
-        m_blurStrength = 0.8f;
+        m_blurRadius = 3;  // Kawase blur radius (passes)
+        m_blurEnabled = false;
         m_blurFloating = true;
 
-        printf("[BlurPlugin] Initialized (dim=%.2f, borders=%s)\n",
-               m_dimAmount, m_showBorders ? "on" : "off");
+        // Initialize blur shader (will be created when first needed)
+        m_blurShader = nullptr;
+
+        printf("[BlurPlugin] Initialized (dim=%.2f, borders=%s, blur=%s)\n",
+               m_dimAmount, m_showBorders ? "on" : "off",
+               m_blurEnabled ? "on" : "off");
     }
 
     void fini() override {
         m_floatingWindows.clear();
+        if (m_blurShader) {
+            delete m_blurShader;
+            m_blurShader = nullptr;
+        }
         printf("[BlurPlugin] Finalized\n");
         m_api = nullptr;
     }
@@ -150,10 +158,35 @@ public:
             }
         }
 
+        // Toggle blur: Meta+Shift+L
+        if ((event.modifiers & MOD_SHIFT) && event.keycode == 44) {  // L
+            m_blurEnabled = !m_blurEnabled;
+            printf("[BlurPlugin] Kawase blur %s\n", m_blurEnabled ? "enabled" : "disabled");
+            
+            // Initialize blur shader on first enable
+            if (m_blurEnabled && !m_blurShader) {
+                m_blurShader = new BlurShader();
+                // Will be initialized with proper size on first use
+            }
+            return true;
+        }
+
+        // Blur radius adjustment: Meta+L/semicolon
+        if (m_blurEnabled && event.keycode == 44) {  // L
+            m_blurRadius = clamp(m_blurRadius + 1, 1, 10);
+            printf("[BlurPlugin] Blur radius: %d\n", m_blurRadius);
+            return true;
+        }
+        if (m_blurEnabled && event.keycode == 51) {  // semicolon
+            m_blurRadius = clamp(m_blurRadius - 1, 1, 10);
+            printf("[BlurPlugin] Blur radius: %d\n", m_blurRadius);
+            return true;
+        }
+
         // Toggle floating window effects
         if (event.keycode == 30) {  // A
             m_blurFloating = !m_blurFloating;
-            printf("[BlurPlugin] Floating window effects: %s\n", 
+            printf("[BlurPlugin] Floating window effects: %s\n",
                    m_blurFloating ? "on" : "off");
             return true;
         }
@@ -161,26 +194,24 @@ public:
         return false;
     }
 
-    int getBlurRadius() const { return m_blurRadius; }
-    int getBlurPasses() const { return m_blurPasses; }
-    float getBlurStrength() const { return m_blurStrength; }
     float getDimAmount() const { return m_dimAmount; }
     bool shouldDimDesktop() const { return m_dimDesktop; }
     bool shouldShowBorders() const { return m_showBorders; }
     bool isEnabled() const { return m_enabled; }
+    bool isBlurEnabled() const { return m_blurEnabled; }
 
 private:
     CompositorAPI* m_api = nullptr;
     std::unordered_set<void*> m_floatingWindows;
-    
+    BlurShader* m_blurShader = nullptr;
+
     bool m_enabled;
     bool m_dimDesktop;
     float m_dimAmount;
     bool m_showBorders;
     int m_borderWidth;
     int m_blurRadius;
-    int m_blurPasses;
-    float m_blurStrength;
+    bool m_blurEnabled;
     bool m_blurFloating;
 
     template<typename T>

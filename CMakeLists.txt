@@ -120,6 +120,8 @@ set(WM_CORE_SOURCES
     src/wm/core/bridge.cpp
     src/wm/core/Animation.cpp
     src/wm/core/Animator.cpp
+    src/wm/core/ScreenCapture.cpp
+    src/wm/core/ScreenCapture.hpp
     src/wm/render/RenderPipeline.cpp
     src/wm/render/render_c_wrappers.c
     src/wm/render/ShaderEffect.cpp
@@ -131,6 +133,8 @@ set(WM_CORE_SOURCES
     src/wm/render/FreeTypeFont.cpp
     src/wm/render/FreeTypeFont.hpp
     src/wm/render/AppIconLoader.cpp
+    src/wm/render/BlurShader.cpp
+    src/wm/render/BlurShader.hpp
     src/wm/input/InputManager.cpp
     src/wm/input/KeybindingManager.cpp
     src/wm/input/KeybindingManager.hpp

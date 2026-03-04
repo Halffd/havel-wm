@@ -36,6 +36,7 @@
 #include <wlr/types/wlr_server_decoration.h>
 #include <wlr/types/wlr_xdg_activation_v1.h>
 #include <wlr/types/wlr_primary_selection_v1.h>
+#include <wlr/types/wlr_screencopy_v1.h>
 #include <wlr/util/log.h>
 #include <wlr/xwayland.h>
 
@@ -1578,6 +1579,10 @@ havel_wlr_server_t* havel_wlr_create(void) {
     // This requires wl_display to be created
     havel_cpp_server_init_text_input(server->cpp_server, server->display);
 
+    // Initialize screen capture (PipeWire/screencopy)
+    // This requires wl_display and output_layout to be created
+    // Will be initialized after output_layout creation
+
     server->allocator = wlr_allocator_autocreate(server->backend, server->renderer);
     if (!server->allocator) {
         LOG_ERROR("[ALLOCATOR] Failed to create allocator");
@@ -1601,6 +1606,10 @@ havel_wlr_server_t* havel_wlr_create(void) {
 
     server->output_layout = wlr_output_layout_create(server->display);
     server->scene = wlr_scene_create();
+
+    // Initialize screen capture (PipeWire/screencopy support)
+    // This enables screen sharing in browsers and recording apps
+    // screencapture::initialize(server->display, server->output_layout);
 
     // Background color is now handled by wallpaper plugin via output_frame handler
     // No static background rect needed - plugin draws per-output backgrounds

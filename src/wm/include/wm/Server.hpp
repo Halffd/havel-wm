@@ -145,6 +145,10 @@ public:
     void setTemperature(int kelvin);
     void setBrightness(float brightness);
 
+    // Screen capture (PipeWire/screencopy)
+    void* screenCapture() const { return m_screenCapture; }
+    void setScreenCapture(void* capture) { m_screenCapture = capture; }
+
 private:
     std::array<std::unique_ptr<Workspace>, WORKSPACE_COUNT> m_workspaces;
     uint32_t m_activeWorkspace = 0;
@@ -174,7 +178,10 @@ private:
     float m_bgColorR = 0.1f;
     float m_bgColorG = 0.1f;
     float m_bgColorB = 0.15f;
-    
+
+    // Screen capture (PipeWire)
+    void* m_screenCapture = nullptr;
+
     // Gamma/temperature (for gamma plugin)
     float m_gamma = 1.0f;
     int m_temperature = 6500;  // Kelvin
