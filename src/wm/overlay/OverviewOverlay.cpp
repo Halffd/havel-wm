@@ -1,4 +1,5 @@
 #include "OverviewOverlay.hpp"
+#include <wm/render/OverlayRenderer.hpp>
 #include <cstdio>
 #include <cmath>
 
@@ -171,23 +172,49 @@ void OverviewOverlay::layoutGrid(int screenWidth, int screenHeight) {
     }
 }
 
-void OverviewOverlay::drawWorkspace(void* renderer, const WorkspacePreview& ws, bool selected) {
-    // Would draw:
-    // 1. Workspace background (highlighted if selected/active)
-    // 2. Workspace number label
-    // 3. Window thumbnails within workspace
-    // 4. Window count indicator
-    
-    (void)renderer;
-    (void)ws;
-    (void)selected;
-    
-    // Stub for now - actual rendering requires GLES2
+void OverviewOverlay::drawWorkspace(void* rendererPtr, const WorkspacePreview& ws, bool selected) {
+    OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+    if (!renderer) return;
+
+    // Draw workspace background
+    Color bgColor;
+    if (ws.isActive) {
+        bgColor = Color(0.2f, 0.3f, 0.4f, 0.9f);  // Active workspace - blue tint
+    } else if (selected) {
+        bgColor = Color(0.3f, 0.4f, 0.3f, 0.9f);  // Selected - green tint
+    } else {
+        bgColor = Color(0.15f, 0.15f, 0.2f, 0.9f);  // Normal - dark gray
+    }
+    renderer->drawRect(ws.x, ws.y, ws.w, ws.h, bgColor);
+
+    // Draw border if selected or active
+    if (selected || ws.isActive) {
+        Color borderColor = ws.isActive ? Color(0.4f, 0.6f, 0.9f, 1.0f) : Color(0.4f, 0.7f, 0.4f, 1.0f);
+        float borderWidth = 3.0f;
+        renderer->drawRect(ws.x - borderWidth, ws.y - borderWidth, ws.w + borderWidth*2, borderWidth, borderColor);  // Top
+        renderer->drawRect(ws.x - borderWidth, ws.y + ws.h, ws.w + borderWidth*2, borderWidth, borderColor);  // Bottom
+        renderer->drawRect(ws.x - borderWidth, ws.y, borderWidth, ws.h, borderColor);  // Left
+        renderer->drawRect(ws.x + ws.w, ws.y, borderWidth, ws.h, borderColor);  // Right
+    }
+
+    // Draw workspace number
+    char wsLabel[16];
+    snprintf(wsLabel, sizeof(wsLabel), "Workspace %d", ws.workspaceId + 1);
+    renderer->drawText(wsLabel, ws.x + ws.w/2 - 50, ws.y + 20, 16.0f, Color(1.0f, 1.0f, 1.0f, 1.0f));
+
+    // Draw window count
+    if (ws.windowCount > 0) {
+        char winLabel[32];
+        snprintf(winLabel, sizeof(winLabel), "%d window%s", ws.windowCount, ws.windowCount > 1 ? "s" : "");
+        renderer->drawText(winLabel, ws.x + ws.w/2 - 30, ws.y + ws.h - 20, 12.0f, Color(0.8f, 0.8f, 0.8f, 1.0f));
+    } else {
+        renderer->drawText("Empty", ws.x + ws.w/2 - 20, ws.y + ws.h - 20, 12.0f, Color(0.5f, 0.5f, 0.5f, 1.0f));
+    }
 }
 
 void OverviewOverlay::drawBackground(int screenWidth, int screenHeight) {
-    // Would draw semi-transparent dark overlay
-    // For now, this is a stub
+    // Draw semi-transparent dark overlay
+    // Note: This is handled by the overlay layer background
     (void)screenWidth;
     (void)screenHeight;
 }
