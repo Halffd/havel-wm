@@ -150,6 +150,7 @@ set(WM_CORE_SOURCES
     src/wm/render/RenderPipeline.cpp
     src/wm/render/render_c_wrappers.c
     src/wm/render/ShaderEffect.cpp
+    src/wm/render/AdvancedShaderEffects.cpp
     src/wm/render/OverlayRenderer.cpp
     src/wm/render/OverlayRenderer.hpp
     src/wm/render/OverlayRendering.cpp
