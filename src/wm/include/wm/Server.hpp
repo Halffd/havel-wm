@@ -65,6 +65,10 @@ public:
     View* getFocusedView() const;
     View* getViewById(uint64_t id) const;
 
+    // Window metadata
+    std::string getViewAppId(View* view) const;
+    std::string getViewTitle(View* view) const;
+
     // Layout
     void arrangeWorkspace(uint32_t id);
 

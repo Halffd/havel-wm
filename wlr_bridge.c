@@ -1041,9 +1041,15 @@ static void alt_tab_cycle(void) {
 
 static void alt_tab_select(void) {
     if (!alt_tab_overlay.visible) return;
-    
+
     LOG_INFO("[AltTab] Select window at index %d", alt_tab_overlay.selected_index);
-    // TODO: Focus selected window via C++ layer
+    
+    // Focus selected window via C++ layer
+    // The C++ Server class handles the actual focus logic
+    if (server->cpp_server) {
+        havel_cpp_alt_tab_select(server->cpp_server, alt_tab_overlay.selected_index);
+    }
+    
     alt_tab_hide();
 }
 

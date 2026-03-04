@@ -440,6 +440,17 @@ View* Server::getViewById(uint64_t id) const {
     return nullptr;
 }
 
+// Window metadata implementation
+std::string Server::getViewAppId(View* view) const {
+    if (!view) return "";
+    return view->appId();
+}
+
+std::string Server::getViewTitle(View* view) const {
+    if (!view) return "";
+    return view->title();
+}
+
 void Server::arrangeWorkspace(uint32_t id) {
     if (id >= WORKSPACE_COUNT) return;
 

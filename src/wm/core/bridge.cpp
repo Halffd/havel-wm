@@ -1,6 +1,7 @@
 #include <wm/bridge.h>
 #include <wm/Server.hpp>
 #include <wm/plugins/Plugin.hpp>
+#include <Logger.h>
 #include <cstdint>
 
 // Forward declare C server type and functions
@@ -205,6 +206,24 @@ void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int hei
 void* havel_cpp_get_plugin_manager(struct havel_cpp_server* server) {
     if (!server || !server->server) return nullptr;
     return &server->server->pluginManager();
+}
+
+void havel_cpp_alt_tab_select(struct havel_cpp_server* server, int index) {
+    if (!server || !server->server) return;
+
+    // Get all views and focus the selected one
+    auto& pluginManager = server->server->pluginManager();
+    auto views = pluginManager.getAllViews();
+
+    if (index >= 0 && index < static_cast<int>(views.size())) {
+        havel::View* selectedView = views[index];
+        if (selectedView) {
+            LOG_INFO("[AltTab] Focusing selected window: %s - %s",
+                     selectedView->appId().c_str(),
+                     selectedView->title().c_str());
+            pluginManager.focusView(selectedView);
+        }
+    }
 }
 
 } // extern "C"
