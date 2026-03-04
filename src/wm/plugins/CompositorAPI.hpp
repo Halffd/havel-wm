@@ -71,7 +71,10 @@ public:
     // Cursor position (for HotCorners, etc.)
     virtual double getCursorX() = 0;
     virtual double getCursorY() = 0;
-    
+
+    // Native handle for C bridge (for spawning apps)
+    virtual void* getNativeHandle() = 0;
+
     // Keybinding registration (future)
     // virtual void registerKeybinding(uint32_t mods, uint32_t key, Callback cb) = 0;
 };

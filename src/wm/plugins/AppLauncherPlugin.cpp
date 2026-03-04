@@ -4,6 +4,7 @@
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
+#include <wm/bridge.h>
 #include <input/TextInputManager.hpp>
 #include <cstdio>
 #include <cstring>
@@ -346,13 +347,17 @@ private:
             m_selectedIndex >= (int)m_filtered.size()) {
             return;
         }
-        
+
         const DesktopEntry& entry = m_filtered[m_selectedIndex];
-        printf("[AppLauncher] Launching: %s (%s)\n", 
+        printf("[AppLauncher] Launching: %s (%s)\n",
                entry.name.c_str(), entry.exec.c_str());
-        
-        // Would spawn the application
-        // For now, just log
+
+        // Spawn the application via C bridge
+        // The command is executed through the shell
+        havel_cpp_server_spawn(
+            static_cast<struct havel_cpp_server*>(m_api->getNativeHandle()),
+            entry.exec.c_str());
+
         hideLauncher();
     }
     

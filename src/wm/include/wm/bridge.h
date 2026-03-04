@@ -82,6 +82,9 @@ void* havel_cpp_get_plugin_manager(struct havel_cpp_server* server);
 // Alt-Tab window selection
 void havel_cpp_alt_tab_select(struct havel_cpp_server* server, int index);
 
+// Application spawning (for App Launcher)
+void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command);
+
 // C layer gamma application
 void havel_wlr_set_gamma(havel_wlr_server_t* server, float gamma);
 void havel_wlr_set_temperature(havel_wlr_server_t* server, int kelvin);

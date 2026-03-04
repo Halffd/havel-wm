@@ -83,6 +83,9 @@ public:
     double getCursorX() override;
     double getCursorY() override;
 
+    // Native handle for C bridge (for spawning apps)
+    void* getNativeHandle() override;
+
     // Get list of loaded plugins
     const std::vector<std::unique_ptr<Plugin>>& plugins() const { return m_plugins; }
 

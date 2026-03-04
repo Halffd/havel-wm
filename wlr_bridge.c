@@ -382,12 +382,20 @@ static void cpp_impl_server_quit(void) {
 }
 
 static void cpp_impl_server_spawn(const char* command) {
+    if (!command) return;
+    
     pid_t pid = fork();
-    if (pid < 0) return;
-    if (pid == 0) {
-        execl("/bin/sh", "/bin/sh", "-c", command, (char*)NULL);
-        _exit(127);
+    if (pid < 0) {
+        LOG_ERROR("[Spawn] Fork failed for command: %s", command);
+        return;
     }
+    if (pid == 0) {
+        // Child process - execute command
+        execl("/bin/sh", "/bin/sh", "-c", command, (char*)NULL);
+        _exit(127);  // exec failed
+    }
+    // Parent process
+    LOG_INFO("[Spawn] Launched: %s (PID: %d)", command, pid);
 }
 
 // ============================================================================

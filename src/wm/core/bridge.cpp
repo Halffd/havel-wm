@@ -3,6 +3,7 @@
 #include <wm/plugins/Plugin.hpp>
 #include <Logger.h>
 #include <cstdint>
+#include <unistd.h>
 
 // Forward declare C server type and functions
 typedef struct havel_wlr_server havel_wlr_server_t;
@@ -206,6 +207,22 @@ void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int hei
 void* havel_cpp_get_plugin_manager(struct havel_cpp_server* server) {
     if (!server || !server->server) return nullptr;
     return &server->server->pluginManager();
+}
+
+void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command) {
+    if (!server || !command) return;
+
+    // Fork and exec the command
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Child process - execute command through shell
+        execl("/bin/sh", "sh", "-c", command, (char*)NULL);
+        _exit(1);  // execl failed
+    } else if (pid > 0) {
+        LOG_INFO("[Spawn] Launched command: %s (PID: %d)", command, pid);
+    } else {
+        LOG_ERROR("[Spawn] Failed to fork for command: %s", command);
+    }
 }
 
 void havel_cpp_alt_tab_select(struct havel_cpp_server* server, int index) {

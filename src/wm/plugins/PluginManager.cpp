@@ -375,4 +375,10 @@ double PluginManager::getCursorY() {
     return server->cursorY();
 }
 
+void* PluginManager::getNativeHandle() {
+    if (!m_server) return nullptr;
+    auto* server = static_cast<Server*>(m_server);
+    return server->nativeHandle();
+}
+
 } // namespace havel
