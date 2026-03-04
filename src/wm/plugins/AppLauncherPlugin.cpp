@@ -14,6 +14,8 @@
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#include <dirent.h>
+#include <unistd.h>
 
 namespace havel {
 
@@ -155,63 +157,81 @@ private:
             "/usr/local/share/applications/",
             nullptr
         };
-        
+
         for (int i = 0; paths[i] != nullptr; i++) {
             scanDirectory(paths[i]);
         }
-        
-        // Sort by name
+
+        // Also scan user's local applications
+        const char* home = getenv("HOME");
+        if (home) {
+            std::string localPath = std::string(home) + "/.local/share/applications/";
+            scanDirectory(localPath.c_str());
+        }
+
+        // Remove duplicates (by name)
         std::sort(m_entries.begin(), m_entries.end(),
             [](const DesktopEntry& a, const DesktopEntry& b) {
                 return a.name < b.name;
             });
+        
+        auto last = std::unique(m_entries.begin(), m_entries.end(),
+            [](const DesktopEntry& a, const DesktopEntry& b) {
+                return a.name == b.name;
+            });
+        m_entries.erase(last, m_entries.end());
+
+        printf("[AppLauncher] Scanned %zu applications\n", m_entries.size());
     }
     
     void scanDirectory(const char* path) {
-        // Would use opendir/readdir in real implementation
-        // For now, this is a stub showing the pattern
-        (void)path;
-        
-        // Example stub entries
-        DesktopEntry term;
-        term.id = "terminal";
-        term.name = "Terminal";
-        term.exec = "foot";
-        term.comment = "Terminal emulator";
-        term.icon = "utilities-terminal";
-        term.noDisplay = false;
-        m_entries.push_back(term);
-        
-        DesktopEntry browser;
-        browser.id = "firefox";
-        browser.name = "Firefox";
-        browser.exec = "firefox";
-        browser.comment = "Web browser";
-        browser.icon = "firefox";
-        browser.noDisplay = false;
-        m_entries.push_back(browser);
-        
-        DesktopEntry files;
-        files.id = "files";
-        files.name = "File Manager";
-        files.exec = "thunar";
-        files.comment = "Browse files";
-        files.icon = "system-file-manager";
-        files.noDisplay = false;
-        m_entries.push_back(files);
+        DIR* dir = opendir(path);
+        if (!dir) return;
+
+        struct dirent* entry;
+        while ((entry = readdir(dir)) != nullptr) {
+            std::string filename = entry->d_name;
+            
+            // Only process .desktop files
+            if (filename.length() > 8 && 
+                filename.substr(filename.length() - 8) == ".desktop") {
+                
+                std::string fullPath = std::string(path) + filename;
+                DesktopEntry de;
+                de.id = fullPath;
+                de.noDisplay = true;
+                
+                parseDesktopFile(fullPath, de);
+                
+                if (!de.noDisplay && !de.exec.empty()) {
+                    // Remove field codes from Exec (%f, %F, %u, %U, etc.)
+                    size_t pctPos = de.exec.find('%');
+                    if (pctPos != std::string::npos) {
+                        de.exec = de.exec.substr(0, pctPos);
+                    }
+                    // Trim trailing whitespace
+                    while (!de.exec.empty() && (de.exec.back() == ' ' || de.exec.back() == '\t')) {
+                        de.exec.pop_back();
+                    }
+                    m_entries.push_back(de);
+                }
+            }
+        }
+
+        closedir(dir);
     }
     
     void parseDesktopFile(const std::string& path, DesktopEntry& entry) {
         std::ifstream file(path);
         if (!file.is_open()) return;
-        
+
         std::string line;
         std::string currentGroup;
-        
+
         while (std::getline(file, line)) {
             // Skip comments and empty lines
             if (line.empty() || line[0] == '#') continue;
-            
+
             // Section header
             if (line[0] == '[') {
                 size_t end = line.find(']');
@@ -220,29 +240,43 @@ private:
                 }
                 continue;
             }
-            
+
             // Only parse [Desktop Entry] section
             if (currentGroup != "Desktop Entry") continue;
-            
+
             // Parse key=value
             size_t eq = line.find('=');
             if (eq == std::string::npos) continue;
-            
+
             std::string key = line.substr(0, eq);
             std::string value = line.substr(eq + 1);
-            
+
             // Remove locale suffix (e.g., [en_US])
             size_t bracket = key.find('[');
             if (bracket != std::string::npos) continue;
-            
+
+            // Trim whitespace
+            while (!key.empty() && (key.back() == ' ' || key.back() == '\t')) key.pop_back();
+            while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) value.erase(0, 1);
+
             if (key == "Name") entry.name = value;
             else if (key == "Exec") entry.exec = value;
             else if (key == "Comment") entry.comment = value;
             else if (key == "Icon") entry.icon = value;
             else if (key == "Categories") entry.categories = value;
             else if (key == "NoDisplay") entry.noDisplay = (value == "true");
+            else if (key == "Hidden") entry.noDisplay = (value == "true");
+            else if (key == "OnlyShowIn") {
+                // Only show if it matches our desktop
+                if (value.find("HAVEL") == std::string::npos && 
+                    value.find("GNOME") == std::string::npos &&
+                    value.find("KDE") == std::string::npos &&
+                    value.find("XFCE") == std::string::npos) {
+                    entry.noDisplay = true;
+                }
+            }
         }
-        
+
         file.close();
     }
     
