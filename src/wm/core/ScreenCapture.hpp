@@ -1,15 +1,21 @@
-// Screen Capture - PipeWire screencopy support for screen sharing
-// Implements wlr-screencopy-unstable-v1 protocol
+// Screen Capture - PipeWire integration
+// Provides screen sharing via PipeWire
 
 #pragma once
 
 #include <wayland-server-core.h>
-#include <wlr/types/wlr_screencopy_v1.h>
 #include <vector>
 #include <memory>
 #include <string>
 
+struct wlr_output;
+struct wlr_output_layout;
+
 namespace havel {
+
+#ifdef HAVE_PIPEWIRE
+class PipeWireStream;
+#endif
 
 /**
  * Screen Capture Manager
@@ -19,45 +25,44 @@ namespace havel {
  * - Screenshots
  * - Screen recording
  * 
- * Uses wlr-screencopy-unstable-v1 protocol
- * which is supported by:
- * - OBS Studio
- * - Firefox/Chrome (PipeWire)
- * - wf-recorder
- * - grim/slurp
+ * Integration points:
+ * - xdg-desktop-portal-wlr (browser screen sharing)
+ * - OBS Studio (recording)
+ * - wf-recorder (command line recording)
  */
 class ScreenCapture {
 public:
     ScreenCapture();
     ~ScreenCapture();
 
-    // Initialize with wl_display
+    // Initialize with wl_display and output_layout
     bool initialize(struct wl_display* display, struct wlr_output_layout* layout);
     void shutdown();
 
-    // Take screenshot of output
+    // Capture output to PipeWire stream
     bool captureOutput(struct wlr_output* output, const char* outputPath);
     
-    // Get screencopy manager handle
-    struct wlr_screencopy_manager_v1* getManager() const { return m_manager; }
-
     bool isInitialized() const { return m_initialized; }
 
 private:
     struct wl_display* m_display = nullptr;
     struct wlr_output_layout* m_layout = nullptr;
-    struct wlr_screencopy_manager_v1* m_manager = nullptr;
     bool m_initialized = false;
 
-    // Capture state
+    // Capture session
     struct CaptureSession {
-        struct wlr_screencopy_frame_v1* frame = nullptr;
         struct wlr_output* output = nullptr;
         std::string outputPath;
+#ifdef HAVE_PIPEWIRE
+        PipeWireStream* pwStream = nullptr;
+#endif
         bool active = false;
     };
 
     std::vector<std::unique_ptr<CaptureSession>> m_sessions;
+
+    // Setup listeners
+    void setupScreencopyListeners();
 
     // Frame handlers
     static void handleFrameReady(void* data, struct wl_resource* resource);

@@ -19,6 +19,16 @@ pkg_check_modules(GLES2 REQUIRED glesv2)
 pkg_check_modules(EGL REQUIRED egl)
 pkg_check_modules(FREETYPE REQUIRED freetype2)
 
+# Find PipeWire for screen sharing
+pkg_check_modules(PIPEWIRE libpipewire-0.3)
+if(PIPEWIRE_FOUND)
+    set(PIPEWIRE_ENABLED ON)
+    message(STATUS "PipeWire found - screen sharing enabled")
+else()
+    set(PIPEWIRE_ENABLED OFF)
+    message(STATUS "PipeWire not found - screen sharing disabled")
+endif()
+
 # Find Qt6 for panel
 find_package(Qt6 COMPONENTS Core Gui Widgets QUIET)
 if(Qt6_FOUND)
@@ -122,6 +132,8 @@ set(WM_CORE_SOURCES
     src/wm/core/Animator.cpp
     src/wm/core/ScreenCapture.cpp
     src/wm/core/ScreenCapture.hpp
+    src/wm/core/PipeWireStream.cpp
+    src/wm/core/PipeWireStream.hpp
     src/wm/render/RenderPipeline.cpp
     src/wm/render/render_c_wrappers.c
     src/wm/render/ShaderEffect.cpp
@@ -204,6 +216,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${GLES2_INCLUDE_DIRS}
     ${EGL_INCLUDE_DIRS}
     ${FREETYPE_INCLUDE_DIRS}
+    ${PIPEWIRE_INCLUDE_DIRS}
     # UI framework include (for future use)
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/include
     # Protocol headers for wlroots unstable headers
@@ -220,6 +233,7 @@ target_link_libraries(${PROJECT_NAME}
     ${GLES2_LIBRARIES}
     ${EGL_LIBRARIES}
     ${FREETYPE_LIBRARIES}
+    ${PIPEWIRE_LIBRARIES}
 )
 
 # Set library directories
