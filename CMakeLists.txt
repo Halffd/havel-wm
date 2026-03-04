@@ -153,6 +153,8 @@ set(WM_CORE_SOURCES
     src/wm/plugins/AltTabPlugin.cpp
     src/wm/plugins/OverviewPlugin.cpp
     src/wm/plugins/ServerDecorationPlugin.cpp
+    src/wm/plugins/DrawPlugin.cpp
+    src/wm/plugins/FPSPlugin.cpp
     # VulkanRenderer.cpp - disabled, wlroots handles rendering
 )
 

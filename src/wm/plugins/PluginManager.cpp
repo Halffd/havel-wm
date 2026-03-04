@@ -109,17 +109,19 @@ void PluginManager::shutdown() {
 
 void PluginManager::registerPlugin(std::unique_ptr<Plugin> plugin) {
     if (!plugin) {
+        printf("[PluginManager] WARNING: null plugin passed to registerPlugin!\n");
         return;
     }
 
-    printf("[PluginManager] Registered plugin: %s\n", plugin->name());
+    printf("[PluginManager] Registering plugin: %s (ptr=%p)\n", plugin->name(), (void*)plugin.get());
     m_plugins.push_back(std::move(plugin));
 
     // If already initialized, init the new plugin immediately (if enabled)
     if (m_initialized && m_server) {
         std::string name = m_plugins.back()->name();
+        printf("[PluginManager] Plugin %s enabled=%d\n", name.c_str(), isPluginEnabled(name) ? 1 : 0);
         if (isPluginEnabled(name)) {
-            printf("[PluginManager] Initializing newly registered plugin: %s\n", name.c_str());
+            printf("[PluginManager] Initializing newly registered plugin: %s (ptr=%p)\n", name.c_str(), (void*)m_plugins.back().get());
             m_plugins.back()->init(this);
         } else {
             printf("[PluginManager] Skipping disabled plugin: %s\n", name.c_str());
@@ -141,6 +143,11 @@ void PluginManager::unregisterPlugin(const char* name) {
 // Event dispatch
 void PluginManager::dispatchOutputFrame(const OutputFrameEvent& event) {
     for (auto& plugin : m_plugins) {
+        if (!plugin) {
+            printf("[PluginManager] WARNING: null plugin in vector!\n");
+            continue;
+        }
+        printf("[PluginManager] dispatchOutputFrame: plugin=%s\n", plugin->name());
         plugin->onOutputFrame(event);
     }
 }

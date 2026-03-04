@@ -181,8 +181,16 @@ private:
     float m_brightness = 1.0f;
 
     // Grab state for mouse operations
+    enum class GrabMode : uint8_t {
+        None = 0,
+        Move,
+        Resize,
+        Draw
+    };
+    
     struct GrabState {
         View* view = nullptr;
+        GrabMode mode = GrabMode::None;
         uint32_t button = 0;
         double startX = 0;
         double startY = 0;

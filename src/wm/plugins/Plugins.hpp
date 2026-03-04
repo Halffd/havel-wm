@@ -18,5 +18,7 @@ Plugin* create_app_launcher_plugin();
 Plugin* create_alt_tab_plugin();
 Plugin* create_overview_plugin();
 Plugin* create_server_decoration_plugin();
+Plugin* create_draw_plugin();
+Plugin* create_fps_plugin();
 
 } // namespace havel

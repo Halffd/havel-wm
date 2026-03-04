@@ -360,6 +360,66 @@ void OverlayRenderer::drawBorder(const FloatRect& rect, const Color& color, floa
     drawRect(rect.x + rect.w - thickness, rect.y, thickness, rect.h, color);  // Right
 }
 
+void OverlayRenderer::drawCircle(float cx, float cy, float radius, const Color& color) {
+    if (!m_initialized) return;
+    
+    // Draw circle as a series of small rectangles (approximation)
+    // Using 32 segments for smooth appearance
+    const int segments = 32;
+    const float PI = 3.14159265359f;
+    
+    for (int i = 0; i < segments; i++) {
+        float angle1 = 2.0f * PI * i / segments;
+        float angle2 = 2.0f * PI * (i + 1) / segments;
+        
+        float x1 = cx + radius * std::cos(angle1);
+        float y1 = cy + radius * std::sin(angle1);
+        float x2 = cx + radius * std::cos(angle2);
+        float y2 = cy + radius * std::sin(angle2);
+        
+        // Draw line segment as thin rectangle
+        float dx = x2 - x1;
+        float dy = y2 - y1;
+        float dist = std::sqrt(dx * dx + dy * dy);
+        float angle = std::atan2(dy, dx);
+        
+        float lineWidth = 2.0f;
+        float rectW = dist;
+        float rectH = lineWidth;
+        
+        FloatRect rect(x1, y1 - lineWidth/2, rectW, rectH);
+        
+        // Rotate and draw
+        glUseProgram(m_colorShader);
+        glUniform4f(m_colorColorLoc, color.r, color.g, color.b, color.a);
+        
+        glBindVertexArray(m_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
+        
+        // Simple approach: draw small rectangle at each segment
+        float left = (2.0f * x1) / m_screenWidth - 1.0f;
+        float top = 1.0f - (2.0f * y1) / m_screenHeight;
+        float right = (2.0f * (x1 + rectW)) / m_screenWidth - 1.0f;
+        float bottom = 1.0f - (2.0f * (y1 + rectH)) / m_screenHeight;
+        
+        float vertices[] = {
+            left, bottom, 0.0f, 0.0f,
+            right, bottom, 1.0f, 0.0f,
+            right, top, 1.0f, 1.0f,
+            left, bottom, 0.0f, 0.0f,
+            right, top, 1.0f, 1.0f,
+            left, top, 0.0f, 1.0f,
+        };
+        
+        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
+        glEnableVertexAttribArray(m_colorPosLoc);
+        glVertexAttribPointer(m_colorPosLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+        
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+    }
+    glBindVertexArray(0);
+}
+
 void OverlayRenderer::drawTexture(GLuint texture, const FloatRect& rect, float alpha) {
     drawTexture(texture, rect.x, rect.y, rect.w, rect.h, alpha);
 }

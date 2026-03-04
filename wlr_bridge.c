@@ -28,7 +28,6 @@
 #include <wlr/types/wlr_pointer.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_seat.h>
-#include <wlr/types/wlr_shm.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_shell.h>
@@ -741,10 +740,18 @@ static void layer_surface_handle_destroy(struct wl_listener *listener, void *dat
 
 static void layer_surface_handle_map(struct wl_listener *listener, void *data) {
     struct havel_layer_surface *lsurface = wl_container_of(listener, lsurface, map);
+    struct wlr_output *output = lsurface->output;
 
     LOG_INFO("[LayerShell] Surface mapped: namespace=%s, layer=%d",
              lsurface->scene_layer_surface->layer_surface->namespace,
              lsurface->scene_layer_surface->layer_surface->current.layer);
+
+    // Configure now that surface is initialized - fixes assertion failure
+    if (output) {
+        struct wlr_box full_area = {0, 0, output->width, output->height};
+        struct wlr_box usable_area = {0, 0, output->width, output->height};
+        wlr_scene_layer_surface_v1_configure(lsurface->scene_layer_surface, &full_area, &usable_area);
+    }
 
     // Raise to top when mapped
     wlr_scene_node_raise_to_top(&lsurface->scene_tree->node);
@@ -798,18 +805,6 @@ static void server_new_layer_surface(struct wl_listener *listener, void *data) {
 
     lsurface->unmap.notify = layer_surface_handle_unmap;
     wl_signal_add(&layer_surface->surface->events.unmap, &lsurface->unmap);
-
-    // Configure with output size - MUST do this to complete layer-shell handshake
-    if (output) {
-        struct wlr_box full_area = {0, 0, output->width, output->height};
-        struct wlr_box usable_area = {0, 0, output->width, output->height};
-        wlr_scene_layer_surface_v1_configure(lsurface->scene_layer_surface, &full_area, &usable_area);
-    } else {
-        // Fallback for when output isn't ready yet
-        struct wlr_box full_area = {0, 0, 1920, 1080};
-        struct wlr_box usable_area = {0, 0, 1920, 1080};
-        wlr_scene_layer_surface_v1_configure(lsurface->scene_layer_surface, &full_area, &usable_area);
-    }
 
     // Raise to top
     wlr_scene_node_raise_to_top(&lsurface->scene_tree->node);
@@ -1567,6 +1562,9 @@ havel_wlr_server_t* havel_wlr_create(void) {
 
     server->renderer = wlr_renderer_autocreate(server->backend);
     if (!server->renderer) {
+        LOG_ERROR("[RENDERER] Failed to create renderer (no GPU/DRM access)");
+        LOG_ERROR("[RENDERER] Try setting WLR_RENDERER=pixman for software rendering");
+        LOG_ERROR("[RENDERER] Or ensure you have proper GPU drivers installed");
         wlr_backend_destroy(server->backend);
         wl_display_destroy(server->display);
         havel_cpp_server_destroy(server->cpp_server);
@@ -1581,10 +1579,24 @@ havel_wlr_server_t* havel_wlr_create(void) {
     havel_cpp_server_init_text_input(server->cpp_server, server->display);
 
     server->allocator = wlr_allocator_autocreate(server->backend, server->renderer);
+    if (!server->allocator) {
+        LOG_ERROR("[ALLOCATOR] Failed to create allocator");
+        LOG_ERROR("[ALLOCATOR] This usually means no DRM/GPU access is available");
+        LOG_ERROR("[ALLOCATOR] Try:");
+        LOG_ERROR("[ALLOCATOR]   - Running on a real GPU with proper drivers");
+        LOG_ERROR("[ALLOCATOR]   - Setting WLR_RENDERER=pixman for software rendering");
+        LOG_ERROR("[ALLOCATOR]   - Using WLR_BACKENDS=x11 or wayland for nested mode");
+        wlr_backend_destroy(server->backend);
+        wl_display_destroy(server->display);
+        havel_cpp_server_destroy(server->cpp_server);
+        free(server);
+        return NULL;
+    }
+    LOG_INFO("[ALLOCATOR] Allocator created successfully");
     server->compositor = wlr_compositor_create(server->display, 5, server->renderer);
     struct wlr_subcompositor *sub = wlr_subcompositor_create(server->display);
     fprintf(stderr, "subcompositor_create: %p\n", (void *)sub);
-    wlr_shm_create_with_renderer(server->display, 1, server->renderer);
+    // wl_shm is auto-created by wlroots 0.20 with renderer - don't create twice
     wlr_data_device_manager_create(server->display);
 
     server->output_layout = wlr_output_layout_create(server->display);
@@ -1614,14 +1626,14 @@ havel_wlr_server_t* havel_wlr_create(void) {
     wlr_xdg_output_manager_v1_create(server->display, server->output_layout);
     LOG_INFO("[XDG Output] xdg_output_manager_v1 created");
 
-    server->xdg_shell = wlr_xdg_shell_create(server->display, 3);
+    server->xdg_shell = wlr_xdg_shell_create(server->display, 6);
     server->new_xdg_toplevel.notify = server_new_xdg_toplevel;
     wl_signal_add(&server->xdg_shell->events.new_toplevel, &server->new_xdg_toplevel);
     server->new_xdg_surface.notify = server_new_xdg_surface;
     wl_signal_add(&server->xdg_shell->events.new_surface, &server->new_xdg_surface);
 
     // Initialize layer-shell v1 (for waybar, notifications, etc.)
-    server->layer_shell = wlr_layer_shell_v1_create(server->display, 4);
+    server->layer_shell = wlr_layer_shell_v1_create(server->display, 1);
     if (!server->layer_shell) {
         LOG_WARN("[LayerShell] Failed to create layer_shell_v1");
     } else {

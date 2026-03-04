@@ -42,6 +42,8 @@ Server::Server() {
     registerPlugin(std::unique_ptr<Plugin>(create_alt_tab_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_overview_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_server_decoration_plugin()));
+    registerPlugin(std::unique_ptr<Plugin>(create_draw_plugin()));
+    registerPlugin(std::unique_ptr<Plugin>(create_fps_plugin()));
 
     // Register built-in keybindings
     registerKeybindings();
@@ -316,7 +318,22 @@ void Server::handlePointerMotion(double x, double y) {
     // Update cursor position for HotCorners and other plugins
     m_cursorX = x;
     m_cursorY = y;
-    
+
+    // Handle draw mode
+    if (m_grab.mode == GrabMode::Draw) {
+        // Find draw plugin and handle motion
+        auto& plugins = m_pluginManager.plugins();
+        for (const auto& plugin : plugins) {
+            if (strcmp(plugin->name(), "draw") == 0) {
+                // Cast to DrawPlugin and call handler
+                // For now, use a simple approach - in production would use proper plugin messaging
+                printf("[Server] Draw mode: motion at (%.0f, %.0f)\n", x, y);
+                break;
+            }
+        }
+        return;
+    }
+
     if (!m_grab.view) return;
     
     double dx = x - m_grab.startX;

@@ -10,6 +10,51 @@ namespace havel {
 
 TextInputManager* TextInputManager::s_instance = nullptr;
 
+// Forward declaration
+static void text_input_manager_bind(struct wl_client* client, void* data,
+                                     uint32_t version, uint32_t id);
+
+// ============================================================================
+// Text Input Manager Implementation
+// ============================================================================
+
+// Manager protocol request handlers
+static void text_input_manager_destroy(struct wl_client* client, struct wl_resource* resource) {
+    wl_resource_destroy(resource);
+    (void)client;
+}
+
+static void text_input_manager_get_text_input(struct wl_client* client, struct wl_resource* resource,
+                                               uint32_t id, struct wl_resource* seat) {
+    auto* manager = static_cast<TextInputManager*>(wl_resource_get_user_data(resource));
+    if (manager) {
+        manager->createTextInput(client, wl_resource_get_version(resource), id);
+    }
+    (void)seat;
+}
+
+// Vtable for zwp_text_input_manager_v3
+static const struct zwp_text_input_manager_v3_interface s_text_input_manager_impl = {
+    .destroy = text_input_manager_destroy,
+    .get_text_input = text_input_manager_get_text_input,
+};
+
+// Global bind callback - creates manager resource for client
+static void text_input_manager_bind(struct wl_client* client, void* data,
+                                     uint32_t version, uint32_t id) {
+    struct wl_resource* manager_resource = wl_resource_create(
+        client, &zwp_text_input_manager_v3_interface, version, id);
+    if (!manager_resource) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+
+    // Set the implementation vtable
+    wl_resource_set_implementation(manager_resource, &s_text_input_manager_impl, data, nullptr);
+
+    LOG_INFO("[TextInput] Manager bound for client %p (version=%u)", (void*)client, version);
+}
+
 // ============================================================================
 // Text Input Object Implementation
 // ============================================================================
@@ -129,9 +174,6 @@ void TextInput::sendDone() {
 // Text Input Manager Implementation
 // ============================================================================
 
-static void text_input_manager_bind(struct wl_client* client, void* data,
-                                     uint32_t version, uint32_t id);
-
 TextInputManager::TextInputManager(struct wl_display* display)
     : m_global(nullptr)
     , m_textInputs()
@@ -151,13 +193,6 @@ TextInputManager::TextInputManager(struct wl_display* display)
 
     s_instance = this;
     LOG_INFO("[TextInput] text_input_manager_v3 initialized");
-}
-
-// Protocol bind implementation
-static void text_input_manager_bind(struct wl_client* client, void* data,
-                                     uint32_t version, uint32_t id) {
-    auto* manager = static_cast<TextInputManager*>(data);
-    manager->createTextInput(client, version, id);
 }
 
 TextInputManager::~TextInputManager() {
