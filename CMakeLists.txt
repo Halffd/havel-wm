@@ -18,6 +18,7 @@ pkg_check_modules(FMT REQUIRED fmt)
 pkg_check_modules(GLES2 REQUIRED glesv2)
 pkg_check_modules(EGL REQUIRED egl)
 pkg_check_modules(FREETYPE REQUIRED freetype2)
+pkg_check_modules(PNG REQUIRED libpng)
 
 # Find PipeWire for screen sharing
 pkg_check_modules(PIPEWIRE libpipewire-0.3)
@@ -228,6 +229,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${GLES2_INCLUDE_DIRS}
     ${EGL_INCLUDE_DIRS}
     ${FREETYPE_INCLUDE_DIRS}
+    ${PNG_INCLUDE_DIRS}
     ${PIPEWIRE_INCLUDE_DIRS}
     ${GLIB_INCLUDE_DIRS}
     # UI framework include (for future use)
@@ -246,6 +248,7 @@ target_link_libraries(${PROJECT_NAME}
     ${GLES2_LIBRARIES}
     ${EGL_LIBRARIES}
     ${FREETYPE_LIBRARIES}
+    ${PNG_LIBRARIES}
     ${PIPEWIRE_LIBRARIES}
     ${GLIB_LIBRARIES}
 )

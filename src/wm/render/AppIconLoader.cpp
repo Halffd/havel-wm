@@ -4,6 +4,7 @@
 #include <Logger.h>
 #include <cstring>
 #include <algorithm>
+#include <png.h>
 
 namespace havel {
 
@@ -116,19 +117,112 @@ GLuint AppIconLoader::loadIconFromFile(const std::string& appId) {
 }
 
 GLuint AppIconLoader::loadIconFromPath(const std::string& path) {
-    // For now, we'll generate a placeholder
-    // A full implementation would use stb_image.h or similar to load PNG/SVG
-    // This is a stub that checks if file exists and returns a placeholder
+    // Check file extension
+    if (path.length() < 4) return 0;
+    std::string ext = path.substr(path.length() - 4);
     
-    FILE* f = fopen(path.c_str(), "r");
-    if (f) {
-        fclose(f);
-        // File exists - in real implementation, load the image
-        // For now, just return a placeholder with the path hash
-        return generatePlaceholderIcon(path);
+    // Only load PNG files for now
+    if (ext != ".png" && ext != ".PNG") {
+        // Try SVG - would need librsvg for proper rendering
+        if (ext == ".svg" || ext == ".SVG") {
+            // For SVG, generate placeholder with icon name
+            return generatePlaceholderIcon(path);
+        }
+        return 0;
     }
+
+    // Open PNG file
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return 0;
+
+    // Check PNG signature
+    unsigned char header[8];
+    size_t readCount = fread(header, 1, 8, f);
+    if (readCount != 8 || png_sig_cmp(header, 0, 8) != 0) {
+        fclose(f);
+        return 0;
+    }
+
+    // Create PNG read struct
+    png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    if (!png) {
+        fclose(f);
+        return 0;
+    }
+
+    png_infop info = png_create_info_struct(png);
+    if (!info) {
+        png_destroy_read_struct(&png, nullptr, nullptr);
+        fclose(f);
+        return 0;
+    }
+
+    if (setjmp(png_jmpbuf(png))) {
+        png_destroy_read_struct(&png, &info, nullptr);
+        fclose(f);
+        return 0;
+    }
+
+    png_init_io(png, f);
+    png_set_sig_bytes(png, 8);
+    png_read_info(png, info);
+
+    // Get image info
+    png_uint_32 width = png_get_image_width(png, info);
+    png_uint_32 height = png_get_image_height(png, info);
+    png_byte colorType = png_get_color_type(png, info);
+    png_byte bitDepth = png_get_bit_depth(png, info);
+
+    // Convert to 8-bit RGBA
+    if (bitDepth == 16) png_set_strip_16(png);
+    if (colorType == PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(png);
+    if (colorType == PNG_COLOR_TYPE_GRAY && bitDepth < 8) png_set_expand_gray_1_2_4_to_8(png);
+    if (png_get_valid(png, info, PNG_INFO_tRNS)) png_set_tRNS_to_alpha(png);
+    if (colorType == PNG_COLOR_TYPE_RGB || colorType == PNG_COLOR_TYPE_GRAY || 
+        colorType == PNG_COLOR_TYPE_PALETTE) {
+        png_set_add_alpha(png, 0xFF, PNG_FILLER_AFTER);
+    }
+    if (colorType == PNG_COLOR_TYPE_GRAY || colorType == PNG_COLOR_TYPE_GRAY_ALPHA) {
+        png_set_gray_to_rgb(png);
+    }
+
+    png_read_update_info(png, info);
+
+    // Allocate row pointers and data
+    std::vector<png_bytep> rowPointers(height);
+    std::vector<png_byte> rowData(height * width * 4);
     
-    return 0;
+    for (png_uint_32 y = 0; y < height; y++) {
+        rowPointers[y] = &rowData[y * width * 4];
+    }
+
+    // Read image data
+    png_read_image(png, rowPointers.data());
+    png_read_end(png, nullptr);
+
+    // Create OpenGL texture
+    GLuint texture;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+
+    // Upload texture data
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, 
+                 GL_UNSIGNED_BYTE, rowData.data());
+
+    // Set texture parameters
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    // Cleanup
+    png_destroy_read_struct(&png, &info, nullptr);
+    fclose(f);
+
+    LOG_DEBUG("[AppIconLoader] Loaded PNG icon: %s (%dx%d)", path.c_str(), width, height);
+    return texture;
 }
 
 GLuint AppIconLoader::generatePlaceholderIcon(const std::string& name) {
