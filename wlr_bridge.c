@@ -1611,6 +1611,10 @@ havel_wlr_server_t* havel_wlr_create(void) {
     // This enables screen sharing in browsers and recording apps
     // screencapture::initialize(server->display, server->output_layout);
 
+    // Initialize xdg-desktop-portal integration
+    // This enables browser screen sharing (Firefox, Chrome) via D-Bus
+    // portal::initialize(server->display);
+
     // Background color is now handled by wallpaper plugin via output_frame handler
     // No static background rect needed - plugin draws per-output backgrounds
 

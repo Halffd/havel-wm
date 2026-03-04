@@ -29,6 +29,16 @@ else()
     message(STATUS "PipeWire not found - screen sharing disabled")
 endif()
 
+# Find GLib/GIO for D-Bus (xdg-desktop-portal integration)
+pkg_check_modules(GLIB gio-2.0 gio-unix-2.0)
+if(GLIB_FOUND)
+    set(GLIB_ENABLED ON)
+    message(STATUS "GLib/GIO found - xdg-desktop-portal integration enabled")
+else()
+    set(GLIB_ENABLED OFF)
+    message(STATUS "GLib/GIO not found - xdg-desktop-portal integration disabled")
+endif()
+
 # Find Qt6 for panel
 find_package(Qt6 COMPONENTS Core Gui Widgets QUIET)
 if(Qt6_FOUND)
@@ -134,6 +144,8 @@ set(WM_CORE_SOURCES
     src/wm/core/ScreenCapture.hpp
     src/wm/core/PipeWireStream.cpp
     src/wm/core/PipeWireStream.hpp
+    src/wm/core/DesktopPortal.cpp
+    src/wm/core/DesktopPortal.hpp
     src/wm/render/RenderPipeline.cpp
     src/wm/render/render_c_wrappers.c
     src/wm/render/ShaderEffect.cpp
@@ -217,6 +229,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${EGL_INCLUDE_DIRS}
     ${FREETYPE_INCLUDE_DIRS}
     ${PIPEWIRE_INCLUDE_DIRS}
+    ${GLIB_INCLUDE_DIRS}
     # UI framework include (for future use)
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/include
     # Protocol headers for wlroots unstable headers
@@ -234,6 +247,7 @@ target_link_libraries(${PROJECT_NAME}
     ${EGL_LIBRARIES}
     ${FREETYPE_LIBRARIES}
     ${PIPEWIRE_LIBRARIES}
+    ${GLIB_LIBRARIES}
 )
 
 # Set library directories
