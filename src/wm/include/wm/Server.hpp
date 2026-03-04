@@ -157,6 +157,10 @@ public:
     void* gestureRecognizer() const { return m_gestureRecognizer; }
     void setGestureRecognizer(void* recognizer) { m_gestureRecognizer = recognizer; }
 
+    // Window group management
+    void* windowGroupManager() const { return m_windowGroupManager; }
+    void setWindowGroupManager(void* manager) { m_windowGroupManager = manager; }
+
 private:
     std::array<std::unique_ptr<Workspace>, WORKSPACE_COUNT> m_workspaces;
     uint32_t m_activeWorkspace = 0;
@@ -192,6 +196,9 @@ private:
 
     // Gesture recognition
     void* m_gestureRecognizer = nullptr;
+
+    // Window group manager
+    void* m_windowGroupManager = nullptr;
 
     // Gamma/temperature (for gamma plugin)
     float m_gamma = 1.0f;

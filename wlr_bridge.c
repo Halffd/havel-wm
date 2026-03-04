@@ -1607,6 +1607,9 @@ havel_wlr_server_t* havel_wlr_create(void) {
     // Initialize gesture recognition
     havel_cpp_init_gestures(server->cpp_server);
 
+    // Initialize window group manager
+    havel_cpp_init_window_groups(server->cpp_server);
+
     // Initialize screen capture (PipeWire/screencopy)
     // This requires wl_display and output_layout to be created
     // Will be initialized after output_layout creation

@@ -53,6 +53,9 @@ Server::Server() {
     // Will be initialized in wlr_bridge.c after display creation
     m_textInputManager = nullptr;
 
+    // Initialize window group manager
+    m_windowGroupManager = nullptr;  // Will be initialized in wlr_bridge.c
+
     LOG_INFO("Plugins initialized (%d plugins)", m_pluginManager.plugins().size());
 }
 

@@ -2,6 +2,7 @@
 #include <wm/Server.hpp>
 #include <wm/plugins/Plugin.hpp>
 #include "../input/GestureRecognizer.hpp"
+#include "WindowGroupManager.hpp"
 #include <Logger.h>
 #include <cstdint>
 #include <unistd.h>
@@ -296,6 +297,34 @@ void havel_cpp_process_gesture_button(struct havel_cpp_server* server, int butto
     if (recognizer && recognizer->isGesturesEnabled()) {
         recognizer->processButton(button, pressed, static_cast<float>(x), static_cast<float>(y), timestamp);
     }
+}
+
+void havel_cpp_init_window_groups(struct havel_cpp_server* server) {
+    if (!server || !server->server) return;
+    
+    // Initialize window group manager
+    auto* groupManager = new havel::WindowGroupManager();
+    groupManager->initialize();
+    
+    server->server->setWindowGroupManager(groupManager);
+    
+    // Add default window rules
+    havel::WindowRule firefoxRule;
+    firefoxRule.appId = "firefox";
+    firefoxRule.groupType = havel::GroupType::Tabbed;
+    groupManager->addWindowRule(firefoxRule);
+    
+    havel::WindowRule terminalRule;
+    terminalRule.appId = "foot";
+    terminalRule.groupType = havel::GroupType::SplitH;
+    groupManager->addWindowRule(terminalRule);
+    
+    LOG_INFO("[Bridge] Window group manager initialized");
+}
+
+void* havel_cpp_get_window_group_manager(struct havel_cpp_server* server) {
+    if (!server || !server->server) return nullptr;
+    return server->server->windowGroupManager();
 }
 
 } // extern "C"

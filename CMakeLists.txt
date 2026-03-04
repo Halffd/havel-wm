@@ -147,6 +147,8 @@ set(WM_CORE_SOURCES
     src/wm/core/PipeWireStream.hpp
     src/wm/core/DesktopPortal.cpp
     src/wm/core/DesktopPortal.hpp
+    src/wm/core/WindowGroupManager.cpp
+    src/wm/core/WindowGroupManager.hpp
     src/wm/render/RenderPipeline.cpp
     src/wm/render/render_c_wrappers.c
     src/wm/render/ShaderEffect.cpp

@@ -90,6 +90,10 @@ void havel_cpp_init_gestures(struct havel_cpp_server* server);
 void havel_cpp_process_gesture_motion(struct havel_cpp_server* server, double x, double y, uint64_t timestamp);
 void havel_cpp_process_gesture_button(struct havel_cpp_server* server, int button, bool pressed, double x, double y, uint64_t timestamp);
 
+// Window group management
+void havel_cpp_init_window_groups(struct havel_cpp_server* server);
+void* havel_cpp_get_window_group_manager(struct havel_cpp_server* server);
+
 // C layer gamma application
 void havel_wlr_set_gamma(havel_wlr_server_t* server, float gamma);
 void havel_wlr_set_temperature(havel_wlr_server_t* server, int kelvin);
