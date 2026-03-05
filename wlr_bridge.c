@@ -1300,7 +1300,30 @@ static void server_new_input(struct wl_listener *listener, void *data) {
     case WLR_INPUT_DEVICE_POINTER:
         server_new_pointer(server, device);
         break;
+    case WLR_INPUT_DEVICE_TOUCH:
+        // Touchscreen support
+        LOG_INFO("[Input] New touchscreen: %s", device->name);
+        break;
+    case WLR_INPUT_DEVICE_TABLET_PAD:
+        // Tablet pad (buttons/dials)
+        LOG_INFO("[Input] New tablet pad: %s", device->name);
+        break;
+    case WLR_INPUT_DEVICE_SWITCH:
+        // Laptop lid switch
+        LOG_INFO("[Input] New switch: %s", device->name);
+        break;
     default:
+        // Check if it's a gamepad/joystick via device name
+        if (device->name) {
+            const char* name = device->name;
+            if (strstr(name, "gamepad") || strstr(name, "controller") ||
+                strstr(name, "joystick") || strstr(name, "Xbox") ||
+                strstr(name, "PlayStation") || strstr(name, "DualShock") ||
+                strstr(name, "DualSense") || strstr(name, "Steam")) {
+                LOG_INFO("[Input] New gamepad/controller: %s", device->name);
+                // Would initialize via InputDeviceManager
+            }
+        }
         break;
     }
 
