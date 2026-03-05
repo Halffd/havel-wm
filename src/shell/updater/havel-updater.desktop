@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Havel System Updater
+Comment=System Update Manager for Havel WM
+Exec=havel-updater
+Icon=system-software-update
+Terminal=false
+Type=Application
+Categories=System;Settings;
+Keywords=update;upgrade;package;system;

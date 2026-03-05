@@ -340,6 +340,9 @@ if(PANEL_ENABLED)
     # Build dictionary
     add_subdirectory(src/shell/dictionary)
 
+    # Build updater
+    add_subdirectory(src/shell/updater)
+
     # Build and install settings
     add_subdirectory(src/shell/settings)
 

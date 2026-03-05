@@ -70,6 +70,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QRegularExpression>
+#include <iostream>
 
 struct WordDefinition {
     QString word;
@@ -1496,6 +1497,165 @@ private:
 };
 
 int main(int argc, char* argv[]) {
+    // Check for CLI arguments first - if present, run in CLI mode
+    QStringList args;
+    for (int i = 1; i < argc; i++) {
+        args << QString::fromLocal8Bit(argv[i]);
+    }
+    
+    // CLI mode - no GUI
+    if (args.contains("--lookup") || args.contains("--translate") || 
+        args.contains("--detect") || args.contains("--wotd")) {
+        
+        QCoreApplication app(argc, argv);
+        app.setApplicationName("Havel Dictionary");
+        app.setOrganizationName("Havel WM");
+        
+        // Create network manager for CLI
+        QNetworkAccessManager networkManager;
+        
+        for (int i = 0; i < args.size(); i++) {
+            if (args[i] == "--lookup" && i + 1 < args.size()) {
+                QString word = args[i + 1];
+                std::cout << "Looking up: " << word.toStdString() << std::endl;
+                
+                // Synchronous lookup
+                QUrl url("https://api.dictionaryapi.dev/api/v2/entries/en/" + word);
+                QNetworkReply* reply = networkManager.get(QNetworkRequest(url));
+                
+                QEventLoop loop;
+                QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+                loop.exec();
+                
+                if (reply->error() == QNetworkReply::NoError) {
+                    QByteArray data = reply->readAll();
+                    QJsonDocument json = QJsonDocument::fromJson(data);
+                    
+                    if (!json.array().isEmpty()) {
+                        QJsonObject entry = json.array()[0].toObject();
+                        QString defWord = entry["word"].toString();
+                        std::cout << "\nWord: " << defWord.toStdString() << std::endl;
+                        
+                        if (entry.contains("phonetic")) {
+                            std::cout << "Phonetic: " << entry["phonetic"].toString().toStdString() << std::endl;
+                        }
+                        
+                        if (entry.contains("meanings")) {
+                            QJsonArray meanings = entry["meanings"].toArray();
+                            for (const QJsonValue& m : meanings) {
+                                QJsonObject mObj = m.toObject();
+                                std::cout << "\n" << mObj["partOfSpeech"].toString().toStdString() << std::endl;
+                                
+                                QJsonArray defs = mObj["definitions"].toArray();
+                                for (int j = 0; j < defs.size() && j < 3; j++) {
+                                    std::cout << "  - " << defs[j].toObject()["definition"].toString().toStdString() << std::endl;
+                                }
+                            }
+                        }
+                    } else {
+                        std::cout << "No definition found for: " << word.toStdString() << std::endl;
+                    }
+                } else {
+                    std::cout << "Error: " << reply->errorString().toStdString() << std::endl;
+                }
+                
+                reply->deleteLater();
+            }
+            else if (args[i] == "--translate" && i + 1 < args.size()) {
+                QString text = args[i + 1];
+                QString target = "en";
+                
+                // Check for target language
+                if (i + 2 < args.size() && !args[i + 2].startsWith("--")) {
+                    target = args[i + 2];
+                    i++;
+                }
+                
+                std::cout << "Translating to " << target.toStdString() << ": " << text.toStdString() << std::endl;
+                
+                QUrl url("https://api.mymemory.translated.net/get");
+                QUrlQuery query;
+                query.addQueryItem("q", text);
+                query.addQueryItem("langpair", "auto|" + target);
+                url.setQuery(query);
+                
+                QNetworkReply* reply = networkManager.get(QNetworkRequest(url));
+                
+                QEventLoop loop;
+                QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+                loop.exec();
+                
+                if (reply->error() == QNetworkReply::NoError) {
+                    QByteArray data = reply->readAll();
+                    QJsonDocument json = QJsonDocument::fromJson(data);
+                    QJsonObject obj = json.object();
+                    
+                    if (obj.contains("responseData")) {
+                        QJsonObject responseData = obj["responseData"].toObject();
+                        QString translatedText = responseData["translatedText"].toString();
+                        QString detectedLang = responseData["match"].toString();
+                        
+                        std::cout << "\nDetected Language: " << detectedLang.toStdString() << std::endl;
+                        std::cout << "Translation: " << translatedText.toStdString() << std::endl;
+                    } else {
+                        std::cout << "Translation failed" << std::endl;
+                    }
+                } else {
+                    std::cout << "Error: " << reply->errorString().toStdString() << std::endl;
+                }
+                
+                reply->deleteLater();
+            }
+            else if (args[i] == "--detect" && i + 1 < args.size()) {
+                QString text = args[i + 1];
+                std::cout << "Detecting language for: " << text.toStdString() << std::endl;
+                
+                QUrl url("https://api.mymemory.translated.net/get");
+                QUrlQuery query;
+                query.addQueryItem("q", text);
+                query.addQueryItem("langpair", "en|en");
+                url.setQuery(query);
+                
+                QNetworkReply* reply = networkManager.get(QNetworkRequest(url));
+                
+                QEventLoop loop;
+                QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+                loop.exec();
+                
+                if (reply->error() == QNetworkReply::NoError) {
+                    QByteArray data = reply->readAll();
+                    QJsonDocument json = QJsonDocument::fromJson(data);
+                    QJsonObject obj = json.object();
+                    
+                    if (obj.contains("responseData")) {
+                        QJsonObject responseData = obj["responseData"].toObject();
+                        QString detectedLang = responseData["match"].toString();
+                        std::cout << "\nDetected Language: " << detectedLang.toStdString() << std::endl;
+                    }
+                } else {
+                    std::cout << "Error: " << reply->errorString().toStdString() << std::endl;
+                }
+                
+                reply->deleteLater();
+            }
+            else if (args[i] == "--wotd") {
+                QStringList words = {"serendipity", "ephemeral", "ubiquitous", "eloquent", "resilient",
+                                   "meticulous", "enigma", "paradox", "quintessential", "aesthetic"};
+                
+                QDate today = QDate::currentDate();
+                int index = today.dayOfYear() % words.size();
+                QString wotd = words[index];
+                
+                std::cout << "Word of the Day:" << std::endl;
+                std::cout << "  Word: " << wotd.toStdString() << std::endl;
+                std::cout << "  Date: " << today.toString("yyyy-MM-dd").toStdString() << std::endl;
+            }
+        }
+        
+        return 0;
+    }
+    
+    // GUI mode
     QApplication app(argc, argv);
     app.setApplicationName("Havel Dictionary & Reader");
     app.setOrganizationName("Havel WM");
@@ -1515,37 +1675,6 @@ int main(int argc, char* argv[]) {
     
     DictionaryApp dictionary;
     dictionary.show();
-    
-    // Handle CLI arguments
-    QStringList args = app.arguments();
-    for (int i = 1; i < args.size(); i++) {
-        if (args[i] == "--lookup" && i + 1 < args.size()) {
-            QTimer::singleShot(500, [&dictionary, &args, i]() {
-                dictionary.lookupWord(args[i + 1]);
-            });
-        } else if (args[i] == "--translate" && i + 2 < args.size()) {
-            QString text = args[i + 1];
-            QString target = "en";
-            if (i + 3 < args.size() && !args[i + 3].startsWith("--")) {
-                target = args[i + 3];
-            }
-            QTimer::singleShot(500, [&dictionary, text, target]() {
-                dictionary.translateText(text, "auto", target);
-            });
-        } else if (args[i] == "--detect" && i + 1 < args.size()) {
-            QTimer::singleShot(500, [&dictionary, &args, i]() {
-                dictionary.detectLanguage(args[i + 1]);
-            });
-        } else if (args[i] == "--wotd") {
-            QTimer::singleShot(500, [&dictionary]() {
-                dictionary.showWordOfTheDay();
-            });
-        } else if (args[i] == "--open" && i + 1 < args.size()) {
-            QTimer::singleShot(500, [&dictionary, &args, i]() {
-                dictionary.openDocument(args[i + 1]);
-            });
-        }
-    }
     
     return app.exec();
 }
