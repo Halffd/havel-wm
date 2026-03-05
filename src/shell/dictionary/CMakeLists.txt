@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find Qt6
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network PrintSupport)
 
 # Enable Qt MOC
 set(CMAKE_AUTOMOC ON)
@@ -28,6 +28,7 @@ target_link_libraries(havel-dictionary PRIVATE
     Qt6::Gui
     Qt6::Widgets
     Qt6::Network
+    Qt6::PrintSupport
 )
 
 # Install

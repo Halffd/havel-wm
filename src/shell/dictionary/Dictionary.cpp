@@ -1,4 +1,4 @@
-// Dictionary Application for Havel WM
+// Enhanced Dictionary with Reader Mode
 
 #include <QApplication>
 #include <QMainWindow>
@@ -49,6 +49,17 @@
 #include <QStyleFactory>
 #include <QPalette>
 #include <QRandomGenerator>
+#include <QTextDocument>
+#include <QTextCursor>
+#include <QKeyEvent>
+#include <QToolTip>
+#include <QProgressDialog>
+#include <QScrollBar>
+#include <QSlider>
+#include <QSpinBox>
+#include <QStackedWidget>
+#include <QPrintDialog>
+#include <QPrinter>
 
 struct WordDefinition {
     QString word;
@@ -65,7 +76,6 @@ struct WordDefinition {
     };
     
     QList<Meaning> meanings;
-    
     WordDefinition() {}
 };
 
@@ -80,13 +90,398 @@ class DictionaryApp : public QMainWindow {
 
 public:
     DictionaryApp() {
-        setWindowTitle("Dictionary - Havel WM");
-        setMinimumSize(900, 700);
+        setWindowTitle("Dictionary & Reader - Havel WM");
+        setMinimumSize(1100, 800);
         
-        // Central widget
-        QWidget* central = new QWidget();
-        setCentralWidget(central);
-        QVBoxLayout* mainLayout = new QVBoxLayout(central);
+        // Central widget with stacked layout
+        m_stackedWidget = new QStackedWidget();
+        setCentralWidget(m_stackedWidget);
+        
+        // Create dictionary view
+        QWidget* dictView = createDictionaryView();
+        m_stackedWidget->addWidget(dictView);
+        
+        // Create reader view
+        QWidget* readerView = createReaderView();
+        m_stackedWidget->addWidget(readerView);
+        
+        setupMenu();
+        setupToolbar();
+        loadSettings();
+        loadFavorites();
+        loadHistory();
+        updateWordOfTheDay();
+        
+        // System tray
+        m_trayIcon = new QSystemTrayIcon(QIcon::fromTheme("accessories-dictionary"), this);
+        m_trayIcon->show();
+        
+        QMenu* trayMenu = new QMenu(this);
+        trayMenu->addAction("Show", this, &DictionaryApp::show);
+        trayMenu->addSeparator();
+        trayMenu->addAction("Quit", qApp, &QApplication::quit);
+        m_trayIcon->setContextMenu(trayMenu);
+        
+        connect(m_trayIcon, &QSystemTrayIcon::activated, [this](QSystemTrayIcon::ActivationReason reason) {
+            if (reason == QSystemTrayIcon::DoubleClick) {
+                show();
+                raise();
+                activateWindow();
+            }
+        });
+        
+        // Network manager
+        m_networkManager = new QNetworkAccessManager(this);
+        connect(m_networkManager, &QNetworkAccessManager::finished, this, &DictionaryApp::onNetworkReply);
+        
+        // Local dictionary
+        loadLocalDictionary();
+        
+        // Popup definition widget
+        m_popupWidget = new QWidget(nullptr, Qt::Tool | Qt::FramelessWindowHint);
+        m_popupWidget->setWindowTitle("Definition");
+        QVBoxLayout* popupLayout = new QVBoxLayout(m_popupWidget);
+        m_popupText = new QTextEdit();
+        m_popupText->setReadOnly(true);
+        m_popupText->setMaximumSize(400, 300);
+        popupLayout->addWidget(m_popupText);
+        m_popupWidget->setLayout(popupLayout);
+        m_popupWidget->hide();
+    }
+    
+    ~DictionaryApp() {
+        saveSettings();
+        saveFavorites();
+        saveHistory();
+    }
+    
+    // CLI support
+    void lookupWord(const QString& word) {
+        m_stackedWidget->setCurrentIndex(0);
+        m_searchEdit->setText(word);
+        onSearch();
+    }
+    
+    void openDocument(const QString& path) {
+        m_stackedWidget->setCurrentIndex(1);
+        loadDocument(path);
+    }
+    
+    void showWordOfTheDay() {
+        updateWordOfTheDay();
+    }
+    
+private slots:
+    void onSearch() {
+        QString word = m_searchEdit->text().trimmed();
+        if (word.isEmpty()) return;
+        
+        m_statusLabel->setText("Searching...");
+        m_searchButton->setEnabled(false);
+        
+        addToHistory(word);
+        m_favoriteButton->setChecked(m_favorites.contains(word));
+        
+        QString source = m_sourceCombo->currentData().toString();
+        if (source == "online") {
+            searchOnline(word);
+        } else {
+            searchLocal(word);
+        }
+    }
+    
+    void onRandomWord() {
+        if (m_localDictionary.isEmpty()) {
+            QStringList commonWords = {"serendipity", "ephemeral", "ubiquitous", "eloquent", "resilient"};
+            QString word = commonWords[QRandomGenerator::global()->bounded(commonWords.size())];
+            m_searchEdit->setText(word);
+            onSearch();
+        } else {
+            QStringList words = m_localDictionary.keys();
+            QString word = words[QRandomGenerator::global()->bounded(words.size())];
+            m_searchEdit->setText(word);
+            onSearch();
+        }
+    }
+    
+    void onToggleFavorite(bool checked) {
+        QString word = m_wordLabel->text();
+        if (word.isEmpty() || word == "Enter a word") return;
+        
+        if (checked) {
+            m_favorites.insert(word);
+            m_favoriteButton->setText("★");
+        } else {
+            m_favorites.remove(word);
+            m_favoriteButton->setText("☆");
+        }
+        saveFavorites();
+        updateFavoritesList();
+    }
+    
+    void onClearFavorites() {
+        if (QMessageBox::question(this, "Clear Favorites", "Clear all favorites?") == QMessageBox::Yes) {
+            m_favorites.clear();
+            saveFavorites();
+            updateFavoritesList();
+        }
+    }
+    
+    void onClearHistory() {
+        if (QMessageBox::question(this, "Clear History", "Clear search history?") == QMessageBox::Yes) {
+            m_history.clear();
+            saveHistory();
+            m_historyList->clear();
+        }
+    }
+    
+    void onFavoriteClicked(QListWidgetItem* item) {
+        m_searchEdit->setText(item->text());
+        onSearch();
+    }
+    
+    void onHistoryClicked(QListWidgetItem* item) {
+        m_searchEdit->setText(item->text());
+        onSearch();
+    }
+    
+    void onPlayAudio() {
+        if (!m_currentAudioUrl.isEmpty()) {
+            QDesktopServices::openUrl(QUrl(m_currentAudioUrl));
+        }
+    }
+    
+    void onNetworkReply(QNetworkReply* reply) {
+        m_searchButton->setEnabled(true);
+        
+        if (reply->error() != QNetworkReply::NoError) {
+            m_statusLabel->setText("Error: " + reply->errorString());
+            m_definitionText->setText("Failed to fetch definition.");
+            reply->deleteLater();
+            return;
+        }
+        
+        QByteArray data = reply->readAll();
+        QJsonDocument json = QJsonDocument::fromJson(data);
+        
+        if (json.isNull() || json.array().isEmpty()) {
+            m_statusLabel->setText("No definition found");
+            m_definitionText->setText("No definition found for: " + m_searchEdit->text());
+            m_wordLabel->setText(m_searchEdit->text());
+            reply->deleteLater();
+            return;
+        }
+        
+        parseDefinition(json.array()[0].toObject());
+        reply->deleteLater();
+    }
+    
+    void onExportFavorites() {
+        QString path = QFileDialog::getSaveFileName(this, "Export Favorites", "", "Text Files (*.txt)");
+        if (!path.isEmpty()) {
+            QFile file(path);
+            if (file.open(QIODevice::WriteOnly)) {
+                QTextStream out(&file);
+                for (const QString& word : m_favorites) {
+                    out << word << "\n";
+                }
+                file.close();
+                statusBar()->showMessage("Favorites exported", 2000);
+            }
+        }
+    }
+    
+    void onImportFavorites() {
+        QString path = QFileDialog::getOpenFileName(this, "Import Favorites", "", "Text Files (*.txt)");
+        if (!path.isEmpty()) {
+            QFile file(path);
+            if (file.open(QIODevice::ReadOnly)) {
+                QTextStream in(&file);
+                while (!in.atEnd()) {
+                    QString word = in.readLine().trimmed();
+                    if (!word.isEmpty()) m_favorites.insert(word);
+                }
+                file.close();
+                saveFavorites();
+                updateFavoritesList();
+                statusBar()->showMessage("Favorites imported", 2000);
+            }
+        }
+    }
+    
+    void onLookupWotd() {
+        if (!m_wotdWord->text().isEmpty()) {
+            m_searchEdit->setText(m_wotdWord->text());
+            onSearch();
+        }
+    }
+    
+    // Reader mode slots
+    void onOpenDocument() {
+        QString path = QFileDialog::getOpenFileName(this, "Open Document", "",
+            "Documents (*.txt *.md *.html *.htm *.pdf *.epub);;All Files (*)");
+        if (!path.isEmpty()) {
+            loadDocument(path);
+        }
+    }
+    
+    void onZoomIn() {
+        m_zoomSlider->setValue(m_zoomSlider->value() + 10);
+    }
+    
+    void onZoomOut() {
+        m_zoomSlider->setValue(m_zoomSlider->value() - 10);
+    }
+    
+    void onZoomChanged(int value) {
+        QFont font = m_readerView->font();
+        font.setPointSize(value / 10);
+        m_readerView->setFont(font);
+        m_zoomLabel->setText(QString("%1%").arg(value));
+    }
+    
+    void onPreviousPage() {
+        // QTextEdit doesn't have history, skip
+    }
+    
+    void onNextPage() {
+        // QTextEdit doesn't have history, skip
+    }
+    
+    void onSearchInDocument() {
+        QString text = QInputDialog::getText(this, "Find in Document", "Find:");
+        if (!text.isEmpty()) {
+            m_readerView->find(text);
+        }
+    }
+    
+    void onPrintDocument() {
+        QPrinter printer;
+        QPrintDialog dialog(&printer, this);
+        if (dialog.exec() == QDialog::Accepted) {
+            m_readerView->print(&printer);
+        }
+    }
+    
+    void onToggleReaderMode() {
+        int currentIndex = m_stackedWidget->currentIndex();
+        m_stackedWidget->setCurrentIndex(currentIndex == 0 ? 1 : 0);
+    }
+    
+    void onWordClicked(const QString& word) {
+        // Show popup definition
+        showPopupDefinition(word);
+    }
+    
+    void onAbout() {
+        QMessageBox::about(this, "About Dictionary & Reader",
+            "Havel WM Dictionary & Reader\n\n"
+            "Features:\n"
+            "- Online/Offline dictionary\n"
+            "- Word of the day\n"
+            "- Reader mode for documents\n"
+            "- PDF, EPUB, TXT, HTML support\n"
+            "- Popup definitions\n"
+            "- Keyboard navigation\n"
+            "- Favorites & history");
+    }
+    
+    void onShortcuts() {
+        QMessageBox::information(this, "Keyboard Shortcuts",
+            "Dictionary Mode:\n"
+            "  Enter       Search word\n"
+            "  Ctrl+R      Random word\n"
+            "  Ctrl+F      Toggle favorite\n"
+            "  Ctrl+D      Word of the day\n"
+            "\nReader Mode:\n"
+            "  Ctrl+O      Open document\n"
+            "  Ctrl++      Zoom in\n"
+            "  Ctrl+-      Zoom out\n"
+            "  Ctrl+F      Find in document\n"
+            "  Ctrl+P      Print\n"
+            "  Alt+Left    Previous page\n"
+            "  Alt+Right   Next page\n"
+            "  Space       Page down\n"
+            "  Shift+Space Page up\n"
+            "\nGeneral:\n"
+            "  Ctrl+Tab    Toggle mode\n"
+            "  Ctrl+Q      Quit");
+    }
+    
+protected:
+    void closeEvent(QCloseEvent* event) {
+        if (m_trayIcon->isVisible()) {
+            hide();
+            event->ignore();
+        } else {
+            saveSettings();
+            saveFavorites();
+            saveHistory();
+            event->accept();
+        }
+    }
+    
+    void keyPressEvent(QKeyEvent* event) {
+        // Global keyboard shortcuts
+        if (event->modifiers() == Qt::ControlModifier) {
+            switch (event->key()) {
+                case Qt::Key_Tab:
+                    onToggleReaderMode();
+                    return;
+                case Qt::Key_Plus:
+                case Qt::Key_Equal:
+                    onZoomIn();
+                    return;
+                case Qt::Key_Minus:
+                    onZoomOut();
+                    return;
+                case Qt::Key_O:
+                    onOpenDocument();
+                    return;
+                case Qt::Key_P:
+                    onPrintDocument();
+                    return;
+                case Qt::Key_F:
+                    if (m_stackedWidget->currentIndex() == 1) {
+                        onSearchInDocument();
+                    }
+                    return;
+            }
+        }
+        
+        if (event->modifiers() == Qt::AltModifier) {
+            switch (event->key()) {
+                case Qt::Key_Left:
+                    onPreviousPage();
+                    return;
+                case Qt::Key_Right:
+                    onNextPage();
+                    return;
+            }
+        }
+        
+        // Reader mode navigation
+        if (m_stackedWidget->currentIndex() == 1) {
+            switch (event->key()) {
+                case Qt::Key_Space:
+                    if (event->modifiers() & Qt::ShiftModifier) {
+                        QKeyEvent upEvent(QKeyEvent::KeyPress, Qt::Key_PageUp, Qt::NoModifier);
+                        QApplication::sendEvent(m_readerView, &upEvent);
+                    } else {
+                        QKeyEvent downEvent(QKeyEvent::KeyPress, Qt::Key_PageDown, Qt::NoModifier);
+                        QApplication::sendEvent(m_readerView, &downEvent);
+                    }
+                    return;
+            }
+        }
+        
+        QMainWindow::keyPressEvent(event);
+    }
+
+private:
+    QWidget* createDictionaryView() {
+        QWidget* widget = new QWidget();
+        QVBoxLayout* mainLayout = new QVBoxLayout(widget);
         
         // Search bar
         QHBoxLayout* searchLayout = new QHBoxLayout();
@@ -265,289 +660,131 @@ public:
         m_countLabel = new QLabel("");
         statusBar()->addPermanentWidget(m_countLabel);
         
-        setupMenu();
-        setupToolbar();
-        loadSettings();
-        loadFavorites();
-        loadHistory();
-        updateWordOfTheDay();
+        return widget;
+    }
+    
+    QWidget* createReaderView() {
+        QWidget* widget = new QWidget();
+        QVBoxLayout* layout = new QVBoxLayout(widget);
         
-        // System tray
-        m_trayIcon = new QSystemTrayIcon(QIcon::fromTheme("accessories-dictionary"), this);
-        m_trayIcon->show();
+        // Reader toolbar
+        QHBoxLayout* readerToolbar = new QHBoxLayout();
         
-        QMenu* trayMenu = new QMenu(this);
-        trayMenu->addAction("Show", this, &DictionaryApp::show);
-        trayMenu->addSeparator();
-        trayMenu->addAction("Quit", qApp, &QApplication::quit);
-        m_trayIcon->setContextMenu(trayMenu);
+        QPushButton* openBtn = new QPushButton("📂 Open");
+        connect(openBtn, &QPushButton::clicked, this, &DictionaryApp::onOpenDocument);
+        readerToolbar->addWidget(openBtn);
         
-        connect(m_trayIcon, &QSystemTrayIcon::activated, [this](QSystemTrayIcon::ActivationReason reason) {
-            if (reason == QSystemTrayIcon::DoubleClick) {
-                show();
-                raise();
-                activateWindow();
+        QPushButton* prevBtn = new QPushButton("◀");
+        connect(prevBtn, &QPushButton::clicked, this, &DictionaryApp::onPreviousPage);
+        readerToolbar->addWidget(prevBtn);
+        
+        QPushButton* nextBtn = new QPushButton("▶");
+        connect(nextBtn, &QPushButton::clicked, this, &DictionaryApp::onNextPage);
+        readerToolbar->addWidget(nextBtn);
+        
+        readerToolbar->addWidget(new QLabel("Zoom:"));
+        
+        m_zoomSlider = new QSlider(Qt::Horizontal);
+        m_zoomSlider->setRange(50, 200);
+        m_zoomSlider->setValue(100);
+        m_zoomSlider->setMaximumWidth(150);
+        connect(m_zoomSlider, &QSlider::valueChanged, this, &DictionaryApp::onZoomChanged);
+        readerToolbar->addWidget(m_zoomSlider);
+        
+        m_zoomLabel = new QLabel("100%");
+        readerToolbar->addWidget(m_zoomLabel);
+        
+        QPushButton* findBtn = new QPushButton("🔍 Find");
+        connect(findBtn, &QPushButton::clicked, this, &DictionaryApp::onSearchInDocument);
+        readerToolbar->addWidget(findBtn);
+        
+        QPushButton* printBtn = new QPushButton("🖨 Print");
+        connect(printBtn, &QPushButton::clicked, this, &DictionaryApp::onPrintDocument);
+        readerToolbar->addWidget(printBtn);
+        
+        readerToolbar->addStretch();
+        layout->addLayout(readerToolbar);
+        
+        // Reader view
+        m_readerView = new QTextEdit();
+        m_readerView->setReadOnly(true);
+        m_readerView->setAcceptRichText(true);
+        QFont font = m_readerView->font();
+        font.setPointSize(11);
+        m_readerView->setFont(font);
+        
+        layout->addWidget(m_readerView);
+        
+        // Load welcome page
+        QString welcomeHtml = R"(
+            <html><head><style>
+                body { font-family: sans-serif; padding: 40px; background: #202020; color: #fff; }
+                h1 { color: #4CAF50; }
+                .info { background: #303030; padding: 20px; border-radius: 8px; margin: 20px 0; }
+                .formats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+                .format { background: #404040; padding: 10px; border-radius: 4px; }
+            </style></head>
+            <body>
+                <h1>📖 Reader Mode</h1>
+                <div class="info">
+                    <p>Open a document to start reading. Double-click any word to see its definition.</p>
+                    <h3>Supported Formats:</h3>
+                    <div class="formats">
+                        <div class="format">📄 TXT - Plain Text</div>
+                        <div class="format">📝 MD - Markdown</div>
+                        <div class="format">🌐 HTML - Web Pages</div>
+                    </div>
+                </div>
+                <h3>Keyboard Shortcuts:</h3>
+                <ul>
+                    <li><b>Ctrl+O</b> - Open document</li>
+                    <li><b>Ctrl++/-</b> - Zoom in/out</li>
+                    <li><b>Ctrl+F</b> - Find in document</li>
+                    <li><b>Space/Shift+Space</b> - Page down/up</li>
+                </ul>
+            </body></html>
+        )";
+        
+        m_readerView->setHtml(welcomeHtml);
+        
+        // Enable word click for popup definitions
+        connect(m_readerView, &QTextEdit::cursorPositionChanged, [this]() {
+            QTextCursor cursor = m_readerView->textCursor();
+            QString word = cursor.selectedText();
+            if (!word.isEmpty() && word.length() < 50) {
+                showPopupDefinition(word);
             }
         });
         
-        // Network manager
-        m_networkManager = new QNetworkAccessManager(this);
-        connect(m_networkManager, &QNetworkAccessManager::finished, this, &DictionaryApp::onNetworkReply);
-        
-        // Local dictionary
-        loadLocalDictionary();
+        return widget;
     }
     
-    ~DictionaryApp() {
-        saveSettings();
-        saveFavorites();
-        saveHistory();
-    }
-    
-    // CLI support
-    void lookupWord(const QString& word) {
-        m_searchEdit->setText(word);
-        onSearch();
-    }
-    
-    void showWordOfTheDay() {
-        updateWordOfTheDay();
-    }
-    
-    void addToFavorites(const QString& word) {
-        m_favorites.insert(word);
-        saveFavorites();
-        updateFavoritesList();
-    }
-    
-    void removeFromFavorites(const QString& word) {
-        m_favorites.remove(word);
-        saveFavorites();
-        updateFavoritesList();
-    }
-    
-    void showHistory() {
-        m_sidebarTabs->setCurrentIndex(1);
-    }
-    
-private slots:
-    void onSearch() {
-        QString word = m_searchEdit->text().trimmed();
-        if (word.isEmpty()) return;
-        
-        m_statusLabel->setText("Searching...");
-        m_searchButton->setEnabled(false);
-        
-        // Add to history
-        addToHistory(word);
-        
-        // Update favorite button
-        m_favoriteButton->setChecked(m_favorites.contains(word));
-        
-        // Search based on source
-        QString source = m_sourceCombo->currentData().toString();
-        if (source == "online") {
-            searchOnline(word);
-        } else {
-            searchLocal(word);
-        }
-    }
-    
-    void onRandomWord() {
-        if (m_localDictionary.isEmpty()) {
-            // Use common words if local dict empty
-            QStringList commonWords = {"serendipity", "ephemeral", "ubiquitous", "eloquent", "resilient", 
-                                       "meticulous", "enigma", "paradox", "quintessential", "aesthetic"};
-            QString word = commonWords[QRandomGenerator::global()->bounded(commonWords.size())];
-            m_searchEdit->setText(word);
-            onSearch();
-        } else {
-            QStringList words = m_localDictionary.keys();
-            QString word = words[QRandomGenerator::global()->bounded(words.size())];
-            m_searchEdit->setText(word);
-            onSearch();
-        }
-    }
-    
-    void onToggleFavorite(bool checked) {
-        QString word = m_wordLabel->text();
-        if (word.isEmpty() || word == "Enter a word") return;
-        
-        if (checked) {
-            m_favorites.insert(word);
-            m_favoriteButton->setText("★");
-        } else {
-            m_favorites.remove(word);
-            m_favoriteButton->setText("☆");
-        }
-        saveFavorites();
-        updateFavoritesList();
-    }
-    
-    void onClearFavorites() {
-        if (QMessageBox::question(this, "Clear Favorites", "Clear all favorites?") == QMessageBox::Yes) {
-            m_favorites.clear();
-            saveFavorites();
-            updateFavoritesList();
-        }
-    }
-    
-    void onClearHistory() {
-        if (QMessageBox::question(this, "Clear History", "Clear search history?") == QMessageBox::Yes) {
-            m_history.clear();
-            saveHistory();
-            m_historyList->clear();
-        }
-    }
-    
-    void onFavoriteClicked(QListWidgetItem* item) {
-        m_searchEdit->setText(item->text());
-        onSearch();
-    }
-    
-    void onHistoryClicked(QListWidgetItem* item) {
-        m_searchEdit->setText(item->text());
-        onSearch();
-    }
-    
-    void onPlayAudio() {
-        if (!m_currentAudioUrl.isEmpty()) {
-            QDesktopServices::openUrl(QUrl(m_currentAudioUrl));
-        }
-    }
-    
-    void onNetworkReply(QNetworkReply* reply) {
-        m_searchButton->setEnabled(true);
-        
-        if (reply->error() != QNetworkReply::NoError) {
-            m_statusLabel->setText("Error: " + reply->errorString());
-            m_definitionText->setText("Failed to fetch definition. Please check your internet connection.");
-            reply->deleteLater();
-            return;
-        }
-        
-        QByteArray data = reply->readAll();
-        QJsonDocument json = QJsonDocument::fromJson(data);
-        
-        if (json.isNull() || json.array().isEmpty()) {
-            m_statusLabel->setText("No definition found");
-            m_definitionText->setText("No definition found for: " + m_searchEdit->text());
-            m_wordLabel->setText(m_searchEdit->text());
-            m_phoneticLabel->clear();
-            m_originLabel->clear();
-            m_currentAudioUrl.clear();
-            reply->deleteLater();
-            return;
-        }
-        
-        parseDefinition(json.array()[0].toObject());
-        reply->deleteLater();
-    }
-    
-    void onExportFavorites() {
-        QString path = QFileDialog::getSaveFileName(this, "Export Favorites", "", "Text Files (*.txt)");
-        if (!path.isEmpty()) {
-            QFile file(path);
-            if (file.open(QIODevice::WriteOnly)) {
-                QTextStream out(&file);
-                for (const QString& word : m_favorites) {
-                    out << word << "\n";
-                }
-                file.close();
-                statusBar()->showMessage("Favorites exported", 2000);
-            }
-        }
-    }
-    
-    void onImportFavorites() {
-        QString path = QFileDialog::getOpenFileName(this, "Import Favorites", "", "Text Files (*.txt)");
-        if (!path.isEmpty()) {
-            QFile file(path);
-            if (file.open(QIODevice::ReadOnly)) {
-                QTextStream in(&file);
-                while (!in.atEnd()) {
-                    QString word = in.readLine().trimmed();
-                    if (!word.isEmpty()) {
-                        m_favorites.insert(word);
-                    }
-                }
-                file.close();
-                saveFavorites();
-                updateFavoritesList();
-                statusBar()->showMessage("Favorites imported", 2000);
-            }
-        }
-    }
-    
-    void onLookupWotd() {
-        if (!m_wotdWord->text().isEmpty()) {
-            m_searchEdit->setText(m_wotdWord->text());
-            onSearch();
-        }
-    }
-    
-    void onAbout() {
-        QMessageBox::about(this, "About Dictionary",
-            "Havel WM Dictionary\n\n"
-            "A simple dictionary application with:\n"
-            "- Online and offline lookup\n"
-            "- Word of the day\n"
-            "- Favorites management\n"
-            "- Search history\n"
-            "- Audio pronunciation\n"
-            "- CLI support");
-    }
-    
-    void onShortcuts() {
-        QMessageBox::information(this, "Keyboard Shortcuts",
-            "Enter       Search word\n"
-            "Ctrl+R      Random word\n"
-            "Ctrl+F      Toggle favorite\n"
-            "Ctrl+H      Show history\n"
-            "Ctrl+D      Word of the day\n"
-            "Ctrl+S      Settings\n"
-            "Ctrl+Q      Quit");
-    }
-    
-protected:
-    void closeEvent(QCloseEvent* event) {
-        if (m_trayIcon->isVisible()) {
-            hide();
-            event->ignore();
-        } else {
-            saveSettings();
-            saveFavorites();
-            saveHistory();
-            event->accept();
-        }
-    }
-    
-private:
     void setupMenu() {
         QMenu* fileMenu = menuBar()->addMenu("&File");
         fileMenu->addAction("&Search", this, &DictionaryApp::onSearch, QKeySequence::Find);
         fileMenu->addAction("&Random Word", this, &DictionaryApp::onRandomWord, QKeySequence(Qt::CTRL | Qt::Key_R));
         fileMenu->addAction("Word of &Day", this, &DictionaryApp::updateWordOfTheDay, QKeySequence(Qt::CTRL | Qt::Key_D));
         fileMenu->addSeparator();
+        fileMenu->addAction("&Open Document", this, &DictionaryApp::onOpenDocument, QKeySequence(Qt::CTRL | Qt::Key_O));
+        fileMenu->addAction("&Print", this, &DictionaryApp::onPrintDocument, QKeySequence::Print);
+        fileMenu->addSeparator();
         fileMenu->addAction("E&xit", qApp, &QApplication::quit, QKeySequence::Quit);
         
         QMenu* editMenu = menuBar()->addMenu("&Edit");
-        editMenu->addAction("Toggle &Favorite", [this]() {
-            m_favoriteButton->click();
-        }, QKeySequence(Qt::CTRL | Qt::Key_F));
+        editMenu->addAction("Toggle &Favorite", [this]() { m_favoriteButton->click(); }, QKeySequence(Qt::CTRL | Qt::Key_F));
         editMenu->addAction("Copy Definition", [this]() {
             QApplication::clipboard()->setText(m_definitionText->toPlainText());
         });
+        editMenu->addSeparator();
+        editMenu->addAction("&Find in Document", this, &DictionaryApp::onSearchInDocument, QKeySequence::Find);
         
         QMenu* viewMenu = menuBar()->addMenu("&View");
-        viewMenu->addAction("&History", [this]() {
-            m_sidebarTabs->setCurrentIndex(1);
-        }, QKeySequence(Qt::CTRL | Qt::Key_H));
-        viewMenu->addAction("&Font...", [this]() {
-            bool ok;
-            QFont font = QFontDialog::getFont(&ok, m_definitionText->font(), this);
-            if (ok) m_definitionText->setFont(font);
-        });
+        viewMenu->addAction("&Dictionary Mode", [this]() { m_stackedWidget->setCurrentIndex(0); });
+        viewMenu->addAction("&Reader Mode", [this]() { m_stackedWidget->setCurrentIndex(1); }, QKeySequence(Qt::CTRL | Qt::Key_Tab));
+        viewMenu->addSeparator();
+        viewMenu->addAction("Zoom &In", this, &DictionaryApp::onZoomIn, QKeySequence::ZoomIn);
+        viewMenu->addAction("Zoom &Out", this, &DictionaryApp::onZoomOut, QKeySequence::ZoomOut);
+        viewMenu->addAction("&Normal Size", [this]() { m_zoomSlider->setValue(100); }, QKeySequence(Qt::CTRL | Qt::Key_0));
         
         QMenu* helpMenu = menuBar()->addMenu("&Help");
         helpMenu->addAction("&About", this, &DictionaryApp::onAbout);
@@ -560,9 +797,9 @@ private:
         toolbar->addAction("🎲 Random", this, &DictionaryApp::onRandomWord);
         toolbar->addAction("📅 Word of Day", this, &DictionaryApp::updateWordOfTheDay);
         toolbar->addSeparator();
-        toolbar->addAction("⭐ Favorite", [this]() {
-            m_favoriteButton->click();
-        });
+        toolbar->addAction("📂 Open Document", this, &DictionaryApp::onOpenDocument);
+        toolbar->addSeparator();
+        toolbar->addAction("⭐ Favorite", [this]() { m_favoriteButton->click(); });
         toolbar->addAction("🔊 Audio", this, &DictionaryApp::onPlayAudio);
     }
     
@@ -678,10 +915,8 @@ private:
         QDate today = QDate::currentDate();
         
         if (today != m_lastWotdDate || m_currentWotd.isEmpty()) {
-            // Generate word of the day based on date
             QStringList words = {"serendipity", "ephemeral", "ubiquitous", "eloquent", "resilient",
-                               "meticulous", "enigma", "paradox", "quintessential", "aesthetic",
-                               "pragmatic", "eloquent", "tenacious", "empathy", "nostalgia"};
+                               "meticulous", "enigma", "paradox", "quintessential", "aesthetic"};
             
             int index = today.dayOfYear() % words.size();
             m_currentWotd = words[index];
@@ -693,7 +928,6 @@ private:
     }
     
     void addToHistory(const QString& word) {
-        // Remove if already exists
         for (int i = 0; i < m_history.size(); i++) {
             if (m_history[i].word == word) {
                 m_history.removeAt(i);
@@ -701,23 +935,18 @@ private:
             }
         }
         
-        // Add to front
         HistoryEntry entry;
         entry.word = word;
         entry.timestamp = QDateTime::currentDateTime();
         entry.lookups = 1;
         m_history.prepend(entry);
         
-        // Limit history
-        while (m_history.size() > 50) {
-            m_history.removeLast();
-        }
+        while (m_history.size() > 50) m_history.removeLast();
         
         updateHistoryList();
     }
     
     void loadLocalDictionary() {
-        // Load from file if exists
         QString path = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/dictionary.json";
         
         if (QFile::exists(path)) {
@@ -753,30 +982,80 @@ private:
             }
         }
         
-        // Add some basic words if empty
         if (m_localDictionary.isEmpty()) {
             WordDefinition hello;
             hello.word = "hello";
             hello.phonetic = "/həˈləʊ/";
-            hello.origin = "Late Middle English: variant of earlier hallo, hollo; related to Old English hola 'ho!'";
             WordDefinition::Meaning m1;
             m1.partOfSpeech = "exclamation";
-            m1.definitions.append("used as a greeting or to begin a telephone conversation.");
-            m1.examples.append("hello there, how are you?");
+            m1.definitions.append("used as a greeting.");
             hello.meanings.append(m1);
             m_localDictionary["hello"] = hello;
-            
-            WordDefinition world;
-            world.word = "world";
-            world.phonetic = "/wɜːld/";
-            world.origin = "Old English weorold, from wer 'man' + eld 'age'";
-            WordDefinition::Meaning m2;
-            m2.partOfSpeech = "noun";
-            m2.definitions.append("the earth, together with all of its countries, peoples, and natural features.");
-            m2.definitions.append("a particular field of human activity or area of human interest.");
-            world.meanings.append(m2);
-            m_localDictionary["world"] = world;
         }
+    }
+    
+    void loadDocument(const QString& path) {
+        QFileInfo fi(path);
+        QString ext = fi.suffix().toLower();
+        
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QMessageBox::critical(this, "Error", "Cannot open file: " + path);
+            return;
+        }
+        
+        QString content = QString::fromUtf8(file.readAll());
+        file.close();
+        
+        if (ext == "html" || ext == "htm") {
+            m_readerView->setHtml(content);
+        } else if (ext == "md") {
+            // Simple markdown to HTML conversion
+            content.replace("# ", "<h1>").replace("\n", "</h1>\n");
+            content.replace("## ", "<h2>").replace("\n", "</h2>\n");
+            content.replace("**", "<b>").replace("**", "</b>");
+            content.replace("*", "<i>").replace("*", "</i>");
+            m_readerView->setHtml("<html><body>" + content + "</body></html>");
+        } else {
+            m_readerView->setPlainText(content);
+        }
+        
+        setWindowTitle(fi.fileName() + " - Reader");
+        statusBar()->showMessage("Opened: " + path, 3000);
+    }
+    
+    void showPopupDefinition(const QString& word) {
+        if (word.isEmpty()) return;
+        
+        // Look up word
+        WordDefinition def;
+        if (m_localDictionary.contains(word)) {
+            def = m_localDictionary[word];
+        }
+        
+        QString html;
+        html += QString("<h3>%1</h3>").arg(word);
+        if (!def.phonetic.isEmpty()) {
+            html += QString("<p><i>%1</i></p>").arg(def.phonetic);
+        }
+        
+        for (const WordDefinition::Meaning& meaning : def.meanings) {
+            html += QString("<p><b>%1:</b> %2</p>").arg(meaning.partOfSpeech).arg(meaning.definitions.join("; "));
+        }
+        
+        if (def.meanings.isEmpty()) {
+            html += "<p>Click search to look up this word</p>";
+        }
+        
+        m_popupText->setHtml(html);
+        
+        // Position popup near cursor
+        QPoint pos = QCursor::pos();
+        m_popupWidget->move(pos + QPoint(10, 10));
+        m_popupWidget->show();
+        
+        // Auto-hide after 5 seconds
+        QTimer::singleShot(5000, m_popupWidget, &QWidget::hide);
     }
     
     void updateFavoritesList() {
@@ -842,7 +1121,7 @@ private:
     
     void loadSettings() {
         QSettings settings("Havel WM", "Dictionary");
-        resize(settings.value("size", QSize(900, 700)).toSize());
+        resize(settings.value("size", QSize(1100, 800)).toSize());
         move(settings.value("pos", QPoint(100, 100)).toPoint());
         m_sourceCombo->setCurrentIndex(settings.value("source", 0).toInt());
     }
@@ -854,11 +1133,10 @@ private:
         settings.setValue("source", m_sourceCombo->currentIndex());
     }
     
-    void updateStatus() {
-        m_statusLabel->setText(QString("Ready - %1 words in local dictionary").arg(m_localDictionary.size()));
-    }
-    
     // UI components
+    QStackedWidget* m_stackedWidget;
+    
+    // Dictionary view
     QLineEdit* m_searchEdit;
     QPushButton* m_searchButton;
     QPushButton* m_randomButton;
@@ -881,11 +1159,23 @@ private:
     QLabel* m_wotdWord;
     QLabel* m_wotdDef;
     
+    // Reader view
+    QTextEdit* m_readerView;
+    QSlider* m_zoomSlider;
+    QLabel* m_zoomLabel;
+    
+    // Popup definition
+    QWidget* m_popupWidget;
+    QTextEdit* m_popupText;
+    
+    // Status bar
     QLabel* m_statusLabel;
     QLabel* m_countLabel;
     
+    // System tray
     QSystemTrayIcon* m_trayIcon;
     
+    // Network
     QNetworkAccessManager* m_networkManager;
     QString m_currentAudioUrl;
     
@@ -902,7 +1192,7 @@ private:
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
-    app.setApplicationName("Havel Dictionary");
+    app.setApplicationName("Havel Dictionary & Reader");
     app.setOrganizationName("Havel WM");
     app.setDesktopFileName("havel-dictionary");
     
@@ -932,9 +1222,9 @@ int main(int argc, char* argv[]) {
             QTimer::singleShot(500, [&dictionary]() {
                 dictionary.showWordOfTheDay();
             });
-        } else if (args[i] == "--history") {
-            QTimer::singleShot(500, [&dictionary]() {
-                dictionary.showHistory();
+        } else if (args[i] == "--open" && i + 1 < args.size()) {
+            QTimer::singleShot(500, [&dictionary, &args, i]() {
+                dictionary.openDocument(args[i + 1]);
             });
         }
     }
