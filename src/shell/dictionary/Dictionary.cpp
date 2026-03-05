@@ -60,6 +60,16 @@
 #include <QStackedWidget>
 #include <QPrintDialog>
 #include <QPrinter>
+#include <QTranslator>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QUrl>
+#include <QUrlQuery>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QRegularExpression>
 
 struct WordDefinition {
     QString word;
@@ -162,6 +172,21 @@ public:
         m_stackedWidget->setCurrentIndex(0);
         m_searchEdit->setText(word);
         onSearch();
+    }
+    
+    void translateText(const QString& text, const QString& fromLang, const QString& toLang) {
+        m_stackedWidget->setCurrentIndex(0);
+        m_sidebarTabs->setCurrentIndex(3);  // Translator tab
+        
+        m_translateSource->setText(text);
+        m_translateFrom->setCurrentText(fromLang);
+        m_translateTo->setCurrentText(toLang);
+        onTranslate();
+    }
+    
+    void detectLanguage(const QString& text) {
+        m_searchEdit->setText(text);
+        onDetectLanguage();
     }
     
     void openDocument(const QString& path) {
@@ -317,6 +342,103 @@ private slots:
         }
     }
     
+    void onTranslate() {
+        QString text = m_translateSource->toPlainText().trimmed();
+        if (text.isEmpty()) {
+            QMessageBox::warning(this, "Warning", "Please enter text to translate");
+            return;
+        }
+        
+        QString fromLang = m_translateFrom->currentData().toString();
+        QString toLang = m_translateTo->currentData().toString();
+        
+        m_statusLabel->setText("Translating...");
+        
+        // Use MyMemory Translation API (free, no key required)
+        QUrl url("https://api.mymemory.translated.net/get");
+        QUrlQuery query;
+        query.addQueryItem("q", text);
+        query.addQueryItem("langpair", fromLang + "|" + toLang);
+        url.setQuery(query);
+        
+        QNetworkReply* reply = m_networkManager->get(QNetworkRequest(url));
+        connect(reply, &QNetworkReply::finished, [this, reply, toLang]() {
+            if (reply->error() != QNetworkReply::NoError) {
+                m_translateResult->setText("Translation error: " + reply->errorString());
+                reply->deleteLater();
+                return;
+            }
+            
+            QByteArray data = reply->readAll();
+            QJsonDocument json = QJsonDocument::fromJson(data);
+            QJsonObject obj = json.object();
+            
+            if (obj.contains("responseData")) {
+                QJsonObject responseData = obj["responseData"].toObject();
+                QString translatedText = responseData["translatedText"].toString();
+                
+                // Detect language if auto
+                if (m_translateFrom->currentData().toString() == "auto") {
+                    QString detectedLang = responseData["match"].toString();
+                    m_translateResult->setHtml(
+                        QString("<p><b>Detected Language:</b> %1</p><p>%2</p>")
+                        .arg(detectedLang).arg(translatedText));
+                } else {
+                    m_translateResult->setText(translatedText);
+                }
+            } else {
+                m_translateResult->setText("Translation failed");
+            }
+            
+            m_statusLabel->setText("Translation complete");
+            reply->deleteLater();
+        });
+    }
+    
+    void onDetectLanguage() {
+        QString text = m_searchEdit->text().trimmed();
+        if (text.isEmpty()) return;
+        
+        m_statusLabel->setText("Detecting language...");
+        
+        // Use language detection API
+        QUrl url("https://api.mymemory.translated.net/get");
+        QUrlQuery query;
+        query.addQueryItem("q", text);
+        query.addQueryItem("langpair", "en|en");  // Dummy pair, we just want detection
+        url.setQuery(query);
+        
+        QNetworkReply* reply = m_networkManager->get(QNetworkRequest(url));
+        connect(reply, &QNetworkReply::finished, [this, reply]() {
+            if (reply->error() != QNetworkReply::NoError) {
+                m_statusLabel->setText("Detection failed");
+                reply->deleteLater();
+                return;
+            }
+            
+            QByteArray data = reply->readAll();
+            QJsonDocument json = QJsonDocument::fromJson(data);
+            QJsonObject obj = json.object();
+            
+            if (obj.contains("responseData")) {
+                QJsonObject responseData = obj["responseData"].toObject();
+                QString detectedLang = responseData["match"].toString();
+                
+                // Set language combo to detected language
+                for (int i = 0; i < m_languageCombo->count(); i++) {
+                    if (m_languageCombo->itemData(i).toString() == detectedLang) {
+                        m_languageCombo->setCurrentIndex(i);
+                        break;
+                    }
+                }
+                
+                m_statusLabel->setText("Language detected: " + detectedLang);
+            }
+            
+            reply->deleteLater();
+        });
+    }
+    
     // Reader mode slots
     void onOpenDocument() {
         QString path = QFileDialog::getOpenFileName(this, "Open Document", "",
@@ -406,6 +528,10 @@ private slots:
             "  Ctrl+D      Word of the day\n"
             "  Ctrl+L      Select language\n"
             "  Ctrl+T      Select type\n"
+            "  Ctrl+A      Autodetect language\n"
+            "\nTranslator:\n"
+            "  Ctrl+Shift+T  Translate text\n"
+            "  Ctrl+Shift+D  Detect language\n"
             "\nReader Mode:\n"
             "  Ctrl+O      Open document\n"
             "  Ctrl++      Zoom in\n"
@@ -417,13 +543,12 @@ private slots:
             "\nGeneral:\n"
             "  Ctrl+Tab    Toggle mode\n"
             "  Ctrl+Q      Quit\n"
-            "\nSupported Languages:\n"
-            "  English, Spanish, French, German,\n"
-            "  Italian, Portuguese, Russian,\n"
-            "  Chinese, Japanese, Korean\n"
-            "\nDictionary Types:\n"
-            "  General, Thesaurus, Medical,\n"
-            "  Legal, Technical, Scientific, Business");
+            "\nCLI Usage:\n"
+            "  --lookup WORD           Look up word\n"
+            "  --translate TEXT LANG   Translate text\n"
+            "  --detect TEXT           Detect language\n"
+            "  --wotd                  Word of the day\n"
+            "  --open FILE             Open document");
     }
     
 protected:
@@ -473,6 +598,23 @@ protected:
                     if (m_stackedWidget->currentIndex() == 0) {
                         m_typeCombo->showPopup();
                     }
+                    return;
+                case Qt::Key_A:
+                    if (m_stackedWidget->currentIndex() == 0) {
+                        onDetectLanguage();
+                    }
+                    return;
+            }
+        }
+        
+        if (event->modifiers() == (Qt::ControlModifier | Qt::ShiftModifier)) {
+            switch (event->key()) {
+                case Qt::Key_T:
+                    m_sidebarTabs->setCurrentIndex(3);  // Translator tab
+                    m_translateSource->setFocus();
+                    return;
+                case Qt::Key_D:
+                    onDetectLanguage();
                     return;
             }
         }
@@ -695,6 +837,62 @@ private:
         
         wotdLayout->addStretch();
         m_sidebarTabs->addTab(wotdTab, "📅 Word of Day");
+        
+        // Translator tab
+        QWidget* transTab = new QWidget();
+        QVBoxLayout* transLayout = new QVBoxLayout(transTab);
+        
+        transLayout->addWidget(new QLabel("Translate Text:"));
+        
+        m_translateSource = new QTextEdit();
+        m_translateSource->setPlaceholderText("Enter text to translate...");
+        m_translateSource->setMaximumHeight(150);
+        transLayout->addWidget(m_translateSource);
+        
+        QHBoxLayout* langLayout = new QHBoxLayout();
+        langLayout->addWidget(new QLabel("From:"));
+        m_translateFrom = new QComboBox();
+        m_translateFrom->addItem("Auto Detect", "auto");
+        m_translateFrom->addItem("🇺🇸 English", "en");
+        m_translateFrom->addItem("🇪🇸 Spanish", "es");
+        m_translateFrom->addItem("🇫🇷 French", "fr");
+        m_translateFrom->addItem("🇩🇪 German", "de");
+        m_translateFrom->addItem("🇮🇹 Italian", "it");
+        m_translateFrom->addItem("🇵🇹 Portuguese", "pt");
+        m_translateFrom->addItem("🇷🇺 Russian", "ru");
+        m_translateFrom->addItem("🇨🇳 Chinese", "zh");
+        m_translateFrom->addItem("🇯🇵 Japanese", "ja");
+        m_translateFrom->addItem("🇰🇷 Korean", "ko");
+        langLayout->addWidget(m_translateFrom);
+        
+        langLayout->addWidget(new QLabel("To:"));
+        m_translateTo = new QComboBox();
+        m_translateTo->addItem("🇺🇸 English", "en");
+        m_translateTo->addItem("🇪🇸 Spanish", "es");
+        m_translateTo->addItem("🇫🇷 French", "fr");
+        m_translateTo->addItem("🇩🇪 German", "de");
+        m_translateTo->addItem("🇮🇹 Italian", "it");
+        m_translateTo->addItem("🇵🇹 Portuguese", "pt");
+        m_translateTo->addItem("🇷🇺 Russian", "ru");
+        m_translateTo->addItem("🇨🇳 Chinese", "zh");
+        m_translateTo->addItem("🇯🇵 Japanese", "ja");
+        m_translateTo->addItem("🇰🇷 Korean", "ko");
+        langLayout->addWidget(m_translateTo);
+        
+        transLayout->addLayout(langLayout);
+        
+        QPushButton* translateBtn = new QPushButton("🌐 Translate");
+        translateBtn->setMinimumHeight(40);
+        connect(translateBtn, &QPushButton::clicked, this, &DictionaryApp::onTranslate);
+        transLayout->addWidget(translateBtn);
+        
+        transLayout->addWidget(new QLabel("Translation:"));
+        m_translateResult = new QTextEdit();
+        m_translateResult->setReadOnly(true);
+        m_translateResult->setPlaceholderText("Translation will appear here...");
+        transLayout->addWidget(m_translateResult);
+        
+        m_sidebarTabs->addTab(transTab, "🌐 Translator");
         
         sidebarLayout->addWidget(m_sidebarTabs);
         splitter->addWidget(sidebar);
@@ -1260,6 +1458,12 @@ private:
     QLabel* m_wotdWord;
     QLabel* m_wotdDef;
     
+    // Translator
+    QTextEdit* m_translateSource;
+    QTextEdit* m_translateResult;
+    QComboBox* m_translateFrom;
+    QComboBox* m_translateTo;
+    
     // Reader view
     QTextEdit* m_readerView;
     QSlider* m_zoomSlider;
@@ -1318,6 +1522,19 @@ int main(int argc, char* argv[]) {
         if (args[i] == "--lookup" && i + 1 < args.size()) {
             QTimer::singleShot(500, [&dictionary, &args, i]() {
                 dictionary.lookupWord(args[i + 1]);
+            });
+        } else if (args[i] == "--translate" && i + 2 < args.size()) {
+            QString text = args[i + 1];
+            QString target = "en";
+            if (i + 3 < args.size() && !args[i + 3].startsWith("--")) {
+                target = args[i + 3];
+            }
+            QTimer::singleShot(500, [&dictionary, text, target]() {
+                dictionary.translateText(text, "auto", target);
+            });
+        } else if (args[i] == "--detect" && i + 1 < args.size()) {
+            QTimer::singleShot(500, [&dictionary, &args, i]() {
+                dictionary.detectLanguage(args[i + 1]);
             });
         } else if (args[i] == "--wotd") {
             QTimer::singleShot(500, [&dictionary]() {
