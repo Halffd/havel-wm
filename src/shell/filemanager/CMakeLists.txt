@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find Qt6
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
 
 # Enable Qt MOC
 set(CMAKE_AUTOMOC ON)
@@ -18,10 +18,16 @@ set(CMAKE_AUTOUIC ON)
 set(SOURCES
     main.cpp
     FileManager.cpp
+    ThumbnailGenerator.cpp
+    FileAssociations.cpp
+    FileProperties.cpp
 )
 
 set(HEADERS
     FileManager.hpp
+    ThumbnailGenerator.hpp
+    FileAssociations.hpp
+    FileProperties.hpp
 )
 
 # Create executable
