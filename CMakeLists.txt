@@ -19,6 +19,7 @@ pkg_check_modules(GLES2 REQUIRED glesv2)
 pkg_check_modules(EGL REQUIRED egl)
 pkg_check_modules(FREETYPE REQUIRED freetype2)
 pkg_check_modules(PNG REQUIRED libpng)
+pkg_check_modules(CURL REQUIRED libcurl)
 
 # Find PipeWire for screen sharing
 pkg_check_modules(PIPEWIRE libpipewire-0.3)
@@ -179,6 +180,9 @@ set(WM_CORE_SOURCES
     src/wm/overlay/AppLauncherOverlay.cpp
     src/wm/desktop/DesktopManager.cpp
     src/wm/desktop/DesktopManager.hpp
+    src/wm/desktop/NASAWallpaper.cpp
+    src/wm/desktop/NASAWallpaper.hpp
+    src/wm/desktop/NASAWallpaperTests.cpp
     src/wm/plugins/PluginManager.cpp
     src/wm/plugins/ExamplePlugin.cpp
     src/wm/plugins/BlurPlugin.cpp
@@ -241,6 +245,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${EGL_INCLUDE_DIRS}
     ${FREETYPE_INCLUDE_DIRS}
     ${PNG_INCLUDE_DIRS}
+    ${CURL_INCLUDE_DIRS}
     ${PIPEWIRE_INCLUDE_DIRS}
     ${GLIB_INCLUDE_DIRS}
     # UI framework include (for future use)
@@ -260,6 +265,7 @@ target_link_libraries(${PROJECT_NAME}
     ${EGL_LIBRARIES}
     ${FREETYPE_LIBRARIES}
     ${PNG_LIBRARIES}
+    ${CURL_LIBRARIES}
     ${PIPEWIRE_LIBRARIES}
     ${GLIB_LIBRARIES}
 )

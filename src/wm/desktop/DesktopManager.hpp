@@ -9,6 +9,11 @@
 #include <functional>
 #include <unordered_map>
 
+// Forward declaration
+namespace havel {
+class NASAWallpaperManager;
+}
+
 namespace havel {
 
 /**
@@ -199,6 +204,12 @@ public:
     void setPerMonitorWallpaper(const std::string& monitorId, const std::string& path);
     const WallpaperConfig& getWallpaperConfig() const { return m_config.wallpaper; }
     
+    // NASA wallpaper
+    void enableNASAWallpaper(bool enabled = true);
+    bool isNASAWallpaperEnabled() const { return m_nasaWallpaperEnabled; }
+    void fetchNASAWallpapers(int count = 10);
+    void setNASAWallpaperSlideshow(int intervalSeconds = 300);
+    
     // Configuration
     void setConfig(const DesktopConfig& config);
     const DesktopConfig& getConfig() const { return m_config; }
@@ -302,6 +313,10 @@ private:
     uint64_t m_lastSlideshowChange = 0;
     int m_currentSlideshowIndex = 0;
     void* m_videoPlayer = nullptr;
+    
+    // NASA wallpaper
+    bool m_nasaWallpaperEnabled = true;
+    std::unique_ptr<NASAWallpaperManager> m_nasaWallpaperManager;
     
     // Rendering
     uint32_t m_wallpaperTexture = 0;

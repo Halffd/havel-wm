@@ -1,6 +1,7 @@
 // Desktop Environment Manager Implementation
 
 #include "DesktopManager.hpp"
+#include "NASAWallpaper.hpp"
 #include <Logger.h>
 #include <algorithm>
 #include <fstream>
@@ -55,6 +56,18 @@ bool DesktopManager::initialize() {
     
     m_screenWidth = 1920;
     m_screenHeight = 1080;
+    
+    // Initialize NASA wallpaper manager
+    if (m_nasaWallpaperEnabled) {
+        m_nasaWallpaperManager = std::make_unique<NASAWallpaperManager>();
+        m_nasaWallpaperManager->initialize();
+        
+        // Fetch NASA wallpapers by default
+        fetchNASAWallpapers(10);
+        
+        // Set up NASA wallpaper slideshow
+        setNASAWallpaperSlideshow(300);  // 5 minutes
+    }
     
     // Load default icons (applications)
     addIcon("firefox");
@@ -796,6 +809,51 @@ uint32_t DesktopManager::loadIconTexture(const std::string& iconPath) {
 void DesktopManager::unloadIconTexture(uint32_t textureId) {
     // Would delete OpenGL texture
     (void)textureId;
+}
+
+// ============================================================================
+// NASA Wallpaper Integration
+// ============================================================================
+
+void DesktopManager::enableNASAWallpaper(bool enabled) {
+    m_nasaWallpaperEnabled = enabled;
+    
+    if (enabled && !m_nasaWallpaperManager) {
+        m_nasaWallpaperManager = std::make_unique<NASAWallpaperManager>();
+        m_nasaWallpaperManager->initialize();
+        fetchNASAWallpapers(10);
+    }
+    
+    LOG_INFO("[Desktop] NASA wallpaper %s", enabled ? "enabled" : "disabled");
+}
+
+void DesktopManager::fetchNASAWallpapers(int count) {
+    if (!m_nasaWallpaperManager) {
+        LOG_ERROR("[Desktop] NASA wallpaper manager not initialized");
+        return;
+    }
+    
+    LOG_INFO("[Desktop] Fetching %d NASA wallpapers", count);
+    
+    // Fetch APOD images
+    m_nasaWallpaperManager->fetchAPOD(count);
+    
+    // Download and set as wallpaper
+    const NASAImage* image = m_nasaWallpaperManager->getCurrentImage();
+    if (image && image->isValid()) {
+        m_nasaWallpaperManager->downloadCurrentImage();
+        m_nasaWallpaperManager->setAsWallpaper();
+    }
+}
+
+void DesktopManager::setNASAWallpaperSlideshow(int intervalSeconds) {
+    if (!m_nasaWallpaperManager) {
+        LOG_ERROR("[Desktop] NASA wallpaper manager not initialized");
+        return;
+    }
+    
+    m_nasaWallpaperManager->startSlideshow(intervalSeconds);
+    LOG_INFO("[Desktop] NASA wallpaper slideshow started (%ds)", intervalSeconds);
 }
 
 } // namespace havel
