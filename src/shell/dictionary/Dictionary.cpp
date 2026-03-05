@@ -66,6 +66,8 @@ struct WordDefinition {
     QString phonetic;
     QString audioUrl;
     QString origin;
+    QString language;
+    QString dictionaryType;
     
     struct Meaning {
         QString partOfSpeech;
@@ -76,7 +78,7 @@ struct WordDefinition {
     };
     
     QList<Meaning> meanings;
-    WordDefinition() {}
+    WordDefinition() : language("en"), dictionaryType("general") {}
 };
 
 struct HistoryEntry {
@@ -182,12 +184,11 @@ private slots:
         addToHistory(word);
         m_favoriteButton->setChecked(m_favorites.contains(word));
         
-        QString source = m_sourceCombo->currentData().toString();
-        if (source == "online") {
-            searchOnline(word);
-        } else {
-            searchLocal(word);
-        }
+        // Get selected language and type
+        QString language = m_languageCombo->currentData().toString();
+        QString dictType = m_typeCombo->currentData().toString();
+        
+        searchOnline(word, language, dictType);
     }
     
     void onRandomWord() {
@@ -377,13 +378,23 @@ private slots:
         QMessageBox::about(this, "About Dictionary & Reader",
             "Havel WM Dictionary & Reader\n\n"
             "Features:\n"
+            "- Multi-language support (10 languages)\n"
+            "- Multiple dictionary types\n"
             "- Online/Offline dictionary\n"
+            "- Thesaurus integration\n"
             "- Word of the day\n"
             "- Reader mode for documents\n"
             "- PDF, EPUB, TXT, HTML support\n"
             "- Popup definitions\n"
             "- Keyboard navigation\n"
-            "- Favorites & history");
+            "- Favorites & history\n"
+            "\nSupported Languages:\n"
+            "English, Spanish, French, German,\n"
+            "Italian, Portuguese, Russian,\n"
+            "Chinese, Japanese, Korean\n"
+            "\nDictionary Types:\n"
+            "General, Thesaurus, Medical,\n"
+            "Legal, Technical, Scientific, Business");
     }
     
     void onShortcuts() {
@@ -393,19 +404,26 @@ private slots:
             "  Ctrl+R      Random word\n"
             "  Ctrl+F      Toggle favorite\n"
             "  Ctrl+D      Word of the day\n"
+            "  Ctrl+L      Select language\n"
+            "  Ctrl+T      Select type\n"
             "\nReader Mode:\n"
             "  Ctrl+O      Open document\n"
             "  Ctrl++      Zoom in\n"
             "  Ctrl+-      Zoom out\n"
             "  Ctrl+F      Find in document\n"
             "  Ctrl+P      Print\n"
-            "  Alt+Left    Previous page\n"
-            "  Alt+Right   Next page\n"
             "  Space       Page down\n"
             "  Shift+Space Page up\n"
             "\nGeneral:\n"
             "  Ctrl+Tab    Toggle mode\n"
-            "  Ctrl+Q      Quit");
+            "  Ctrl+Q      Quit\n"
+            "\nSupported Languages:\n"
+            "  English, Spanish, French, German,\n"
+            "  Italian, Portuguese, Russian,\n"
+            "  Chinese, Japanese, Korean\n"
+            "\nDictionary Types:\n"
+            "  General, Thesaurus, Medical,\n"
+            "  Legal, Technical, Scientific, Business");
     }
     
 protected:
@@ -444,6 +462,16 @@ protected:
                 case Qt::Key_F:
                     if (m_stackedWidget->currentIndex() == 1) {
                         onSearchInDocument();
+                    }
+                    return;
+                case Qt::Key_L:
+                    if (m_stackedWidget->currentIndex() == 0) {
+                        m_languageCombo->showPopup();
+                    }
+                    return;
+                case Qt::Key_T:
+                    if (m_stackedWidget->currentIndex() == 0) {
+                        m_typeCombo->showPopup();
                     }
                     return;
             }
@@ -510,12 +538,33 @@ private:
         
         // Source selector
         QHBoxLayout* sourceLayout = new QHBoxLayout();
-        sourceLayout->addWidget(new QLabel("Source:"));
-        m_sourceCombo = new QComboBox();
-        m_sourceCombo->addItem("Online (Free Dictionary API)", "online");
-        m_sourceCombo->addItem("Offline (Local)", "local");
-        m_sourceCombo->setCurrentIndex(0);
-        sourceLayout->addWidget(m_sourceCombo);
+        sourceLayout->addWidget(new QLabel("Language:"));
+        m_languageCombo = new QComboBox();
+        m_languageCombo->addItem("🇺🇸 English", "en");
+        m_languageCombo->addItem("🇪🇸 Spanish", "es");
+        m_languageCombo->addItem("🇫🇷 French", "fr");
+        m_languageCombo->addItem("🇩🇪 German", "de");
+        m_languageCombo->addItem("🇮🇹 Italian", "it");
+        m_languageCombo->addItem("🇵🇹 Portuguese", "pt");
+        m_languageCombo->addItem("🇷🇺 Russian", "ru");
+        m_languageCombo->addItem("🇨🇳 Chinese", "zh");
+        m_languageCombo->addItem("🇯🇵 Japanese", "ja");
+        m_languageCombo->addItem("🇰🇷 Korean", "ko");
+        m_languageCombo->setMaximumWidth(180);
+        sourceLayout->addWidget(m_languageCombo);
+        
+        sourceLayout->addWidget(new QLabel("  Type:"));
+        m_typeCombo = new QComboBox();
+        m_typeCombo->addItem("📖 General", "general");
+        m_typeCombo->addItem("📚 Thesaurus", "thesaurus");
+        m_typeCombo->addItem("⚕️ Medical", "medical");
+        m_typeCombo->addItem("⚖️ Legal", "legal");
+        m_typeCombo->addItem("💻 Technical", "technical");
+        m_typeCombo->addItem("🔬 Scientific", "scientific");
+        m_typeCombo->addItem("📈 Business", "business");
+        m_typeCombo->setMaximumWidth(150);
+        sourceLayout->addWidget(m_typeCombo);
+        
         sourceLayout->addStretch();
         mainLayout->addLayout(sourceLayout);
         
@@ -803,27 +852,53 @@ private:
         toolbar->addAction("🔊 Audio", this, &DictionaryApp::onPlayAudio);
     }
     
-    void searchOnline(const QString& word) {
-        QUrl url("https://api.dictionaryapi.dev/api/v2/entries/en/" + word);
-        m_networkManager->get(QNetworkRequest(url));
-    }
-    
-    void searchLocal(const QString& word) {
-        m_searchButton->setEnabled(true);
+    void searchOnline(const QString& word, const QString& language, const QString& dictType) {
+        // Use different APIs based on language and type
+        QUrl url;
         
-        if (m_localDictionary.contains(word)) {
-            WordDefinition def = m_localDictionary[word];
-            displayDefinition(def);
-            m_statusLabel->setText("Found in local dictionary");
+        if (dictType == "thesaurus") {
+            // Thesaurus API
+            url = QUrl("https://api.datamuse.com/words?ml=" + word + "&max=10");
+        } else if (language == "es") {
+            url = QUrl("https://api.dictionaryapi.dev/api/v2/entries/es/" + word);
+        } else if (language == "fr") {
+            url = QUrl("https://api.dictionaryapi.dev/api/v2/entries/fr/" + word);
+        } else if (language == "de") {
+            url = QUrl("https://api.dictionaryapi.dev/api/v2/entries/de/" + word);
         } else {
-            m_definitionText->setText("Word not found in local dictionary.\nTry switching to online source.");
-            m_wordLabel->setText(word);
-            m_statusLabel->setText("Not found locally");
+            // Default to English
+            url = QUrl("https://api.dictionaryapi.dev/api/v2/entries/en/" + word);
         }
+        
+        m_networkManager->get(QNetworkRequest(url));
     }
     
     void parseDefinition(const QJsonObject& entry) {
         WordDefinition def;
+        def.language = m_languageCombo->currentData().toString();
+        def.dictionaryType = m_typeCombo->currentData().toString();
+        
+        // Handle thesaurus results
+        if (def.dictionaryType == "thesaurus" && entry.contains("word")) {
+            def.word = entry["word"].toString();
+            WordDefinition::Meaning meaning;
+            meaning.partOfSpeech = "synonyms";
+            
+            if (entry.contains("synonyms")) {
+                QJsonArray syns = entry["synonyms"].toArray();
+                for (const QJsonValue& s : syns) {
+                    meaning.synonyms.append(s.toString());
+                }
+            }
+            
+            def.meanings.append(meaning);
+            displayDefinition(def);
+            m_statusLabel->setText("Thesaurus results loaded");
+            m_searchButton->setEnabled(true);
+            return;
+        }
+        
+        // Standard dictionary entry
         def.word = entry["word"].toString();
         
         if (entry.contains("phonetic")) {
@@ -861,6 +936,20 @@ private:
                     }
                 }
                 
+                if (meaningObj.contains("synonyms")) {
+                    QJsonArray syns = meaningObj["synonyms"].toArray();
+                    for (const QJsonValue& s : syns) {
+                        meaning.synonyms.append(s.toString());
+                    }
+                }
+                
+                if (meaningObj.contains("antonyms")) {
+                    QJsonArray ants = meaningObj["antonyms"].toArray();
+                    for (const QJsonValue& a : ants) {
+                        meaning.antonyms.append(a.toString());
+                    }
+                }
+                
                 def.meanings.append(meaning);
             }
         }
@@ -870,7 +959,7 @@ private:
         }
         
         displayDefinition(def);
-        m_statusLabel->setText("Definition loaded");
+        m_statusLabel->setText("Definition loaded (" + def.language + ")");
     }
     
     void displayDefinition(const WordDefinition& def) {
@@ -885,6 +974,11 @@ private:
         m_favoriteButton->setText(m_favorites.contains(def.word) ? "★" : "☆");
         
         QString html;
+        
+        // Show language and type
+        html += QString("<p style='color: #888; font-size: 12px;'>Language: %1 | Type: %2</p>")
+            .arg(def.language).arg(def.dictionaryType);
+        
         for (const WordDefinition::Meaning& meaning : def.meanings) {
             html += QString("<h3 style='color: #4CAF50;'>%1</h3>").arg(meaning.partOfSpeech);
             
@@ -897,7 +991,11 @@ private:
             }
             
             if (!meaning.synonyms.isEmpty()) {
-                html += QString("<p><b>Synonyms:</b> %1</p>").arg(meaning.synonyms.join(", "));
+                html += QString("<p><b style='color: #2196F3;'>Synonyms:</b> %1</p>").arg(meaning.synonyms.join(", "));
+            }
+            
+            if (!meaning.antonyms.isEmpty()) {
+                html += QString("<p><b style='color: #f44336;'>Antonyms:</b> %1</p>").arg(meaning.antonyms.join(", "));
             }
             
             html += "<hr>";
@@ -1123,14 +1221,16 @@ private:
         QSettings settings("Havel WM", "Dictionary");
         resize(settings.value("size", QSize(1100, 800)).toSize());
         move(settings.value("pos", QPoint(100, 100)).toPoint());
-        m_sourceCombo->setCurrentIndex(settings.value("source", 0).toInt());
+        m_languageCombo->setCurrentIndex(settings.value("language", 0).toInt());
+        m_typeCombo->setCurrentIndex(settings.value("type", 0).toInt());
     }
     
     void saveSettings() {
         QSettings settings("Havel WM", "Dictionary");
         settings.setValue("size", size());
         settings.setValue("pos", pos());
-        settings.setValue("source", m_sourceCombo->currentIndex());
+        settings.setValue("language", m_languageCombo->currentIndex());
+        settings.setValue("type", m_typeCombo->currentIndex());
     }
     
     // UI components
@@ -1140,7 +1240,8 @@ private:
     QLineEdit* m_searchEdit;
     QPushButton* m_searchButton;
     QPushButton* m_randomButton;
-    QComboBox* m_sourceCombo;
+    QComboBox* m_languageCombo;
+    QComboBox* m_typeCombo;
     
     QLabel* m_wordLabel;
     QLabel* m_phoneticLabel;
