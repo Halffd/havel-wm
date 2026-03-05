@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Havel Video Player
+Comment=Video Player for Havel WM
+Exec=havel-videoplayer %U
+Icon=media-playback-start
+Terminal=false
+Type=Application
+Categories=AudioVideo;Video;Player;
+MimeType=video/mp4;video/x-matroska;video/x-msvideo;video/quicktime;video/x-flv;video/webm;
+Keywords=video;player;media;movie;film;

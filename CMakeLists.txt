@@ -343,6 +343,9 @@ if(PANEL_ENABLED)
     # Build updater
     add_subdirectory(src/shell/updater)
 
+    # Build video player
+    add_subdirectory(src/shell/videoplayer)
+
     # Build and install settings
     add_subdirectory(src/shell/settings)
 
