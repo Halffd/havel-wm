@@ -150,6 +150,9 @@ set(WM_CORE_SOURCES
     src/wm/core/DesktopPortal.hpp
     src/wm/core/WindowGroupManager.cpp
     src/wm/core/WindowGroupManager.hpp
+    # XWaylandDnD - WIP, needs wlroots integration
+    # src/wm/core/XWaylandDnD.cpp
+    # src/wm/core/XWaylandDnD.hpp
     src/wm/render/RenderPipeline.cpp
     src/wm/render/render_c_wrappers.c
     src/wm/render/ShaderEffect.cpp
@@ -201,9 +204,11 @@ set(WM_CORE_SOURCES
     src/wm/plugins/ServerDecorationPlugin.cpp
     src/wm/plugins/DrawPlugin.cpp
     src/wm/plugins/FPSPlugin.cpp
-    src/wm/plugins/WobblyWindowsPlugin.cpp
-    src/wm/plugins/DestroyOnClosePlugin.cpp
-    src/wm/plugins/SpringOnSpawnPlugin.cpp
+    src/wm/plugins/GammaPlugin.cpp
+    # Animation plugins (WIP - need interface adjustments)
+    # src/wm/plugins/WobblyWindowsPlugin.cpp
+    # src/wm/plugins/DestroyOnClosePlugin.cpp
+    # src/wm/plugins/SpringOnSpawnPlugin.cpp
     # VulkanRenderer.cpp - disabled, wlroots handles rendering
 )
 

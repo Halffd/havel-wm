@@ -5,6 +5,9 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
 #include "IPCClient.hpp"
 #include "LauncherWindow.hpp"
 
@@ -36,6 +39,11 @@ private slots:
     void onIPCError(const QString& error);
     void onIPCConnected();
     void onIPCDisconnected();
+
+protected:
+    void dragEnterEvent(QDragEnterEvent* event) override;
+    void dragMoveEvent(QDragMoveEvent* event) override;
+    void dropEvent(QDropEvent* event) override;
 
 private:
     void setupUI();

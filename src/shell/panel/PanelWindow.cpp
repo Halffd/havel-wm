@@ -5,6 +5,7 @@
 #include <QScreen>
 #include <QTimer>
 #include <QDateTime>
+#include <QMimeData>
 
 namespace havel {
 
@@ -249,6 +250,47 @@ void PanelWindow::onCloseRequested(quint64 windowId) {
     // Close window - would need compositor support
     // For now, just minimize
     m_ipcClient->minimizeWindow(windowId);
+}
+
+// Drag and Drop support
+void PanelWindow::dragEnterEvent(QDragEnterEvent* event) {
+    if (event->mimeData()->hasUrls()) {
+        event->acceptProposedAction();
+    }
+}
+
+void PanelWindow::dragMoveEvent(QDragMoveEvent* event) {
+    if (event->mimeData()->hasUrls()) {
+        event->acceptProposedAction();
+    }
+}
+
+void PanelWindow::dropEvent(QDropEvent* event) {
+    if (event->mimeData()->hasUrls()) {
+        QList<QUrl> urls = event->mimeData()->urls();
+        QStringList uris;
+        
+        for (const QUrl& url : urls) {
+            if (url.isLocalFile()) {
+                uris << url.toLocalFile();
+            } else {
+                uris << url.toString();
+            }
+        }
+        
+        // Check if dropping on taskbar area
+        if (uris.size() > 0) {
+            // Check if any are .desktop files
+            for (const QString& uri : uris) {
+                if (uri.endsWith(".desktop")) {
+                    // Pin this app to taskbar
+                    onPinRequested(uri);
+                }
+            }
+        }
+        
+        event->acceptProposedAction();
+    }
 }
 
 } // namespace havel
