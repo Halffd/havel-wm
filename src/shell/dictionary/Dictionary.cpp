@@ -1,0 +1,945 @@
+// Dictionary Application for Havel WM
+
+#include <QApplication>
+#include <QMainWindow>
+#include <QLineEdit>
+#include <QTextEdit>
+#include <QListWidget>
+#include <QListWidgetItem>
+#include <QToolBar>
+#include <QStatusBar>
+#include <QMenuBar>
+#include <QMenu>
+#include <QAction>
+#include <QLabel>
+#include <QPushButton>
+#include <QComboBox>
+#include <QCheckBox>
+#include <QTabWidget>
+#include <QSplitter>
+#include <QSettings>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QFile>
+#include <QTextStream>
+#include <QDir>
+#include <QStandardPaths>
+#include <QClipboard>
+#include <QSystemTrayIcon>
+#include <QCloseEvent>
+#include <QTimer>
+#include <QDateTime>
+#include <QSet>
+#include <QMessageBox>
+#include <QInputDialog>
+#include <QFileDialog>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QPainter>
+#include <QIcon>
+#include <QFontDialog>
+#include <QScrollArea>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QFormLayout>
+#include <QGroupBox>
+#include <QStyleFactory>
+#include <QPalette>
+#include <QRandomGenerator>
+
+struct WordDefinition {
+    QString word;
+    QString phonetic;
+    QString audioUrl;
+    QString origin;
+    
+    struct Meaning {
+        QString partOfSpeech;
+        QStringList definitions;
+        QStringList synonyms;
+        QStringList antonyms;
+        QStringList examples;
+    };
+    
+    QList<Meaning> meanings;
+    
+    WordDefinition() {}
+};
+
+struct HistoryEntry {
+    QString word;
+    QDateTime timestamp;
+    int lookups;
+};
+
+class DictionaryApp : public QMainWindow {
+    Q_OBJECT
+
+public:
+    DictionaryApp() {
+        setWindowTitle("Dictionary - Havel WM");
+        setMinimumSize(900, 700);
+        
+        // Central widget
+        QWidget* central = new QWidget();
+        setCentralWidget(central);
+        QVBoxLayout* mainLayout = new QVBoxLayout(central);
+        
+        // Search bar
+        QHBoxLayout* searchLayout = new QHBoxLayout();
+        
+        m_searchEdit = new QLineEdit();
+        m_searchEdit->setPlaceholderText("Type a word to search...");
+        m_searchEdit->setMinimumHeight(40);
+        QFont font = m_searchEdit->font();
+        font.setPointSize(14);
+        m_searchEdit->setFont(font);
+        connect(m_searchEdit, &QLineEdit::returnPressed, this, &DictionaryApp::onSearch);
+        searchLayout->addWidget(m_searchEdit);
+        
+        m_searchButton = new QPushButton("🔍 Search");
+        m_searchButton->setMinimumHeight(40);
+        m_searchButton->setMinimumWidth(100);
+        connect(m_searchButton, &QPushButton::clicked, this, &DictionaryApp::onSearch);
+        searchLayout->addWidget(m_searchButton);
+        
+        m_randomButton = new QPushButton("🎲 Random");
+        m_randomButton->setMinimumHeight(40);
+        connect(m_randomButton, &QPushButton::clicked, this, &DictionaryApp::onRandomWord);
+        searchLayout->addWidget(m_randomButton);
+        
+        mainLayout->addLayout(searchLayout);
+        
+        // Source selector
+        QHBoxLayout* sourceLayout = new QHBoxLayout();
+        sourceLayout->addWidget(new QLabel("Source:"));
+        m_sourceCombo = new QComboBox();
+        m_sourceCombo->addItem("Online (Free Dictionary API)", "online");
+        m_sourceCombo->addItem("Offline (Local)", "local");
+        m_sourceCombo->setCurrentIndex(0);
+        sourceLayout->addWidget(m_sourceCombo);
+        sourceLayout->addStretch();
+        mainLayout->addLayout(sourceLayout);
+        
+        // Content area with splitter
+        QSplitter* splitter = new QSplitter(Qt::Horizontal);
+        
+        // Definition display
+        QWidget* defWidget = new QWidget();
+        QVBoxLayout* defLayout = new QVBoxLayout(defWidget);
+        
+        // Word header
+        QHBoxLayout* headerLayout = new QHBoxLayout();
+        
+        m_wordLabel = new QLabel("Enter a word");
+        QFont wordFont = m_wordLabel->font();
+        wordFont.setPointSize(24);
+        wordFont.setBold(true);
+        m_wordLabel->setFont(wordFont);
+        headerLayout->addWidget(m_wordLabel);
+        
+        m_favoriteButton = new QPushButton("☆");
+        m_favoriteButton->setMaximumWidth(40);
+        m_favoriteButton->setCheckable(true);
+        connect(m_favoriteButton, &QPushButton::toggled, this, &DictionaryApp::onToggleFavorite);
+        headerLayout->addWidget(m_favoriteButton);
+        
+        headerLayout->addStretch();
+        defLayout->addLayout(headerLayout);
+        
+        // Phonetic and audio
+        QHBoxLayout* phoneticLayout = new QHBoxLayout();
+        
+        m_phoneticLabel = new QLabel("");
+        m_phoneticLabel->setStyleSheet("color: #888; font-style: italic;");
+        phoneticLayout->addWidget(m_phoneticLabel);
+        
+        m_playAudioButton = new QPushButton("🔊");
+        m_playAudioButton->setMaximumWidth(40);
+        connect(m_playAudioButton, &QPushButton::clicked, this, &DictionaryApp::onPlayAudio);
+        phoneticLayout->addWidget(m_playAudioButton);
+        
+        phoneticLayout->addStretch();
+        defLayout->addLayout(phoneticLayout);
+        
+        // Origin
+        m_originLabel = new QLabel("");
+        m_originLabel->setStyleSheet("color: #666;");
+        m_originLabel->setWordWrap(true);
+        defLayout->addWidget(m_originLabel);
+        
+        // Definition text
+        m_definitionText = new QTextEdit();
+        m_definitionText->setReadOnly(true);
+        m_definitionText->setMinimumHeight(300);
+        defLayout->addWidget(m_definitionText);
+        
+        splitter->addWidget(defWidget);
+        
+        // Sidebar
+        QWidget* sidebar = new QWidget();
+        QVBoxLayout* sidebarLayout = new QVBoxLayout(sidebar);
+        sidebar->setMinimumWidth(250);
+        
+        m_sidebarTabs = new QTabWidget();
+        
+        // Favorites tab
+        QWidget* favTab = new QWidget();
+        QVBoxLayout* favLayout = new QVBoxLayout(favTab);
+        
+        m_favoritesList = new QListWidget();
+        connect(m_favoritesList, &QListWidget::itemDoubleClicked, this, &DictionaryApp::onFavoriteClicked);
+        favLayout->addWidget(m_favoritesList);
+        
+        QHBoxLayout* favBtnLayout = new QHBoxLayout();
+        QPushButton* exportFav = new QPushButton("Export");
+        connect(exportFav, &QPushButton::clicked, this, &DictionaryApp::onExportFavorites);
+        favBtnLayout->addWidget(exportFav);
+        
+        QPushButton* importFav = new QPushButton("Import");
+        connect(importFav, &QPushButton::clicked, this, &DictionaryApp::onImportFavorites);
+        favBtnLayout->addWidget(importFav);
+        
+        m_clearFavButton = new QPushButton("Clear");
+        connect(m_clearFavButton, &QPushButton::clicked, this, &DictionaryApp::onClearFavorites);
+        favBtnLayout->addWidget(m_clearFavButton);
+        
+        favLayout->addLayout(favBtnLayout);
+        m_sidebarTabs->addTab(favTab, "⭐ Favorites");
+        
+        // History tab
+        QWidget* histTab = new QWidget();
+        QVBoxLayout* histLayout = new QVBoxLayout(histTab);
+        
+        m_historyList = new QListWidget();
+        connect(m_historyList, &QListWidget::itemDoubleClicked, this, &DictionaryApp::onHistoryClicked);
+        histLayout->addWidget(m_historyList);
+        
+        m_clearHistButton = new QPushButton("Clear History");
+        connect(m_clearHistButton, &QPushButton::clicked, this, &DictionaryApp::onClearHistory);
+        histLayout->addWidget(m_clearHistButton);
+        
+        m_sidebarTabs->addTab(histTab, "📜 History");
+        
+        // Word of the Day tab
+        QWidget* wotdTab = new QWidget();
+        QVBoxLayout* wotdLayout = new QVBoxLayout(wotdTab);
+        
+        m_wotdLabel = new QLabel("Word of the Day");
+        QFont wotdFont = m_wotdLabel->font();
+        wotdFont.setPointSize(16);
+        wotdFont.setBold(true);
+        m_wotdLabel->setFont(wotdFont);
+        m_wotdLabel->setAlignment(Qt::AlignCenter);
+        wotdLayout->addWidget(m_wotdLabel);
+        
+        m_wotdWord = new QLabel("");
+        m_wotdWord->setWordWrap(true);
+        m_wotdWord->setAlignment(Qt::AlignCenter);
+        wotdLayout->addWidget(m_wotdWord);
+        
+        m_wotdDef = new QLabel("");
+        m_wotdDef->setWordWrap(true);
+        wotdLayout->addWidget(m_wotdDef);
+        
+        QPushButton* lookupWotd = new QPushButton("Look Up");
+        connect(lookupWotd, &QPushButton::clicked, this, &DictionaryApp::onLookupWotd);
+        wotdLayout->addWidget(lookupWotd);
+        
+        wotdLayout->addStretch();
+        m_sidebarTabs->addTab(wotdTab, "📅 Word of Day");
+        
+        sidebarLayout->addWidget(m_sidebarTabs);
+        splitter->addWidget(sidebar);
+        
+        splitter->setSizes(QList<int>() << 650 << 250);
+        mainLayout->addWidget(splitter);
+        
+        // Status bar
+        m_statusLabel = new QLabel("Ready");
+        statusBar()->addWidget(m_statusLabel);
+        
+        m_countLabel = new QLabel("");
+        statusBar()->addPermanentWidget(m_countLabel);
+        
+        setupMenu();
+        setupToolbar();
+        loadSettings();
+        loadFavorites();
+        loadHistory();
+        updateWordOfTheDay();
+        
+        // System tray
+        m_trayIcon = new QSystemTrayIcon(QIcon::fromTheme("accessories-dictionary"), this);
+        m_trayIcon->show();
+        
+        QMenu* trayMenu = new QMenu(this);
+        trayMenu->addAction("Show", this, &DictionaryApp::show);
+        trayMenu->addSeparator();
+        trayMenu->addAction("Quit", qApp, &QApplication::quit);
+        m_trayIcon->setContextMenu(trayMenu);
+        
+        connect(m_trayIcon, &QSystemTrayIcon::activated, [this](QSystemTrayIcon::ActivationReason reason) {
+            if (reason == QSystemTrayIcon::DoubleClick) {
+                show();
+                raise();
+                activateWindow();
+            }
+        });
+        
+        // Network manager
+        m_networkManager = new QNetworkAccessManager(this);
+        connect(m_networkManager, &QNetworkAccessManager::finished, this, &DictionaryApp::onNetworkReply);
+        
+        // Local dictionary
+        loadLocalDictionary();
+    }
+    
+    ~DictionaryApp() {
+        saveSettings();
+        saveFavorites();
+        saveHistory();
+    }
+    
+    // CLI support
+    void lookupWord(const QString& word) {
+        m_searchEdit->setText(word);
+        onSearch();
+    }
+    
+    void showWordOfTheDay() {
+        updateWordOfTheDay();
+    }
+    
+    void addToFavorites(const QString& word) {
+        m_favorites.insert(word);
+        saveFavorites();
+        updateFavoritesList();
+    }
+    
+    void removeFromFavorites(const QString& word) {
+        m_favorites.remove(word);
+        saveFavorites();
+        updateFavoritesList();
+    }
+    
+    void showHistory() {
+        m_sidebarTabs->setCurrentIndex(1);
+    }
+    
+private slots:
+    void onSearch() {
+        QString word = m_searchEdit->text().trimmed();
+        if (word.isEmpty()) return;
+        
+        m_statusLabel->setText("Searching...");
+        m_searchButton->setEnabled(false);
+        
+        // Add to history
+        addToHistory(word);
+        
+        // Update favorite button
+        m_favoriteButton->setChecked(m_favorites.contains(word));
+        
+        // Search based on source
+        QString source = m_sourceCombo->currentData().toString();
+        if (source == "online") {
+            searchOnline(word);
+        } else {
+            searchLocal(word);
+        }
+    }
+    
+    void onRandomWord() {
+        if (m_localDictionary.isEmpty()) {
+            // Use common words if local dict empty
+            QStringList commonWords = {"serendipity", "ephemeral", "ubiquitous", "eloquent", "resilient", 
+                                       "meticulous", "enigma", "paradox", "quintessential", "aesthetic"};
+            QString word = commonWords[QRandomGenerator::global()->bounded(commonWords.size())];
+            m_searchEdit->setText(word);
+            onSearch();
+        } else {
+            QStringList words = m_localDictionary.keys();
+            QString word = words[QRandomGenerator::global()->bounded(words.size())];
+            m_searchEdit->setText(word);
+            onSearch();
+        }
+    }
+    
+    void onToggleFavorite(bool checked) {
+        QString word = m_wordLabel->text();
+        if (word.isEmpty() || word == "Enter a word") return;
+        
+        if (checked) {
+            m_favorites.insert(word);
+            m_favoriteButton->setText("★");
+        } else {
+            m_favorites.remove(word);
+            m_favoriteButton->setText("☆");
+        }
+        saveFavorites();
+        updateFavoritesList();
+    }
+    
+    void onClearFavorites() {
+        if (QMessageBox::question(this, "Clear Favorites", "Clear all favorites?") == QMessageBox::Yes) {
+            m_favorites.clear();
+            saveFavorites();
+            updateFavoritesList();
+        }
+    }
+    
+    void onClearHistory() {
+        if (QMessageBox::question(this, "Clear History", "Clear search history?") == QMessageBox::Yes) {
+            m_history.clear();
+            saveHistory();
+            m_historyList->clear();
+        }
+    }
+    
+    void onFavoriteClicked(QListWidgetItem* item) {
+        m_searchEdit->setText(item->text());
+        onSearch();
+    }
+    
+    void onHistoryClicked(QListWidgetItem* item) {
+        m_searchEdit->setText(item->text());
+        onSearch();
+    }
+    
+    void onPlayAudio() {
+        if (!m_currentAudioUrl.isEmpty()) {
+            QDesktopServices::openUrl(QUrl(m_currentAudioUrl));
+        }
+    }
+    
+    void onNetworkReply(QNetworkReply* reply) {
+        m_searchButton->setEnabled(true);
+        
+        if (reply->error() != QNetworkReply::NoError) {
+            m_statusLabel->setText("Error: " + reply->errorString());
+            m_definitionText->setText("Failed to fetch definition. Please check your internet connection.");
+            reply->deleteLater();
+            return;
+        }
+        
+        QByteArray data = reply->readAll();
+        QJsonDocument json = QJsonDocument::fromJson(data);
+        
+        if (json.isNull() || json.array().isEmpty()) {
+            m_statusLabel->setText("No definition found");
+            m_definitionText->setText("No definition found for: " + m_searchEdit->text());
+            m_wordLabel->setText(m_searchEdit->text());
+            m_phoneticLabel->clear();
+            m_originLabel->clear();
+            m_currentAudioUrl.clear();
+            reply->deleteLater();
+            return;
+        }
+        
+        parseDefinition(json.array()[0].toObject());
+        reply->deleteLater();
+    }
+    
+    void onExportFavorites() {
+        QString path = QFileDialog::getSaveFileName(this, "Export Favorites", "", "Text Files (*.txt)");
+        if (!path.isEmpty()) {
+            QFile file(path);
+            if (file.open(QIODevice::WriteOnly)) {
+                QTextStream out(&file);
+                for (const QString& word : m_favorites) {
+                    out << word << "\n";
+                }
+                file.close();
+                statusBar()->showMessage("Favorites exported", 2000);
+            }
+        }
+    }
+    
+    void onImportFavorites() {
+        QString path = QFileDialog::getOpenFileName(this, "Import Favorites", "", "Text Files (*.txt)");
+        if (!path.isEmpty()) {
+            QFile file(path);
+            if (file.open(QIODevice::ReadOnly)) {
+                QTextStream in(&file);
+                while (!in.atEnd()) {
+                    QString word = in.readLine().trimmed();
+                    if (!word.isEmpty()) {
+                        m_favorites.insert(word);
+                    }
+                }
+                file.close();
+                saveFavorites();
+                updateFavoritesList();
+                statusBar()->showMessage("Favorites imported", 2000);
+            }
+        }
+    }
+    
+    void onLookupWotd() {
+        if (!m_wotdWord->text().isEmpty()) {
+            m_searchEdit->setText(m_wotdWord->text());
+            onSearch();
+        }
+    }
+    
+    void onAbout() {
+        QMessageBox::about(this, "About Dictionary",
+            "Havel WM Dictionary\n\n"
+            "A simple dictionary application with:\n"
+            "- Online and offline lookup\n"
+            "- Word of the day\n"
+            "- Favorites management\n"
+            "- Search history\n"
+            "- Audio pronunciation\n"
+            "- CLI support");
+    }
+    
+    void onShortcuts() {
+        QMessageBox::information(this, "Keyboard Shortcuts",
+            "Enter       Search word\n"
+            "Ctrl+R      Random word\n"
+            "Ctrl+F      Toggle favorite\n"
+            "Ctrl+H      Show history\n"
+            "Ctrl+D      Word of the day\n"
+            "Ctrl+S      Settings\n"
+            "Ctrl+Q      Quit");
+    }
+    
+protected:
+    void closeEvent(QCloseEvent* event) {
+        if (m_trayIcon->isVisible()) {
+            hide();
+            event->ignore();
+        } else {
+            saveSettings();
+            saveFavorites();
+            saveHistory();
+            event->accept();
+        }
+    }
+    
+private:
+    void setupMenu() {
+        QMenu* fileMenu = menuBar()->addMenu("&File");
+        fileMenu->addAction("&Search", this, &DictionaryApp::onSearch, QKeySequence::Find);
+        fileMenu->addAction("&Random Word", this, &DictionaryApp::onRandomWord, QKeySequence(Qt::CTRL | Qt::Key_R));
+        fileMenu->addAction("Word of &Day", this, &DictionaryApp::updateWordOfTheDay, QKeySequence(Qt::CTRL | Qt::Key_D));
+        fileMenu->addSeparator();
+        fileMenu->addAction("E&xit", qApp, &QApplication::quit, QKeySequence::Quit);
+        
+        QMenu* editMenu = menuBar()->addMenu("&Edit");
+        editMenu->addAction("Toggle &Favorite", [this]() {
+            m_favoriteButton->click();
+        }, QKeySequence(Qt::CTRL | Qt::Key_F));
+        editMenu->addAction("Copy Definition", [this]() {
+            QApplication::clipboard()->setText(m_definitionText->toPlainText());
+        });
+        
+        QMenu* viewMenu = menuBar()->addMenu("&View");
+        viewMenu->addAction("&History", [this]() {
+            m_sidebarTabs->setCurrentIndex(1);
+        }, QKeySequence(Qt::CTRL | Qt::Key_H));
+        viewMenu->addAction("&Font...", [this]() {
+            bool ok;
+            QFont font = QFontDialog::getFont(&ok, m_definitionText->font(), this);
+            if (ok) m_definitionText->setFont(font);
+        });
+        
+        QMenu* helpMenu = menuBar()->addMenu("&Help");
+        helpMenu->addAction("&About", this, &DictionaryApp::onAbout);
+        helpMenu->addAction("&Shortcuts", this, &DictionaryApp::onShortcuts);
+    }
+    
+    void setupToolbar() {
+        QToolBar* toolbar = addToolBar("Main");
+        toolbar->addAction("🔍 Search", this, &DictionaryApp::onSearch);
+        toolbar->addAction("🎲 Random", this, &DictionaryApp::onRandomWord);
+        toolbar->addAction("📅 Word of Day", this, &DictionaryApp::updateWordOfTheDay);
+        toolbar->addSeparator();
+        toolbar->addAction("⭐ Favorite", [this]() {
+            m_favoriteButton->click();
+        });
+        toolbar->addAction("🔊 Audio", this, &DictionaryApp::onPlayAudio);
+    }
+    
+    void searchOnline(const QString& word) {
+        QUrl url("https://api.dictionaryapi.dev/api/v2/entries/en/" + word);
+        m_networkManager->get(QNetworkRequest(url));
+    }
+    
+    void searchLocal(const QString& word) {
+        m_searchButton->setEnabled(true);
+        
+        if (m_localDictionary.contains(word)) {
+            WordDefinition def = m_localDictionary[word];
+            displayDefinition(def);
+            m_statusLabel->setText("Found in local dictionary");
+        } else {
+            m_definitionText->setText("Word not found in local dictionary.\nTry switching to online source.");
+            m_wordLabel->setText(word);
+            m_statusLabel->setText("Not found locally");
+        }
+    }
+    
+    void parseDefinition(const QJsonObject& entry) {
+        WordDefinition def;
+        def.word = entry["word"].toString();
+        
+        if (entry.contains("phonetic")) {
+            def.phonetic = entry["phonetic"].toString();
+        }
+        
+        if (entry.contains("phonetics")) {
+            QJsonArray phonetics = entry["phonetics"].toArray();
+            for (const QJsonValue& p : phonetics) {
+                QJsonObject obj = p.toObject();
+                if (!obj["text"].toString().isEmpty() && def.phonetic.isEmpty()) {
+                    def.phonetic = obj["text"].toString();
+                }
+                if (!obj["audio"].toString().isEmpty() && def.audioUrl.isEmpty()) {
+                    def.audioUrl = obj["audio"].toString();
+                }
+            }
+        }
+        
+        if (entry.contains("meanings")) {
+            QJsonArray meanings = entry["meanings"].toArray();
+            for (const QJsonValue& m : meanings) {
+                QJsonObject meaningObj = m.toObject();
+                WordDefinition::Meaning meaning;
+                meaning.partOfSpeech = meaningObj["partOfSpeech"].toString();
+                
+                if (meaningObj.contains("definitions")) {
+                    QJsonArray defs = meaningObj["definitions"].toArray();
+                    for (const QJsonValue& d : defs) {
+                        QJsonObject defObj = d.toObject();
+                        meaning.definitions.append(defObj["definition"].toString());
+                        if (!defObj["example"].toString().isEmpty()) {
+                            meaning.examples.append("Example: " + defObj["example"].toString());
+                        }
+                    }
+                }
+                
+                def.meanings.append(meaning);
+            }
+        }
+        
+        if (entry.contains("origin")) {
+            def.origin = entry["origin"].toString();
+        }
+        
+        displayDefinition(def);
+        m_statusLabel->setText("Definition loaded");
+    }
+    
+    void displayDefinition(const WordDefinition& def) {
+        m_currentDefinition = def;
+        
+        m_wordLabel->setText(def.word);
+        m_phoneticLabel->setText(def.phonetic);
+        m_originLabel->setText(def.origin);
+        m_currentAudioUrl = def.audioUrl;
+        
+        m_favoriteButton->setChecked(m_favorites.contains(def.word));
+        m_favoriteButton->setText(m_favorites.contains(def.word) ? "★" : "☆");
+        
+        QString html;
+        for (const WordDefinition::Meaning& meaning : def.meanings) {
+            html += QString("<h3 style='color: #4CAF50;'>%1</h3>").arg(meaning.partOfSpeech);
+            
+            for (int i = 0; i < meaning.definitions.size(); i++) {
+                html += QString("<p>%1. %2</p>").arg(i + 1).arg(meaning.definitions[i]);
+            }
+            
+            for (const QString& example : meaning.examples) {
+                html += QString("<p style='color: #888; margin-left: 20px;'>%1</p>").arg(example);
+            }
+            
+            if (!meaning.synonyms.isEmpty()) {
+                html += QString("<p><b>Synonyms:</b> %1</p>").arg(meaning.synonyms.join(", "));
+            }
+            
+            html += "<hr>";
+        }
+        
+        if (html.isEmpty()) {
+            html = "<p>No detailed definition available.</p>";
+        }
+        
+        m_definitionText->setHtml(html);
+        m_countLabel->setText(QString("%1 meanings").arg(def.meanings.size()));
+    }
+    
+    void updateWordOfTheDay() {
+        QDate today = QDate::currentDate();
+        
+        if (today != m_lastWotdDate || m_currentWotd.isEmpty()) {
+            // Generate word of the day based on date
+            QStringList words = {"serendipity", "ephemeral", "ubiquitous", "eloquent", "resilient",
+                               "meticulous", "enigma", "paradox", "quintessential", "aesthetic",
+                               "pragmatic", "eloquent", "tenacious", "empathy", "nostalgia"};
+            
+            int index = today.dayOfYear() % words.size();
+            m_currentWotd = words[index];
+            m_lastWotdDate = today;
+        }
+        
+        m_wotdWord->setText(m_currentWotd);
+        m_wotdDef->setText("Click 'Look Up' to see the definition");
+    }
+    
+    void addToHistory(const QString& word) {
+        // Remove if already exists
+        for (int i = 0; i < m_history.size(); i++) {
+            if (m_history[i].word == word) {
+                m_history.removeAt(i);
+                break;
+            }
+        }
+        
+        // Add to front
+        HistoryEntry entry;
+        entry.word = word;
+        entry.timestamp = QDateTime::currentDateTime();
+        entry.lookups = 1;
+        m_history.prepend(entry);
+        
+        // Limit history
+        while (m_history.size() > 50) {
+            m_history.removeLast();
+        }
+        
+        updateHistoryList();
+    }
+    
+    void loadLocalDictionary() {
+        // Load from file if exists
+        QString path = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/dictionary.json";
+        
+        if (QFile::exists(path)) {
+            QFile file(path);
+            if (file.open(QIODevice::ReadOnly)) {
+                QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+                file.close();
+                
+                QJsonObject obj = doc.object();
+                for (auto it = obj.begin(); it != obj.end(); ++it) {
+                    WordDefinition def;
+                    def.word = it.key();
+                    QJsonObject data = it.value().toObject();
+                    def.phonetic = data["phonetic"].toString();
+                    def.origin = data["origin"].toString();
+                    
+                    QJsonArray meanings = data["meanings"].toArray();
+                    for (const QJsonValue& m : meanings) {
+                        QJsonObject mObj = m.toObject();
+                        WordDefinition::Meaning meaning;
+                        meaning.partOfSpeech = mObj["partOfSpeech"].toString();
+                        
+                        QJsonArray defs = mObj["definitions"].toArray();
+                        for (const QJsonValue& d : defs) {
+                            meaning.definitions.append(d.toString());
+                        }
+                        
+                        def.meanings.append(meaning);
+                    }
+                    
+                    m_localDictionary[it.key()] = def;
+                }
+            }
+        }
+        
+        // Add some basic words if empty
+        if (m_localDictionary.isEmpty()) {
+            WordDefinition hello;
+            hello.word = "hello";
+            hello.phonetic = "/həˈləʊ/";
+            hello.origin = "Late Middle English: variant of earlier hallo, hollo; related to Old English hola 'ho!'";
+            WordDefinition::Meaning m1;
+            m1.partOfSpeech = "exclamation";
+            m1.definitions.append("used as a greeting or to begin a telephone conversation.");
+            m1.examples.append("hello there, how are you?");
+            hello.meanings.append(m1);
+            m_localDictionary["hello"] = hello;
+            
+            WordDefinition world;
+            world.word = "world";
+            world.phonetic = "/wɜːld/";
+            world.origin = "Old English weorold, from wer 'man' + eld 'age'";
+            WordDefinition::Meaning m2;
+            m2.partOfSpeech = "noun";
+            m2.definitions.append("the earth, together with all of its countries, peoples, and natural features.");
+            m2.definitions.append("a particular field of human activity or area of human interest.");
+            world.meanings.append(m2);
+            m_localDictionary["world"] = world;
+        }
+    }
+    
+    void updateFavoritesList() {
+        m_favoritesList->clear();
+        for (const QString& word : m_favorites) {
+            m_favoritesList->addItem(word);
+        }
+        m_countLabel->setText(QString("%1 favorites").arg(m_favorites.size()));
+    }
+    
+    void updateHistoryList() {
+        m_historyList->clear();
+        for (const HistoryEntry& entry : m_history) {
+            QListWidgetItem* item = new QListWidgetItem(entry.word);
+            item->setToolTip(entry.timestamp.toString("yyyy-MM-dd HH:mm"));
+            m_historyList->addItem(item);
+        }
+    }
+    
+    void loadFavorites() {
+        QSettings settings("Havel WM", "Dictionary");
+        QStringList favList = settings.value("favorites").toStringList();
+        m_favorites = QSet<QString>(favList.begin(), favList.end());
+        updateFavoritesList();
+    }
+    
+    void saveFavorites() {
+        QSettings settings("Havel WM", "Dictionary");
+        settings.setValue("favorites", QStringList(m_favorites.begin(), m_favorites.end()));
+    }
+    
+    void loadHistory() {
+        QSettings settings("Havel WM", "Dictionary");
+        QJsonArray arr = settings.value("history").toJsonArray();
+        
+        m_history.clear();
+        for (const QJsonValue& val : arr) {
+            QJsonObject obj = val.toObject();
+            HistoryEntry entry;
+            entry.word = obj["word"].toString();
+            entry.timestamp = QDateTime::fromString(obj["timestamp"].toString(), Qt::ISODate);
+            entry.lookups = obj["lookups"].toInt();
+            m_history.append(entry);
+        }
+        
+        updateHistoryList();
+    }
+    
+    void saveHistory() {
+        QSettings settings("Havel WM", "Dictionary");
+        
+        QJsonArray arr;
+        for (const HistoryEntry& entry : m_history) {
+            QJsonObject obj;
+            obj["word"] = entry.word;
+            obj["timestamp"] = entry.timestamp.toString(Qt::ISODate);
+            obj["lookups"] = entry.lookups;
+            arr.append(obj);
+        }
+        
+        settings.setValue("history", arr);
+    }
+    
+    void loadSettings() {
+        QSettings settings("Havel WM", "Dictionary");
+        resize(settings.value("size", QSize(900, 700)).toSize());
+        move(settings.value("pos", QPoint(100, 100)).toPoint());
+        m_sourceCombo->setCurrentIndex(settings.value("source", 0).toInt());
+    }
+    
+    void saveSettings() {
+        QSettings settings("Havel WM", "Dictionary");
+        settings.setValue("size", size());
+        settings.setValue("pos", pos());
+        settings.setValue("source", m_sourceCombo->currentIndex());
+    }
+    
+    void updateStatus() {
+        m_statusLabel->setText(QString("Ready - %1 words in local dictionary").arg(m_localDictionary.size()));
+    }
+    
+    // UI components
+    QLineEdit* m_searchEdit;
+    QPushButton* m_searchButton;
+    QPushButton* m_randomButton;
+    QComboBox* m_sourceCombo;
+    
+    QLabel* m_wordLabel;
+    QLabel* m_phoneticLabel;
+    QLabel* m_originLabel;
+    QTextEdit* m_definitionText;
+    QPushButton* m_playAudioButton;
+    QPushButton* m_favoriteButton;
+    
+    QTabWidget* m_sidebarTabs;
+    QListWidget* m_favoritesList;
+    QListWidget* m_historyList;
+    QPushButton* m_clearFavButton;
+    QPushButton* m_clearHistButton;
+    
+    QLabel* m_wotdLabel;
+    QLabel* m_wotdWord;
+    QLabel* m_wotdDef;
+    
+    QLabel* m_statusLabel;
+    QLabel* m_countLabel;
+    
+    QSystemTrayIcon* m_trayIcon;
+    
+    QNetworkAccessManager* m_networkManager;
+    QString m_currentAudioUrl;
+    
+    // Data
+    WordDefinition m_currentDefinition;
+    QMap<QString, WordDefinition> m_localDictionary;
+    QList<HistoryEntry> m_history;
+    QSet<QString> m_favorites;
+    
+    // Word of the day
+    QString m_currentWotd;
+    QDate m_lastWotdDate;
+};
+
+int main(int argc, char* argv[]) {
+    QApplication app(argc, argv);
+    app.setApplicationName("Havel Dictionary");
+    app.setOrganizationName("Havel WM");
+    app.setDesktopFileName("havel-dictionary");
+    
+    // Dark theme
+    app.setStyle(QStyleFactory::create("Fusion"));
+    QPalette darkPalette;
+    darkPalette.setColor(QPalette::Window, QColor(53, 53, 53));
+    darkPalette.setColor(QPalette::WindowText, Qt::white);
+    darkPalette.setColor(QPalette::Base, QColor(25, 25, 25));
+    darkPalette.setColor(QPalette::Text, Qt::white);
+    darkPalette.setColor(QPalette::Button, QColor(53, 53, 53));
+    darkPalette.setColor(QPalette::ButtonText, Qt::white);
+    darkPalette.setColor(QPalette::Highlight, QColor(42, 130, 218));
+    app.setPalette(darkPalette);
+    
+    DictionaryApp dictionary;
+    dictionary.show();
+    
+    // Handle CLI arguments
+    QStringList args = app.arguments();
+    for (int i = 1; i < args.size(); i++) {
+        if (args[i] == "--lookup" && i + 1 < args.size()) {
+            QTimer::singleShot(500, [&dictionary, &args, i]() {
+                dictionary.lookupWord(args[i + 1]);
+            });
+        } else if (args[i] == "--wotd") {
+            QTimer::singleShot(500, [&dictionary]() {
+                dictionary.showWordOfTheDay();
+            });
+        } else if (args[i] == "--history") {
+            QTimer::singleShot(500, [&dictionary]() {
+                dictionary.showHistory();
+            });
+        }
+    }
+    
+    return app.exec();
+}
+
+#include "Dictionary.moc"

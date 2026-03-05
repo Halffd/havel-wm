@@ -337,6 +337,9 @@ if(PANEL_ENABLED)
     # Build game launcher
     add_subdirectory(src/shell/gamelauncher)
 
+    # Build dictionary
+    add_subdirectory(src/shell/dictionary)
+
     # Build and install settings
     add_subdirectory(src/shell/settings)
 

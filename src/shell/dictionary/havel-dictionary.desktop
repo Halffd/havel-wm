@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Havel Dictionary
+Comment=Dictionary Application for Havel WM
+Exec=havel-dictionary %F
+Icon=accessories-dictionary
+Terminal=false
+Type=Application
+Categories=Utility;Dictionary;
+MimeType=text/plain;
+Keywords=dictionary;words;definition;thesaurus;lookup;
