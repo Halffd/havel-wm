@@ -334,6 +334,9 @@ if(PANEL_ENABLED)
     # Build text editor
     add_subdirectory(src/shell/texteditor)
 
+    # Build game launcher
+    add_subdirectory(src/shell/gamelauncher)
+
     # Build and install settings
     add_subdirectory(src/shell/settings)
 

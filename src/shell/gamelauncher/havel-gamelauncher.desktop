@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Havel Game Launcher
+Comment=Game Launcher for Havel WM
+Exec=havel-gamelauncher %F
+Icon=applications-games
+Terminal=false
+Type=Application
+Categories=Game;Utility;
+MimeType=application/x-game-launcher;
+Keywords=games;launcher;steam;lutris;wine;
