@@ -3,6 +3,7 @@
 #include <wm/plugins/Plugin.hpp>
 #include "../input/GestureRecognizer.hpp"
 #include "WindowGroupManager.hpp"
+#include "../input/ComboManager.hpp"
 #include <Logger.h>
 #include <cstdint>
 #include <unistd.h>
@@ -325,6 +326,16 @@ void havel_cpp_init_window_groups(struct havel_cpp_server* server) {
 void* havel_cpp_get_window_group_manager(struct havel_cpp_server* server) {
     if (!server || !server->server) return nullptr;
     return server->server->windowGroupManager();
+}
+
+void havel_cpp_process_combo_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers) {
+    if (!server || !server->server) return;
+    
+    // Process through combo manager
+    auto& comboManager = havel::getComboManager();
+    if (comboManager.isInitialized()) {
+        comboManager.processKeyEvent(keycode, pressed, modifiers);
+    }
 }
 
 } // extern "C"

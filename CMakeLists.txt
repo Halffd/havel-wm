@@ -171,6 +171,8 @@ set(WM_CORE_SOURCES
     src/wm/input/GestureRecognizer.hpp
     src/wm/input/InputDeviceManager.cpp
     src/wm/input/InputDeviceManager.hpp
+    src/wm/input/ComboManager.cpp
+    src/wm/input/ComboManager.hpp
     src/wm/overlay/OverlayScene.cpp
     src/wm/overlay/AltTabOverlay.cpp
     src/wm/overlay/OverviewOverlay.cpp
