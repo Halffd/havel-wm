@@ -316,15 +316,18 @@ install(FILES havel-wm.desktop
 # Build panel if Qt6 is available
 if(PANEL_ENABLED)
     add_subdirectory(src/shell/panel)
-    
+
     # Install panel target
     install(TARGETS havel-panel
         RUNTIME DESTINATION bin
     )
-    
+
+    # Build file manager
+    add_subdirectory(src/shell/filemanager)
+
     # Build and install settings
     add_subdirectory(src/shell/settings)
-    
+
     # Build and install lock screen
     add_subdirectory(src/shell/lockscreen)
 endif()
