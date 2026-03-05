@@ -331,6 +331,9 @@ if(PANEL_ENABLED)
     # Build screenshot
     add_subdirectory(src/shell/screenshot)
 
+    # Build text editor
+    add_subdirectory(src/shell/texteditor)
+
     # Build and install settings
     add_subdirectory(src/shell/settings)
 
