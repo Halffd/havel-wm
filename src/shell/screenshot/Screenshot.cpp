@@ -194,6 +194,10 @@ void ScreenshotEditor::setupTools() {
     m_numberAction->setCheckable(true);
     connect(m_numberAction, &QAction::triggered, this, &ScreenshotEditor::onDrawNumber);
     
+    m_lensAction = m_toolBar->addAction("Lens (Magnifier)");
+    m_lensAction->setCheckable(true);
+    connect(m_lensAction, &QAction::triggered, this, &ScreenshotEditor::onUseLens);
+    
     m_toolBar->addSeparator();
     
     // Color selector
@@ -266,6 +270,11 @@ void ScreenshotEditor::onAddText() {
 void ScreenshotEditor::onDrawNumber() {
     m_currentTool = Tool::Number;
     m_numberAction->setChecked(true);
+}
+
+void ScreenshotEditor::onUseLens() {
+    m_currentTool = Tool::Lens;
+    m_lensAction->setChecked(true);
 }
 
 void ScreenshotEditor::onChangeColor() {
@@ -408,6 +417,16 @@ void ScreenshotWindow::setupUI() {
     m_regionButton->setIcon(QIcon::fromTheme("select-rectangular"));
     connect(m_regionButton, &QPushButton::clicked, this, &ScreenshotWindow::onCaptureRegion);
     captureLayout->addWidget(m_regionButton);
+    
+    m_perMonitorButton = new QPushButton("Per Monitor");
+    m_perMonitorButton->setIcon(QIcon::fromTheme("video-display"));
+    connect(m_perMonitorButton, &QPushButton::clicked, this, &ScreenshotWindow::onCapturePerMonitor);
+    captureLayout->addWidget(m_perMonitorButton);
+    
+    m_allMonitorsButton = new QPushButton("All Monitors");
+    m_allMonitorsButton->setIcon(QIcon::fromTheme("preferences-desktop-display"));
+    connect(m_allMonitorsButton, &QPushButton::clicked, this, &ScreenshotWindow::onCaptureAllMonitors);
+    captureLayout->addWidget(m_allMonitorsButton);
     
     layout->addWidget(captureGroup);
     
@@ -636,6 +655,81 @@ void ScreenshotWindow::onCaptureRegion() {
     });
     
     selector->startSelection();
+}
+
+void ScreenshotWindow::onCapturePerMonitor() {
+    m_captureMode = CaptureMode::PerMonitor;
+    
+    QList<QScreen*> screens = QApplication::screens();
+    
+    if (screens.size() == 1) {
+        // Single monitor, just capture full screen
+        onCaptureFullScreen();
+        return;
+    }
+    
+    // Capture each monitor
+    int screenIndex = 0;
+    for (QScreen* screen : screens) {
+        QPixmap screenshot = screen->grabWindow(0,
+            screen->geometry().x(),
+            screen->geometry().y(),
+            screen->geometry().width(),
+            screen->geometry().height());
+        
+        if (!screenshot.isNull()) {
+            // Save with screen name
+            QString filename = "screenshot_monitor_" + QString::number(screenIndex + 1) +
+                              "_" + QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss") + ".png";
+            QString path = m_saveDirectory + "/" + filename;
+            screenshot.save(path);
+            
+            if (m_showNotifications) {
+                showNotification("Monitor " + QString::number(screenIndex + 1) + " saved");
+            }
+        }
+        screenIndex++;
+    }
+    
+    if (m_showNotifications) {
+        showNotification(QString("Captured %1 monitors").arg(screens.size()));
+    }
+}
+
+void ScreenshotWindow::onCaptureAllMonitors() {
+    m_captureMode = CaptureMode::AllMonitors;
+    
+    QList<QScreen*> screens = QApplication::screens();
+    
+    if (screens.isEmpty()) {
+        return;
+    }
+    
+    // Calculate total bounding rect
+    QRect totalRect;
+    for (QScreen* screen : screens) {
+        totalRect = totalRect.united(screen->geometry());
+    }
+    
+    // Capture all screens into one image
+    QPixmap screenshot(totalRect.size());
+    screenshot.fill(Qt::black);
+    
+    QPainter painter(&screenshot);
+    
+    for (QScreen* screen : screens) {
+        QPixmap screenShot = screen->grabWindow(0,
+            screen->geometry().x(),
+            screen->geometry().y(),
+            screen->geometry().width(),
+            screen->geometry().height());
+        
+        painter.drawPixmap(screen->geometry().topLeft() - totalRect.topLeft(), screenShot);
+    }
+    
+    painter.end();
+    
+    saveScreenshot(screenshot);
 }
 
 void ScreenshotWindow::onCaptureDelayed() {

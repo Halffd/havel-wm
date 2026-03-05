@@ -14,6 +14,7 @@
 #include <QFile>
 #include <QDir>
 #include <QTextStream>
+#include <QHBoxLayout>
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -132,6 +133,17 @@ void TerminalWidget::setScrollbackSize(int lines) {
     setMaximumBlockCount(lines);
 }
 
+void TerminalWidget::setOpacity(int opacity) {
+    // Set window opacity (0-100%)
+    if (opacity < 5) opacity = 5;
+    if (opacity > 100) opacity = 100;
+    
+    QWidget* pw = QWidget::parentWidget();
+    if (pw) {
+        pw->setWindowOpacity(opacity / 100.0);
+    }
+}
+
 void TerminalWidget::copySelection() {
     if (textCursor().hasSelection()) {
         QApplication::clipboard()->setText(textCursor().selectedText());
@@ -187,6 +199,7 @@ void TerminalWidget::keyPressEvent(QKeyEvent* event) {
                 pasteClipboard();
                 return;
             case Qt::Key_Equal:
+            case Qt::Key_Plus:
                 zoomIn();
                 return;
             case Qt::Key_Minus:
@@ -194,6 +207,21 @@ void TerminalWidget::keyPressEvent(QKeyEvent* event) {
                 return;
             case Qt::Key_0:
                 resetZoom();
+                return;
+            case Qt::Key_1:
+            case Qt::Key_2:
+            case Qt::Key_3:
+            case Qt::Key_4:
+            case Qt::Key_5:
+            case Qt::Key_6:
+            case Qt::Key_7:
+            case Qt::Key_8:
+            case Qt::Key_9:
+                // Tab switching - signal to parent window
+                {
+                    int tabIndex = event->key() - Qt::Key_1;
+                    Q_EMIT tabSwitchRequested(tabIndex);
+                }
                 return;
             case Qt::Key_T:
                 // New tab - signal to parent
@@ -367,7 +395,7 @@ void TerminalWidget::onReadyRead() {
     if (m_process) {
         QByteArray data = m_process->readAll();
         
-        // Simple ANSI escape sequence handling
+        // Handle UTF-8 encoding for emoji and special characters
         QString text = QString::fromUtf8(data);
         
         // Handle basic escape sequences
@@ -576,6 +604,25 @@ void TerminalWindow::setupMenuBar() {
     m_viewMenu->addAction(m_zoomOutAction);
     m_viewMenu->addAction(m_resetZoomAction);
     m_viewMenu->addSeparator();
+    
+    // Opacity submenu
+    QMenu* opacityMenu = m_viewMenu->addMenu("&Opacity");
+    QSlider* opacitySlider = new QSlider(Qt::Horizontal);
+    opacitySlider->setRange(5, 100);
+    opacitySlider->setValue(m_opacity);
+    opacitySlider->setTickPosition(QSlider::TicksBelow);
+    opacitySlider->setTickInterval(10);
+    QWidget* opacityWidget = new QWidget();
+    QHBoxLayout* opacityLayout = new QHBoxLayout(opacityWidget);
+    opacityLayout->addWidget(new QLabel("Opacity:"));
+    opacityLayout->addWidget(opacitySlider);
+    opacityWidget->setMinimumWidth(200);
+    QWidgetAction* opacityAction = new QWidgetAction(this);
+    opacityAction->setDefaultWidget(opacityWidget);
+    opacityMenu->addAction(opacityAction);
+    connect(opacitySlider, &QSlider::valueChanged, this, &TerminalWindow::onChangeOpacityValue);
+    
+    m_viewMenu->addSeparator();
     m_viewMenu->addAction(m_fullscreenAction);
     m_viewMenu->addAction(m_menuBarAction);
     
@@ -617,6 +664,7 @@ int TerminalWindow::newTab(const QString& shell, const QStringList& args) {
     TerminalWidget* terminal = new TerminalWidget(this);
     
     connect(terminal, &TerminalWidget::titleChanged, this, &TerminalWindow::updateTitle);
+    connect(terminal, &TerminalWidget::tabSwitchRequested, this, &TerminalWindow::onTabSwitchRequested);
     
     int tabIndex = m_tabWidget->addTab(terminal, "Terminal");
     
@@ -695,6 +743,12 @@ void TerminalWindow::onRenameTab() {
             m_tabs[index].title = name;
             m_tabWidget->setTabText(index, name);
         }
+    }
+}
+
+void TerminalWindow::onTabSwitchRequested(int tabIndex) {
+    if (tabIndex >= 0 && tabIndex < m_tabWidget->count()) {
+        m_tabWidget->setCurrentIndex(tabIndex);
     }
 }
 
@@ -788,6 +842,11 @@ void TerminalWindow::onChangeOpacity() {
     setWindowOpacity(m_opacity / 100.0);
 }
 
+void TerminalWindow::onChangeOpacityValue(int value) {
+    m_opacity = value;
+    setWindowOpacity(value / 100.0);
+}
+
 void TerminalWindow::onToggleFullscreen() {
     if (isFullScreen()) {
         showNormal();
@@ -822,6 +881,7 @@ void TerminalWindow::onShortcuts() {
         "Ctrl+Shift+T  New tab\n"
         "Ctrl+W        Close tab\n"
         "Ctrl+Shift+R  Rename tab\n"
+        "Ctrl+1-9      Switch to tab 1-9\n"
         "Ctrl+C        Copy selection\n"
         "Ctrl+V        Paste\n"
         "Ctrl+Shift+A  Select all\n"
@@ -862,13 +922,19 @@ void TerminalWindow::loadSettings() {
     m_terminalFont = settings.value("font", QFont("Monospace", 11)).value<QFont>();
     m_foreground = settings.value("foreground", QColor(Qt::white)).value<QColor>();
     m_background = settings.value("background", QColor(Qt::black)).value<QColor>();
-    m_opacity = settings.value("opacity", 100).toInt();
+    m_opacity = settings.value("opacity", 95).toInt();  // Default 95% opacity
     m_showMenuBar = settings.value("showMenuBar", true).toBool();
     
     // Apply settings
     setWindowOpacity(m_opacity / 100.0);
     menuBar()->setVisible(m_showMenuBar);
     m_menuBarAction->setChecked(m_showMenuBar);
+    
+    // Apply to all tabs
+    for (const TerminalTab& tab : m_tabs) {
+        tab.widget->setColors(m_foreground, m_background);
+        tab.widget->setFont(m_terminalFont);
+    }
 }
 
 void TerminalWindow::saveSettings() {

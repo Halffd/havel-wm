@@ -40,7 +40,9 @@ enum class CaptureMode {
     FullScreen,
     ActiveWindow,
     SelectedRegion,
-    SingleWindow
+    SingleWindow,
+    PerMonitor,
+    AllMonitors
 };
 
 /**
@@ -105,6 +107,7 @@ private slots:
     void onDrawEllipse();
     void onAddText();
     void onDrawNumber();
+    void onUseLens();
     void onChangeColor();
     void onChangeSize(int size);
     void onUndo();
@@ -130,7 +133,7 @@ private:
     QVector<QPixmap> m_redoStack;
     
     // Drawing tools
-    enum class Tool { None, Freehand, Arrow, Rectangle, Ellipse, Text, Number };
+    enum class Tool { None, Freehand, Arrow, Rectangle, Ellipse, Text, Number, Lens };
     Tool m_currentTool;
     QColor m_drawColor;
     int m_drawSize;
@@ -147,6 +150,7 @@ private:
     QAction* m_ellipseAction;
     QAction* m_textAction;
     QAction* m_numberAction;
+    QAction* m_lensAction;
     QComboBox* m_colorCombo;
     QSpinBox* m_sizeSpin;
 };
@@ -166,6 +170,8 @@ public slots:
     void onCaptureFullScreen();
     void onCaptureWindow();
     void onCaptureRegion();
+    void onCapturePerMonitor();
+    void onCaptureAllMonitors();
     void onCaptureDelayed();
     
     // Timer completion
@@ -214,6 +220,8 @@ private:
     QPushButton* m_fullScreenButton;
     QPushButton* m_windowButton;
     QPushButton* m_regionButton;
+    QPushButton* m_perMonitorButton;
+    QPushButton* m_allMonitorsButton;
     QPushButton* m_delayButton;
     
     QSpinBox* m_delaySpin;

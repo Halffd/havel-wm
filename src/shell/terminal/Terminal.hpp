@@ -24,6 +24,8 @@
 #include <QInputDialog>
 #include <QShortcut>
 #include <QProcessEnvironment>
+#include <QSlider>
+#include <QWidgetAction>
 
 namespace havel {
 
@@ -47,6 +49,7 @@ public:
     void setColors(const QColor& foreground, const QColor& background);
     void setCursorBlink(bool blink);
     void setScrollbackSize(int lines);
+    void setOpacity(int opacity);  // 0-100%
     
     // Terminal info
     QString getTitle() const { return m_title; }
@@ -66,6 +69,7 @@ signals:
     void titleChanged(const QString& title);
     void processExited(int exitCode);
     void bell();
+    void tabSwitchRequested(int tabIndex);  // Ctrl+1-9
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
@@ -142,6 +146,7 @@ private slots:
     void onNewTab();
     void onCloseTab();
     void onRenameTab();
+    void onTabSwitchRequested(int tabIndex);  // Ctrl+1-9
     
     // Terminal operations
     void onCopy();
@@ -157,6 +162,7 @@ private slots:
     void onChangeFont();
     void onChangeColors();
     void onChangeOpacity();
+    void onChangeOpacityValue(int value);
     void onToggleFullscreen();
     void onToggleMenuBar();
     
@@ -210,7 +216,7 @@ private:
     QFont m_terminalFont;
     QColor m_foreground;
     QColor m_background;
-    int m_opacity;
+    int m_opacity;  // 0-100%
     bool m_showMenuBar;
     
     // Default shell
