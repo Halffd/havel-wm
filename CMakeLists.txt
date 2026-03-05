@@ -201,6 +201,9 @@ set(WM_CORE_SOURCES
     src/wm/plugins/ServerDecorationPlugin.cpp
     src/wm/plugins/DrawPlugin.cpp
     src/wm/plugins/FPSPlugin.cpp
+    src/wm/plugins/WobblyWindowsPlugin.cpp
+    src/wm/plugins/DestroyOnClosePlugin.cpp
+    src/wm/plugins/SpringOnSpawnPlugin.cpp
     # VulkanRenderer.cpp - disabled, wlroots handles rendering
 )
 
