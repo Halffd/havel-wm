@@ -177,6 +177,8 @@ set(WM_CORE_SOURCES
     src/wm/overlay/AltTabOverlay.cpp
     src/wm/overlay/OverviewOverlay.cpp
     src/wm/overlay/AppLauncherOverlay.cpp
+    src/wm/desktop/DesktopManager.cpp
+    src/wm/desktop/DesktopManager.hpp
     src/wm/plugins/PluginManager.cpp
     src/wm/plugins/ExamplePlugin.cpp
     src/wm/plugins/BlurPlugin.cpp

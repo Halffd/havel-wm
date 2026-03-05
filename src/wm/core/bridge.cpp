@@ -4,6 +4,7 @@
 #include "../input/GestureRecognizer.hpp"
 #include "WindowGroupManager.hpp"
 #include "../input/ComboManager.hpp"
+#include "../desktop/DesktopManager.hpp"
 #include <Logger.h>
 #include <cstdint>
 #include <unistd.h>
@@ -335,6 +336,53 @@ void havel_cpp_process_combo_key(struct havel_cpp_server* server, uint32_t keyco
     auto& comboManager = havel::getComboManager();
     if (comboManager.isInitialized()) {
         comboManager.processKeyEvent(keycode, pressed, modifiers);
+    }
+}
+
+void havel_cpp_init_desktop(struct havel_cpp_server* server) {
+    if (!server || !server->server) return;
+    
+    // Initialize desktop manager
+    auto* desktopManager = new havel::DesktopManager();
+    desktopManager->initialize();
+    
+    server->server->setDesktopManager(desktopManager);
+    
+    // Bind logout shortcut (Ctrl+Alt+Delete)
+    desktopManager->bindLogout(111, (1 << 1) | (1 << 2));  // Ctrl+Alt+Delete
+    
+    LOG_INFO("[Bridge] Desktop manager initialized");
+}
+
+void* havel_cpp_get_desktop_manager(struct havel_cpp_server* server) {
+    if (!server || !server->server) return nullptr;
+    return server->server->desktopManager();
+}
+
+void havel_cpp_process_desktop_mouse(struct havel_cpp_server* server, int button, bool pressed, int x, int y) {
+    if (!server || !server->server) return;
+    
+    auto* desktopManager = static_cast<havel::DesktopManager*>(server->server->desktopManager());
+    if (desktopManager) {
+        desktopManager->processMouseButton(button, pressed, x, y);
+    }
+}
+
+void havel_cpp_process_desktop_motion(struct havel_cpp_server* server, int x, int y) {
+    if (!server || !server->server) return;
+    
+    auto* desktopManager = static_cast<havel::DesktopManager*>(server->server->desktopManager());
+    if (desktopManager) {
+        desktopManager->processMouseMove(x, y);
+    }
+}
+
+void havel_cpp_process_desktop_key(struct havel_cpp_server* server, uint32_t keycode, uint32_t modifiers) {
+    if (!server || !server->server) return;
+    
+    auto* desktopManager = static_cast<havel::DesktopManager*>(server->server->desktopManager());
+    if (desktopManager) {
+        desktopManager->processKeyDown(keycode, modifiers);
     }
 }
 

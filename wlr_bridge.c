@@ -1381,9 +1381,13 @@ static void server_cursor_motion(struct wl_listener *listener, void *data) {
     wlr_cursor_move(server->cursor, &event->pointer->base, event->delta_x, event->delta_y);
 
     // Process gesture recognition
-    havel_cpp_process_gesture_motion(server->cpp_server, 
+    havel_cpp_process_gesture_motion(server->cpp_server,
                                       server->cursor->x, server->cursor->y,
                                       event->time_msec);
+
+    // Process desktop events
+    havel_cpp_process_desktop_motion(server->cpp_server,
+                                      (int)server->cursor->x, (int)server->cursor->y);
 
     // Handle interactive move/resize
     if (server->grab.mode != INTERACTIVE_NONE && server->grab.view) {
@@ -1443,6 +1447,11 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
                                       event->time_msec);
 
     wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
+
+    // Process desktop events
+    havel_cpp_process_desktop_mouse(server->cpp_server, event->button,
+                                     event->state == WL_POINTER_BUTTON_STATE_PRESSED,
+                                     (int)server->cursor->x, (int)server->cursor->y);
 
     if (event->state != WL_POINTER_BUTTON_STATE_PRESSED) {
         // Button released - end interactive move/resize
@@ -1636,6 +1645,9 @@ havel_wlr_server_t* havel_wlr_create(void) {
 
     // Initialize gesture recognition
     havel_cpp_init_gestures(server->cpp_server);
+
+    // Initialize desktop manager
+    havel_cpp_init_desktop(server->cpp_server);
 
     // Initialize window group manager
     havel_cpp_init_window_groups(server->cpp_server);

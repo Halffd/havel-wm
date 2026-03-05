@@ -93,6 +93,13 @@ void havel_cpp_process_gesture_button(struct havel_cpp_server* server, int butto
 // Combo system
 void havel_cpp_process_combo_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers);
 
+// Desktop management
+void havel_cpp_init_desktop(struct havel_cpp_server* server);
+void* havel_cpp_get_desktop_manager(struct havel_cpp_server* server);
+void havel_cpp_process_desktop_mouse(struct havel_cpp_server* server, int button, bool pressed, int x, int y);
+void havel_cpp_process_desktop_motion(struct havel_cpp_server* server, int x, int y);
+void havel_cpp_process_desktop_key(struct havel_cpp_server* server, uint32_t keycode, uint32_t modifiers);
+
 // Window group management
 void havel_cpp_init_window_groups(struct havel_cpp_server* server);
 void* havel_cpp_get_window_group_manager(struct havel_cpp_server* server);

@@ -161,6 +161,10 @@ public:
     void* windowGroupManager() const { return m_windowGroupManager; }
     void setWindowGroupManager(void* manager) { m_windowGroupManager = manager; }
 
+    // Desktop management
+    void* desktopManager() const { return m_desktopManager; }
+    void setDesktopManager(void* manager) { m_desktopManager = manager; }
+
 private:
     std::array<std::unique_ptr<Workspace>, WORKSPACE_COUNT> m_workspaces;
     uint32_t m_activeWorkspace = 0;
@@ -199,6 +203,9 @@ private:
 
     // Window group manager
     void* m_windowGroupManager = nullptr;
+
+    // Desktop manager
+    void* m_desktopManager = nullptr;
 
     // Gamma/temperature (for gamma plugin)
     float m_gamma = 1.0f;
