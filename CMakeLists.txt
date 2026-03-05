@@ -325,6 +325,12 @@ if(PANEL_ENABLED)
     # Build file manager
     add_subdirectory(src/shell/filemanager)
 
+    # Build terminal
+    add_subdirectory(src/shell/terminal)
+
+    # Build screenshot
+    add_subdirectory(src/shell/screenshot)
+
     # Build and install settings
     add_subdirectory(src/shell/settings)
 
