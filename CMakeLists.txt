@@ -183,6 +183,8 @@ set(WM_CORE_SOURCES
     src/wm/desktop/NASAWallpaper.cpp
     src/wm/desktop/NASAWallpaper.hpp
     src/wm/desktop/NASAWallpaperTests.cpp
+    src/wm/desktop/FileManager.cpp
+    src/wm/desktop/FileManager.hpp
     src/wm/plugins/PluginManager.cpp
     src/wm/plugins/ExamplePlugin.cpp
     src/wm/plugins/BlurPlugin.cpp
