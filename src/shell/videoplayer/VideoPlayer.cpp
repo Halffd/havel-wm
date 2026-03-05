@@ -28,6 +28,8 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QUrlQuery>
+#include <QTextCodec>
+#include <QGraphicsOpacityEffect>
 #include <QScreen>
 #include <QShortcut>
 #include <QGestureEvent>
@@ -112,6 +114,19 @@ void VideoPlayer::setupUI() {
     m_titleLabel->setStyleSheet("color: white; font-size: 14px; font-weight: bold;");
     controlsLayout->addWidget(m_titleLabel);
     
+    // Subtitle labels (overlay on video)
+    m_subtitleLabel = new QLabel();
+    m_subtitleLabel->setStyleSheet("color: yellow; font-size: 18px; font-weight: bold; background-color: rgba(0,0,0,120); padding: 5px;");
+    m_subtitleLabel->setAlignment(Qt::AlignCenter);
+    m_subtitleLabel->setWordWrap(true);
+    videoLayout->addWidget(m_subtitleLabel);
+    
+    m_secondarySubtitleLabel = new QLabel();
+    m_secondarySubtitleLabel->setStyleSheet("color: cyan; font-size: 16px; background-color: rgba(0,0,0,100); padding: 3px;");
+    m_secondarySubtitleLabel->setAlignment(Qt::AlignCenter);
+    m_secondarySubtitleLabel->setWordWrap(true);
+    videoLayout->addWidget(m_secondarySubtitleLabel);
+    
     controlsLayout->addStretch();
     
     // Progress bar
@@ -186,9 +201,25 @@ void VideoPlayer::setupUI() {
     m_speedCombo->setCurrentIndex(2);
     m_speedCombo->setMaximumWidth(80);
     controlLayout->addWidget(m_speedCombo);
-    
+
     controlLayout->addSpacing(20);
     
+    // Subtitle selector
+    controlLayout->addWidget(new QLabel("<span style='color:white'>Sub:</span>"));
+    m_subtitleCombo = new QComboBox();
+    m_subtitleCombo->addItem("No Subtitles");
+    m_subtitleCombo->setMaximumWidth(150);
+    connect(m_subtitleCombo, QOverload<int>::of(&QComboBox::currentIndexChanged), this, &VideoPlayer::onSubtitleTrackChanged);
+    controlLayout->addWidget(m_subtitleCombo);
+    
+    m_secondarySubtitleCheck = new QCheckBox("2nd");
+    m_secondarySubtitleCheck->setStyleSheet("color: white;");
+    m_secondarySubtitleCheck->setToolTip("Enable secondary subtitle");
+    connect(m_secondarySubtitleCheck, &QCheckBox::toggled, this, &VideoPlayer::onToggleSecondarySubtitle);
+    controlLayout->addWidget(m_secondarySubtitleCheck);
+
+    controlLayout->addSpacing(20);
+
     // Fullscreen
     m_fullscreenButton = new QPushButton("⛶");
     m_fullscreenButton->setFixedSize(35, 35);
@@ -218,6 +249,25 @@ void VideoPlayer::setupUI() {
     
     m_playlistDock->setWidget(playlistWidget);
     addDockWidget(Qt::RightDockWidgetArea, m_playlistDock);
+    
+    // Directory browser dock
+    m_directoryDock = new QDockWidget("Directory", this);
+    m_directoryDock->setMinimumWidth(250);
+    
+    QWidget* directoryWidget = new QWidget();
+    QVBoxLayout* directoryLayout = new QVBoxLayout(directoryWidget);
+    
+    m_directoryWidget = new QListWidget();
+    m_directoryWidget->setAlternatingRowColors(true);
+    directoryLayout->addWidget(m_directoryWidget);
+    
+    QPushButton* dirUpButton = new QPushButton("⬆ Up");
+    connect(dirUpButton, &QPushButton::clicked, this, &VideoPlayer::onDirectoryUp);
+    directoryLayout->addWidget(dirUpButton);
+    
+    m_directoryDock->setWidget(directoryWidget);
+    addDockWidget(Qt::LeftDockWidgetArea, m_directoryDock);
+    m_directoryDock->setVisible(false);
 }
 
 void VideoPlayer::setupMediaPlayer() {
@@ -261,7 +311,16 @@ void VideoPlayer::setupMenu() {
     videoMenu->addAction("Screenshot", this, &VideoPlayer::onScreenshot, QKeySequence(Qt::CTRL | Qt::Key_S));
     videoMenu->addMenu("Aspect Ratio");
     videoMenu->addMenu("Zoom");
-    videoMenu->addAction("Set Subtitle...", this, &VideoPlayer::onSetSubtitle);
+    videoMenu->addSeparator();
+    
+    QMenu* subtitleMenu = videoMenu->addMenu("Subtitles");
+    subtitleMenu->addAction("Load Subtitle File...", this, &VideoPlayer::onLoadSubtitleFile);
+    subtitleMenu->addAction("Select Subtitle Track", this, &VideoPlayer::onSetSubtitle);
+    subtitleMenu->addSeparator();
+    subtitleMenu->addAction("Enable Secondary Subtitle", m_secondarySubtitleCheck, &QCheckBox::toggle);
+    
+    videoMenu->addSeparator();
+    videoMenu->addAction("Browse Directory", this, &VideoPlayer::showDirectoryBrowser, QKeySequence(Qt::CTRL | Qt::Key_B));
     
     QMenu* viewMenu = menuBar()->addMenu("&View");
     viewMenu->addAction("&Playlist", this, &VideoPlayer::onShowPlaylist, QKeySequence(Qt::CTRL | Qt::Key_P));
@@ -353,6 +412,9 @@ void VideoPlayer::setupConnections() {
     // Playlist connections
     connect(m_playlistWidget, &QListWidget::itemDoubleClicked, this, &VideoPlayer::onPlaylistItemActivated);
     connect(m_clearPlaylistButton, &QPushButton::clicked, this, &VideoPlayer::onClearPlaylist);
+    
+    // Directory connections
+    connect(m_directoryWidget, &QListWidget::itemDoubleClicked, this, &VideoPlayer::onDirectoryFileActivated);
     
     // Show controls on mouse move
     m_videoWidget->setMouseTracking(true);
@@ -715,16 +777,6 @@ void VideoPlayer::onScreenshot() {
     }
 }
 
-void VideoPlayer::onSetSubtitle() {
-    QString path = QFileDialog::getOpenFileName(this, "Select Subtitle", "",
-        "Subtitle Files (*.srt *.sub *.ass);;All Files (*)");
-    
-    if (!path.isEmpty()) {
-        // Would load subtitle file
-        statusBar()->showMessage("Subtitle loaded: " + path, 3000);
-    }
-}
-
 void VideoPlayer::onShowPlaylist() {
     m_playlistDock->setVisible(!m_playlistDock->isVisible());
 }
@@ -971,6 +1023,244 @@ void VideoPreferencesDialog::setupUI() {
     connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
     layout->addWidget(buttons);
+}
+
+// ============================================================================
+// Subtitle Functions
+// ============================================================================
+
+void VideoPlayer::onLoadSubtitleFile() {
+    QString path = QFileDialog::getOpenFileName(this, "Load Subtitle", "",
+        "Subtitle Files (*.srt *.ass *.vtt *.sup);;All Files (*)");
+    
+    if (!path.isEmpty()) {
+        SubtitleTrack track;
+        track.filePath = path;
+        track.language = QFileInfo(path).completeBaseName();
+        track.enabled = true;
+        track.trackIndex = m_subtitleTracks.isEmpty() ? 0 : 1;
+        track.encoding = detectSubtitleEncoding(path);
+        
+        m_subtitleTracks.append(track);
+        
+        if (track.trackIndex == 0) {
+            m_primarySubtitle = track;
+        } else {
+            m_secondarySubtitle = track;
+            m_secondarySubtitleCheck->setChecked(true);
+        }
+        
+        updateSubtitleCombo();
+        loadSubtitle(track);
+        
+        statusBar()->showMessage("Subtitle loaded: " + QFileInfo(path).fileName(), 3000);
+    }
+}
+
+void VideoPlayer::onSetSubtitle() {
+    if (m_currentIndex >= 0 && m_currentIndex < m_playlist.size()) {
+        QString videoPath = m_playlist[m_currentIndex].filePath;
+        QString videoDir = QFileInfo(videoPath).path();
+        QString videoName = QFileInfo(videoPath).completeBaseName();
+        
+        QDir dir(videoDir);
+        QStringList filters;
+        filters << "*.srt" << "*.ass" << "*.vtt" << "*.sup";
+        
+        QFileInfoList subtitleFiles = dir.entryInfoList(filters, QDir::Files);
+        
+        m_subtitleTracks.clear();
+        m_subtitleCombo->clear();
+        m_subtitleCombo->addItem("No Subtitles");
+        
+        for (const QFileInfo& fi : subtitleFiles) {
+            if (fi.completeBaseName().startsWith(videoName)) {
+                SubtitleTrack track;
+                track.filePath = fi.filePath();
+                track.language = fi.completeBaseName().replace(videoName, "").replace(".", "").replace("-", "").trimmed();
+                if (track.language.isEmpty()) track.language = "Default";
+                track.enabled = false;
+                track.trackIndex = m_subtitleTracks.size();
+                track.encoding = detectSubtitleEncoding(fi.filePath());
+                
+                m_subtitleTracks.append(track);
+                m_subtitleCombo->addItem(track.language + " (" + fi.suffix().toUpper() + ")");
+            }
+        }
+        
+        if (m_subtitleTracks.size() > 1) {
+            statusBar()->showMessage(QString("%1 subtitle files found").arg(m_subtitleTracks.size()), 3000);
+        }
+    }
+}
+
+void VideoPlayer::onSubtitleTrackChanged(int index) {
+    if (index == 0) {
+        m_subtitleLabel->clear();
+        m_primarySubtitle.enabled = false;
+    } else if (index - 1 < m_subtitleTracks.size()) {
+        m_primarySubtitle = m_subtitleTracks[index - 1];
+        m_primarySubtitle.enabled = true;
+        loadSubtitle(m_primarySubtitle);
+    }
+}
+
+void VideoPlayer::onToggleSecondarySubtitle(bool enabled) {
+    m_secondarySubtitle.enabled = enabled;
+    if (enabled && !m_secondarySubtitle.filePath.isEmpty()) {
+        loadSubtitle(m_secondarySubtitle);
+    } else {
+        m_secondarySubtitleLabel->clear();
+    }
+}
+
+void VideoPlayer::loadSubtitle(const SubtitleTrack& track) {
+    if (!QFile::exists(track.filePath)) return;
+    
+    QFile file(track.filePath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
+    
+    QString content = QString::fromUtf8(file.readAll());
+    file.close();
+    
+    QString ext = QFileInfo(track.filePath).suffix().toLower();
+    
+    if (ext == "srt") {
+        parseSRT(content, track.trackIndex);
+    } else if (ext == "vtt") {
+        parseVTT(content, track.trackIndex);
+    } else if (ext == "ass") {
+        parseASS(content, track.trackIndex);
+    }
+}
+
+QString VideoPlayer::detectSubtitleEncoding(const QString& path) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return "UTF-8";
+    
+    QByteArray data = file.readAll();
+    file.close();
+    
+    if (data.startsWith("\xEF\xBB\xBF")) return "UTF-8";
+    if (data.startsWith("\xFF\xFE")) return "UTF-16LE";
+    if (data.startsWith("\xFE\xFF")) return "UTF-16BE";
+    
+    QStringList encodings = {"UTF-8", "ISO-8859-1", "Windows-1252", "Windows-1251", "GB18030", "Shift_JIS"};
+    
+    for (const QString& encoding : encodings) {
+        QTextCodec* codec = QTextCodec::codecForName(encoding.toLocal8Bit());
+        if (codec) {
+            QString text = codec->toUnicode(data);
+            if (!text.contains(QChar::ReplacementCharacter)) {
+                return encoding;
+            }
+        }
+    }
+    
+    return "UTF-8";
+}
+
+void VideoPlayer::parseSRT(const QString& content, int trackIndex) {
+    QStringList lines = content.split("\n", Qt::SkipEmptyParts);
+    QLabel* label = (trackIndex == 0) ? m_subtitleLabel : m_secondarySubtitleLabel;
+    if (label) label->setText("SRT loaded - " + QString::number(lines.size()) + " lines");
+}
+
+void VideoPlayer::parseVTT(const QString& content, int trackIndex) {
+    QLabel* label = (trackIndex == 0) ? m_subtitleLabel : m_secondarySubtitleLabel;
+    if (label) label->setText("VTT loaded");
+}
+
+void VideoPlayer::parseASS(const QString& content, int trackIndex) {
+    QLabel* label = (trackIndex == 0) ? m_subtitleLabel : m_secondarySubtitleLabel;
+    if (label) label->setText("ASS loaded");
+}
+
+void VideoPlayer::updateSubtitleCombo() {
+    m_subtitleCombo->clear();
+    m_subtitleCombo->addItem("No Subtitles");
+    for (const SubtitleTrack& track : m_subtitleTracks) {
+        m_subtitleCombo->addItem(track.language);
+    }
+}
+
+// ============================================================================
+// Directory Navigation Functions
+// ============================================================================
+
+void VideoPlayer::showDirectoryBrowser() {
+    m_directoryDock->setVisible(!m_directoryDock->isVisible());
+    if (m_currentIndex >= 0 && m_currentIndex < m_playlist.size()) {
+        loadDirectory(QFileInfo(m_playlist[m_currentIndex].filePath).path());
+    }
+}
+
+void VideoPlayer::loadDirectory(const QString& path) {
+    m_currentDirectory = path;
+    m_directoryWidget->clear();
+    m_directoryFiles.clear();
+    
+    QDir dir(path);
+    
+    if (dir.cdUp()) {
+        DirectoryFile parentDir;
+        parentDir.name = "..";
+        parentDir.path = dir.path();
+        parentDir.isDirectory = true;
+        m_directoryFiles.append(parentDir);
+        dir.cd(path);
+    }
+    
+    QFileInfoList dirs = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name);
+    for (const QFileInfo& fi : dirs) {
+        DirectoryFile df;
+        df.name = fi.fileName();
+        df.path = fi.filePath();
+        df.isDirectory = true;
+        df.isVideo = false;
+        m_directoryFiles.append(df);
+        m_directoryWidget->addItem("📁 " + df.name);
+    }
+    
+    QStringList videoFilters;
+    videoFilters << "*.mp4" << "*.mkv" << "*.avi" << "*.mov" << "*.wmv" << "*.flv" << "*.webm";
+    
+    QFileInfoList files = dir.entryInfoList(videoFilters, QDir::Files, QDir::Name);
+    for (const QFileInfo& fi : files) {
+        DirectoryFile df;
+        df.name = fi.fileName();
+        df.path = fi.filePath();
+        df.isDirectory = false;
+        df.isVideo = true;
+        df.size = fi.size();
+        m_directoryFiles.append(df);
+        
+        QString sizeStr;
+        if (df.size > 1073741824) sizeStr = QString::number(df.size / 1073741824.0, 'f', 1) + " GB";
+        else if (df.size > 1048576) sizeStr = QString::number(df.size / 1048576.0, 'f', 1) + " MB";
+        else sizeStr = QString::number(df.size / 1024.0, 'f', 1) + " KB";
+        
+        m_directoryWidget->addItem("🎬 " + df.name + " (" + sizeStr + ")");
+    }
+    
+    m_directoryDock->setWindowTitle("Directory: " + path);
+}
+
+void VideoPlayer::onDirectoryUp() {
+    QDir dir(m_currentDirectory);
+    if (dir.cdUp()) loadDirectory(dir.path());
+}
+
+void VideoPlayer::onDirectoryFileActivated(QListWidgetItem* item) {
+    int index = m_directoryWidget->row(item);
+    if (index >= 0 && index < m_directoryFiles.size()) {
+        DirectoryFile df = m_directoryFiles[index];
+        if (df.isDirectory) {
+            loadDirectory(df.path);
+        } else if (df.isVideo) {
+            playFile(df.path);
+        }
+    }
 }
 
 } // namespace havel

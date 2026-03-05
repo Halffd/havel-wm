@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Find Qt6 Multimedia
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Multimedia Core5Compat)
 
 # Enable Qt MOC
 set(CMAKE_AUTOMOC ON)
@@ -33,6 +33,7 @@ target_link_libraries(havel-videoplayer PRIVATE
     Qt6::Gui
     Qt6::Widgets
     Qt6::Multimedia
+    Qt6::Core5Compat
 )
 
 # Install

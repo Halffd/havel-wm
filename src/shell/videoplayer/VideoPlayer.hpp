@@ -100,9 +100,23 @@ struct VideoInfo {
 struct SubtitleTrack {
     QString language;
     QString filePath;
+    QString encoding;
     bool enabled;
+    int trackIndex;  // 0=primary, 1=secondary, 2=third
     
-    SubtitleTrack() : enabled(false) {}
+    SubtitleTrack() : enabled(false), trackIndex(0) {}
+};
+
+/**
+ * Directory file for navigation
+ */
+struct DirectoryFile {
+    QString name;
+    QString path;
+    bool isVideo;
+    bool isDirectory;
+    qint64 size;
+    QDateTime modified;
 };
 
 /**
@@ -168,6 +182,21 @@ private slots:
     void onZoom();
     void onScreenshot();
     void onSetSubtitle();
+    void onSubtitleTrackChanged(int index);
+    void onLoadSubtitleFile();
+    void onToggleSecondarySubtitle(bool enabled);
+    void loadSubtitle(const SubtitleTrack& track);
+    QString detectSubtitleEncoding(const QString& path);
+    void parseSRT(const QString& content, int trackIndex);
+    void parseVTT(const QString& content, int trackIndex);
+    void parseASS(const QString& content, int trackIndex);
+    void updateSubtitleCombo();
+    
+    // Directory navigation
+    void onDirectoryUp();
+    void onDirectoryFileActivated(QListWidgetItem* item);
+    void showDirectoryBrowser();
+    void loadDirectory(const QString& path);
     
     // Playlist
     void onShowPlaylist();
@@ -244,6 +273,8 @@ private:
     QLabel* m_timeLabel;
     QLabel* m_durationLabel;
     QLabel* m_titleLabel;
+    QLabel* m_subtitleLabel;
+    QLabel* m_secondarySubtitleLabel;
     
     // Playlist dock
     QDockWidget* m_playlistDock;
@@ -282,6 +313,19 @@ private:
     PlaybackSettings m_settings;
     int m_currentIndex;
     bool m_seeking;
+    
+    // Subtitles
+    QList<SubtitleTrack> m_subtitleTracks;
+    SubtitleTrack m_primarySubtitle;
+    SubtitleTrack m_secondarySubtitle;
+    QComboBox* m_subtitleCombo;
+    QCheckBox* m_secondarySubtitleCheck;
+    
+    // Directory navigation
+    QString m_currentDirectory;
+    QList<DirectoryFile> m_directoryFiles;
+    QDockWidget* m_directoryDock;
+    QListWidget* m_directoryWidget;
     
     // State
     bool m_fullscreen;
