@@ -20,6 +20,10 @@ typedef struct {
     uint32_t desiredImageCount;
     bool enableVSync;
     bool enableHDR;
+    // VSync options
+    bool enableFrameTiming;
+    uint32_t targetFrameRate;  // 0 = match display refresh
+    float maxFrameLatency;     // Maximum frames in flight (1-3)
 } VulkanRendererConfig;
 
 // Create Vulkan renderer
@@ -68,6 +72,27 @@ bool vulkan_renderer_has_shader_objects(VulkanRenderer* renderer);
 bool vulkan_renderer_has_maintenance5(VulkanRenderer* renderer);
 uint32_t vulkan_renderer_get_version(VulkanRenderer* renderer);
 const char* vulkan_renderer_get_version_string(VulkanRenderer* renderer);
+
+// VSync and frame timing
+void vulkan_renderer_set_vsync_enabled(VulkanRenderer* renderer, bool enabled);
+bool vulkan_renderer_is_vsync_enabled(VulkanRenderer* renderer);
+void vulkan_renderer_set_target_frame_rate(VulkanRenderer* renderer, uint32_t fps);
+uint32_t vulkan_renderer_get_target_frame_rate(VulkanRenderer* renderer);
+void vulkan_renderer_set_max_frame_latency(VulkanRenderer* renderer, uint32_t latency);
+uint32_t vulkan_renderer_get_max_frame_latency(VulkanRenderer* renderer);
+
+// Frame timing statistics
+typedef struct {
+    float currentFPS;
+    float averageFPS;
+    float frameTimeMs;
+    float averageFrameTimeMs;
+    uint32_t droppedFrames;
+    bool vsyncEnabled;
+    uint32_t presentMode;  // FIFO, MAILBOX, IMMEDIATE
+} VulkanFrameStats;
+
+void vulkan_renderer_get_frame_stats(VulkanRenderer* renderer, VulkanFrameStats* stats);
 
 // KHR_surface/presentation queries
 bool vulkan_renderer_get_surface_formats(VulkanRenderer* renderer, void* surface,

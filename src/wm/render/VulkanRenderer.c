@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 
 // Target Vulkan 1.4 with fallback to 1.3/1.2
 #define VULKAN_TARGET_VERSION VK_API_VERSION_1_4
@@ -39,12 +40,24 @@ struct VulkanRendererInternal {
     bool framebufferResized;
     VulkanRendererConfig config;
     float clearColor[4];
-    
+
     // Vulkan 1.4 features
     bool hasDynamicRendering2;
     bool hasShaderObjects;
     bool hasMaintenance5;
     uint32_t vulkanVersion;
+    
+    // VSync and frame timing
+    bool vsyncEnabled;
+    uint32_t targetFrameRate;
+    uint32_t maxFrameLatency;
+    VkPresentModeKHR presentMode;
+    
+    // Frame timing statistics
+    VulkanFrameStats frameStats;
+    uint64_t lastFrameTime;
+    uint64_t frameTimeAccum;
+    uint32_t frameTimeCount;
 };
 
 struct VulkanTextureInternal {
@@ -56,6 +69,9 @@ struct VulkanTextureInternal {
     uint32_t height;
     VkFormat format;
 };
+
+// Forward declarations
+static void update_frame_timing(struct VulkanRendererInternal* renderer);
 
 // Validation layers
 static const char* g_validationLayers[] = {
@@ -686,10 +702,25 @@ VulkanRenderer* vulkan_renderer_create(const VulkanRendererConfig* config) {
     
     result = create_sync_objects(renderer);
     if (result != VK_SUCCESS) { vulkan_renderer_destroy((VulkanRenderer*)renderer); return NULL; }
-    
+
     renderer->currentFrame = 0;
     renderer->framebufferResized = false;
     
+    // Initialize VSync and frame timing
+    renderer->vsyncEnabled = renderer->config.enableVSync;
+    renderer->targetFrameRate = renderer->config.targetFrameRate;
+    renderer->maxFrameLatency = renderer->config.maxFrameLatency > 0 ? 
+                                renderer->config.maxFrameLatency : 1;
+    renderer->presentMode = VK_PRESENT_MODE_FIFO_KHR;  // Default to FIFO (vsync)
+    
+    // Initialize frame stats
+    memset(&renderer->frameStats, 0, sizeof(VulkanFrameStats));
+    renderer->frameStats.vsyncEnabled = renderer->vsyncEnabled;
+    renderer->frameStats.presentMode = renderer->presentMode;
+    renderer->lastFrameTime = 0;
+    renderer->frameTimeAccum = 0;
+    renderer->frameTimeCount = 0;
+
     LOG_INFO("[Vulkan] Renderer created successfully");
     return (VulkanRenderer*)renderer;
 }
@@ -854,8 +885,12 @@ bool vulkan_renderer_end_frame(VulkanRenderer* renderer_ptr) {
         LOG_ERROR("[Vulkan] Failed to present: %d", result);
         return false;
     }
-    
+
     renderer->currentFrame = (renderer->currentFrame + 1) % renderer->swapchainImageCount;
+    
+    // Update frame timing statistics
+    update_frame_timing(renderer);
+    
     return true;
 }
 
@@ -1100,4 +1135,131 @@ bool vulkan_renderer_select_present_mode(VulkanRenderer* renderer_ptr, void* sur
     
     free(modes);
     return true;
+}
+
+// ============================================================================
+// VSync and Frame Timing Implementation
+// ============================================================================
+
+void vulkan_renderer_set_vsync_enabled(VulkanRenderer* renderer_ptr, bool enabled) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    if (!renderer) return;
+    
+    renderer->vsyncEnabled = enabled;
+    renderer->frameStats.vsyncEnabled = enabled;
+    
+    // Select appropriate present mode
+    if (enabled) {
+        // VSync enabled: prefer MAILBOX (tear-free, non-blocking) or FIFO (tear-free, blocking)
+        if (renderer->presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+            renderer->presentMode = VK_PRESENT_MODE_FIFO_KHR;
+        }
+    } else {
+        // VSync disabled: use IMMEDIATE for lowest latency
+        renderer->presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+    }
+    
+    renderer->frameStats.presentMode = renderer->presentMode;
+    
+    LOG_INFO("[Vulkan] VSync %s (present mode: %s)",
+             enabled ? "enabled" : "disabled",
+             renderer->presentMode == VK_PRESENT_MODE_FIFO_KHR ? "FIFO" :
+             renderer->presentMode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX" : "IMMEDIATE");
+}
+
+bool vulkan_renderer_is_vsync_enabled(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    return renderer ? renderer->vsyncEnabled : false;
+}
+
+void vulkan_renderer_set_target_frame_rate(VulkanRenderer* renderer_ptr, uint32_t fps) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    if (!renderer) return;
+    
+    renderer->targetFrameRate = fps;
+    renderer->frameStats.averageFPS = fps;
+    
+    LOG_INFO("[Vulkan] Target frame rate set to %u FPS", fps);
+}
+
+uint32_t vulkan_renderer_get_target_frame_rate(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    return renderer ? renderer->targetFrameRate : 0;
+}
+
+void vulkan_renderer_set_max_frame_latency(VulkanRenderer* renderer_ptr, uint32_t latency) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    if (!renderer) return;
+    
+    // Clamp latency to valid range (1-3)
+    if (latency < 1) latency = 1;
+    if (latency > 3) latency = 3;
+    
+    renderer->maxFrameLatency = latency;
+    
+    LOG_INFO("[Vulkan] Max frame latency set to %u", latency);
+}
+
+uint32_t vulkan_renderer_get_max_frame_latency(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    return renderer ? renderer->maxFrameLatency : 1;
+}
+
+void vulkan_renderer_get_frame_stats(VulkanRenderer* renderer_ptr, VulkanFrameStats* stats) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    if (!renderer || !stats) return;
+    
+    *stats = renderer->frameStats;
+}
+
+// Internal: Update frame timing
+static void update_frame_timing(struct VulkanRendererInternal* renderer) {
+    uint64_t current_time = 0;
+    
+    // Get current time in nanoseconds
+#ifdef CLOCK_MONOTONIC_RAW
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+    current_time = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    current_time = (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+#endif
+    
+    // Calculate frame time
+    if (renderer->lastFrameTime > 0) {
+        uint64_t frame_time_ns = current_time - renderer->lastFrameTime;
+        float frame_time_ms = (float)frame_time_ns / 1000000.0f;
+        
+        // Update current FPS
+        if (frame_time_ns > 0) {
+            renderer->frameStats.currentFPS = 1000000000.0f / (float)frame_time_ns;
+        }
+        
+        renderer->frameStats.frameTimeMs = frame_time_ms;
+        
+        // Update average
+        renderer->frameTimeAccum += frame_time_ms;
+        renderer->frameTimeCount++;
+        
+        if (renderer->frameTimeCount >= 60) {
+            renderer->frameStats.averageFrameTimeMs = 
+                (float)renderer->frameTimeAccum / renderer->frameTimeCount;
+            renderer->frameStats.averageFPS = 
+                1000.0f / renderer->frameStats.averageFrameTimeMs;
+            renderer->frameTimeAccum = 0;
+            renderer->frameTimeCount = 0;
+        }
+        
+        // Check for dropped frames (frame took > 2x target time)
+        float target_frame_time = renderer->targetFrameRate > 0 ?
+            1000.0f / renderer->targetFrameRate : 16.67f;  // Default 60 FPS
+        
+        if (frame_time_ms > target_frame_time * 2.0f) {
+            renderer->frameStats.droppedFrames++;
+        }
+    }
+    
+    renderer->lastFrameTime = current_time;
 }
