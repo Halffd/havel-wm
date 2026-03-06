@@ -22,6 +22,26 @@ pkg_check_modules(PNG REQUIRED libpng)
 pkg_check_modules(CURL REQUIRED libcurl)
 pkg_check_modules(VULKAN REQUIRED vulkan)
 
+# Renderer selection (default: Vulkan with GLES2 fallback)
+option(USE_VULKAN "Use Vulkan renderer (default ON)" ON)
+option(USE_GLES2 "Use GLES2 renderer as fallback (default ON)" ON)
+
+if(USE_VULKAN)
+    add_compile_definitions(USE_VULKAN=1)
+    message(STATUS "Vulkan renderer enabled")
+else()
+    add_compile_definitions(USE_VULKAN=0)
+    message(STATUS "Vulkan renderer disabled")
+endif()
+
+if(USE_GLES2)
+    add_compile_definitions(USE_GLES2=1)
+    message(STATUS "GLES2 renderer enabled")
+else()
+    add_compile_definitions(USE_GLES2=0)
+    message(STATUS "GLES2 renderer disabled")
+endif()
+
 # Find PipeWire for screen sharing
 pkg_check_modules(PIPEWIRE libpipewire-0.3)
 if(PIPEWIRE_FOUND)
@@ -216,6 +236,10 @@ set(WM_CORE_SOURCES
     src/wm/render/VulkanOverlayRenderer.h
     src/wm/render/VulkanDmaBuf.c
     src/wm/render/VulkanDmaBuf.h
+    src/wm/render/GLES2Renderer.c
+    src/wm/render/GLES2Renderer.h
+    src/wm/render/UnifiedRenderer.c
+    src/wm/render/UnifiedRenderer.h
     # Animation plugins (WIP - need interface adjustments)
     # src/wm/plugins/WobblyWindowsPlugin.cpp
     # src/wm/plugins/DestroyOnClosePlugin.cpp
@@ -251,12 +275,17 @@ target_include_directories(wlr_bridge PRIVATE
     ${WLROOTS_INCLUDE_DIRS}
     ${PROTOCOL_HEADERS_DIR}
     ${VULKAN_INCLUDE_DIRS}
+    ${GLES2_INCLUDE_DIRS}
+    ${EGL_INCLUDE_DIRS}
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
 )
 target_compile_definitions(wlr_bridge PRIVATE WLR_USE_UNSTABLE)
 target_link_libraries(wlr_bridge
     ${WLROOTS_LIBRARIES}
     ${VULKAN_LIBRARIES}
+    ${GLES2_LIBRARIES}
+    ${EGL_LIBRARIES}
+    dl
 )
 set_target_properties(wlr_bridge PROPERTIES
     LINKER_LANGUAGE C
