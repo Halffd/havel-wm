@@ -832,8 +832,11 @@ static void output_frame(struct wl_listener *listener, void *data) {
 
     // DEBUG: Confirm frame callback is firing
     static int frame_count = 0;
-    if (++frame_count % 60 == 0) {
-        LOG_INFO("[DEBUG] Frame #%d on %s", frame_count, output->output->name);
+    frame_count++;
+    if (frame_count % 30 == 0) {
+        LOG_INFO("[DEBUG] Frame #%d on %s (enabled=%d, scene_output=%p)", 
+                 frame_count, output->output->name, 
+                 output->output->enabled, output->scene_output);
     }
 
     LOG_INFO("[FRAME] %s: >>> START", output->output->name);
@@ -868,6 +871,9 @@ static void output_frame(struct wl_listener *listener, void *data) {
     havel_cpp_draw_overlays(server->cpp_server, output->output->width, output->output->height);
 
     LOG_INFO("[FRAME] %s: calling wlr_scene_output_commit", output->output->name);
+    LOG_INFO("[FRAME]   scene_output=%p, scene=%p", output->scene_output, output->scene_output->scene);
+    LOG_INFO("[FRAME]   scene->tree.enabled=%d", output->scene_output->scene->tree.node.enabled);
+    LOG_INFO("[FRAME]   output->enabled=%d", output->output->enabled);
 
     wlr_scene_output_commit(output->scene_output, &options);
     LOG_INFO("[FRAME] %s: <<< COMMIT COMPLETE", output->output->name);
@@ -946,6 +952,12 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     output->is_primary = wl_list_empty(&server->outputs) || (server->outputs.next == &output->link);
 
     LOG_DEBUG("[OUTPUT] %s is %s", wlr_output->name, output->is_primary ? "primary" : "secondary");
+
+    // Create a test rectangle to confirm rendering works
+    struct wlr_scene_rect *test_rect = wlr_scene_rect_create(
+        &server->scene->tree, 100, 100, (float[4]){1.0f, 0.0f, 0.0f, 1.0f});  // Red box
+    wlr_scene_node_set_position(&test_rect->node, 50, 50);
+    LOG_INFO("[TEST] Created red test box at (50,50) size 100x100 on %s", wlr_output->name);
 
     output->frame.notify = output_frame;
     wl_signal_add(&wlr_output->events.frame, &output->frame);
@@ -1702,8 +1714,8 @@ havel_wlr_server_t* havel_wlr_create(void) {
     // Create overlay layer (raised to top for Alt-Tab, Overview, etc.)
     server->overlay_layer = wlr_scene_tree_create(&server->scene->tree);
     wlr_scene_node_raise_to_top(&server->overlay_layer->node);
-    wlr_scene_node_set_enabled(&server->overlay_layer->node, false);  // Hidden by default
-    LOG_INFO("[Overlay] Overlay layer created (raised to top)");
+    wlr_scene_node_set_enabled(&server->overlay_layer->node, true);  // ENABLED for testing
+    LOG_INFO("[Overlay] Overlay layer created (ENABLED for testing)");
 
     // Pass overlay layer to C++ server for plugin rendering
     havel_cpp_server_set_overlay_layer(server->cpp_server, server->overlay_layer);
