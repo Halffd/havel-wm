@@ -20,6 +20,7 @@ pkg_check_modules(EGL REQUIRED egl)
 pkg_check_modules(FREETYPE REQUIRED freetype2)
 pkg_check_modules(PNG REQUIRED libpng)
 pkg_check_modules(CURL REQUIRED libcurl)
+pkg_check_modules(VULKAN REQUIRED vulkan)
 
 # Find PipeWire for screen sharing
 pkg_check_modules(PIPEWIRE libpipewire-0.3)
@@ -207,11 +208,12 @@ set(WM_CORE_SOURCES
     src/wm/plugins/DrawPlugin.cpp
     src/wm/plugins/FPSPlugin.cpp
     src/wm/plugins/GammaPlugin.cpp
+    src/wm/render/VulkanRenderer.c
+    src/wm/render/VulkanRenderer.h
     # Animation plugins (WIP - need interface adjustments)
     # src/wm/plugins/WobblyWindowsPlugin.cpp
     # src/wm/plugins/DestroyOnClosePlugin.cpp
     # src/wm/plugins/SpringOnSpawnPlugin.cpp
-    # VulkanRenderer.cpp - disabled, wlroots handles rendering
 )
 
 # Shell/panel sources (Phase 1 - window manager integration)
@@ -258,6 +260,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${FREETYPE_INCLUDE_DIRS}
     ${PNG_INCLUDE_DIRS}
     ${CURL_INCLUDE_DIRS}
+    ${VULKAN_INCLUDE_DIRS}
     ${PIPEWIRE_INCLUDE_DIRS}
     ${GLIB_INCLUDE_DIRS}
     # UI framework include (for future use)
@@ -278,6 +281,7 @@ target_link_libraries(${PROJECT_NAME}
     ${FREETYPE_LIBRARIES}
     ${PNG_LIBRARIES}
     ${CURL_LIBRARIES}
+    ${VULKAN_LIBRARIES}
     ${PIPEWIRE_LIBRARIES}
     ${GLIB_LIBRARIES}
 )
