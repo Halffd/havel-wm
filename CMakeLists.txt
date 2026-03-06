@@ -208,8 +208,9 @@ set(WM_CORE_SOURCES
     src/wm/plugins/DrawPlugin.cpp
     src/wm/plugins/FPSPlugin.cpp
     src/wm/plugins/GammaPlugin.cpp
-    src/wm/render/VulkanRenderer.c
-    src/wm/render/VulkanRenderer.h
+    # Vulkan renderer (WIP - needs C bridge integration)
+    # src/wm/render/VulkanRenderer.c
+    # src/wm/render/VulkanRendererBridge.h
     # Animation plugins (WIP - need interface adjustments)
     # src/wm/plugins/WobblyWindowsPlugin.cpp
     # src/wm/plugins/DestroyOnClosePlugin.cpp
@@ -227,31 +228,55 @@ set(UTIL_SOURCES
     src/utils/Logger.c
 )
 
+# Wlroots C bridge library (isolates wlroots headers from C++)
+set(WLR_BRIDGE_SOURCES
+    wlr_bridge.c
+)
+
+add_library(wlr_bridge STATIC ${WLR_BRIDGE_SOURCES})
+target_include_directories(wlr_bridge PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/shell/include
+    ${PROTOCOL_HEADERS_DIR}
+)
+target_include_directories(wlr_bridge PRIVATE
+    ${WLROOTS_INCLUDE_DIRS}
+    ${PROTOCOL_HEADERS_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+)
+target_compile_definitions(wlr_bridge PRIVATE WLR_USE_UNSTABLE)
+target_link_libraries(wlr_bridge
+    ${WLROOTS_LIBRARIES}
+)
+set_target_properties(wlr_bridge PROPERTIES
+    LINKER_LANGUAGE C
+)
+
 # Add executable
 add_executable(${PROJECT_NAME}
     src/main.cpp
-    wlr_bridge.c
     ${WM_CORE_SOURCES}
     ${SHELL_SOURCES}
     ${UTIL_SOURCES}
     ${PROTOCOL_SOURCES}
 )
 
-# Set compile definitions for unstable API
-target_compile_definitions(${PROJECT_NAME} PRIVATE
-    WLR_USE_UNSTABLE
-)
-
-# Set include directories
+# Set include directories for main executable
 target_include_directories(${PROJECT_NAME} PRIVATE
-    ${PROTOCOL_HEADERS_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/wm
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src/shell/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
-    ${WAYLAND_SERVER_INCLUDE_DIRS}
+    ${PROTOCOL_HEADERS_DIR}
     ${WLROOTS_INCLUDE_DIRS}
+    ${WAYLAND_SERVER_INCLUDE_DIRS}
     ${XKB_INCLUDE_DIRS}
     ${PIXMAN_INCLUDE_DIRS}
     ${FMT_INCLUDE_DIRS}
@@ -260,19 +285,17 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${FREETYPE_INCLUDE_DIRS}
     ${PNG_INCLUDE_DIRS}
     ${CURL_INCLUDE_DIRS}
-    ${VULKAN_INCLUDE_DIRS}
     ${PIPEWIRE_INCLUDE_DIRS}
     ${GLIB_INCLUDE_DIRS}
-    # UI framework include (for future use)
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/ui/include
-    # Protocol headers for wlroots unstable headers
-    ${PROTOCOL_HEADERS_DIR}
 )
 
-# Link libraries
-target_link_libraries(${PROJECT_NAME}
+# Enable unstable wlroots features
+target_compile_definitions(${PROJECT_NAME} PRIVATE WLR_USE_UNSTABLE)
+
+# Link with wlroots bridge library and other libraries
+target_link_libraries(${PROJECT_NAME} PRIVATE
+    wlr_bridge
     ${WAYLAND_SERVER_LIBRARIES}
-    ${WLROOTS_LIBRARIES}
     ${XKB_LIBRARIES}
     ${PIXMAN_LIBRARIES}
     ${FMT_LIBRARIES}
@@ -281,7 +304,6 @@ target_link_libraries(${PROJECT_NAME}
     ${FREETYPE_LIBRARIES}
     ${PNG_LIBRARIES}
     ${CURL_LIBRARIES}
-    ${VULKAN_LIBRARIES}
     ${PIPEWIRE_LIBRARIES}
     ${GLIB_LIBRARIES}
 )

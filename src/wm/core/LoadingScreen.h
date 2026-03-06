@@ -4,11 +4,13 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <wlr/types/wlr_scene.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Forward declare wlroots types (opaque pointers)
+struct wlr_scene_tree;
 
 // Loading screen configuration
 struct LoadingScreenConfig {
