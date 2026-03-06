@@ -1,16 +1,56 @@
-// Vulkan Renderer Implementation
+// Vulkan Renderer Implementation - C only
 
-#include "VulkanRenderer.h"
+#include "VulkanRendererBridge.h"
+#include <vulkan/vulkan.h>
 #include <Logger.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
+// Internal structures (not exposed in header)
+struct VulkanRendererInternal {
+    VkInstance instance;
+    VkDebugUtilsMessengerEXT debugMessenger;
+    VkPhysicalDevice physicalDevice;
+    VkDevice device;
+    uint32_t graphicsFamilyIndex;
+    uint32_t presentFamilyIndex;
+    VkQueue graphicsQueue;
+    VkQueue presentQueue;
+    VkSwapchainKHR swapchain;
+    VkFormat swapchainFormat;
+    VkExtent2D swapchainExtent;
+    VkImage* swapchainImages;
+    VkImageView* swapchainImageViews;
+    uint32_t swapchainImageCount;
+    VkRenderPass renderPass;
+    VkPipelineLayout pipelineLayout;
+    VkFramebuffer* framebuffers;
+    VkCommandPool commandPool;
+    VkCommandBuffer* commandBuffers;
+    VkSemaphore* imageAvailableSemaphores;
+    VkSemaphore* renderFinishedSemaphores;
+    VkFence* inFlightFences;
+    uint32_t currentFrame;
+    bool framebufferResized;
+    VulkanRendererConfig config;
+    float clearColor[4];
+};
+
+struct VulkanTextureInternal {
+    VkImage image;
+    VkImageView view;
+    VkSampler sampler;
+    VkDeviceMemory memory;
+    uint32_t width;
+    uint32_t height;
+    VkFormat format;
+};
+
 // Validation layers
 static const char* g_validationLayers[] = {
     "VK_LAYER_KHRONOS_validation"
 };
-static const uint32_t g_validationLayerCount = 1;
 
 // Device extensions
 static const char* g_deviceExtensions[] = {
@@ -18,20 +58,17 @@ static const char* g_deviceExtensions[] = {
 };
 static const uint32_t g_deviceExtensionCount = 1;
 
-// Debug messenger callback
+// Debug callback
 static VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(
     VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
     VkDebugUtilsMessageTypeFlagsEXT messageType,
     const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
     void* pUserData) {
-    
     (void)messageType;
     (void)pUserData;
-    
     if (messageSeverity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) {
         LOG_ERROR("[Vulkan] %s", pCallbackData->pMessage);
     }
-    
     return VK_FALSE;
 }
 
@@ -39,7 +76,6 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(
 static bool check_validation_layer_support(void) {
     uint32_t layerCount;
     vkEnumerateInstanceLayerProperties(&layerCount, NULL);
-    
     VkLayerProperties* availableLayers = 
         (VkLayerProperties*)malloc(layerCount * sizeof(VkLayerProperties));
     vkEnumerateInstanceLayerProperties(&layerCount, availableLayers);
@@ -51,7 +87,6 @@ static bool check_validation_layer_support(void) {
             break;
         }
     }
-    
     free(availableLayers);
     return found;
 }
@@ -63,37 +98,24 @@ static const char** get_required_extensions(uint32_t* extensionCount) {
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
         VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
 #endif
-#ifdef VK_USE_PLATFORM_XLIB_KHR
-        VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
-#endif
     };
-    
     *extensionCount = sizeof(extensions) / sizeof(extensions[0]);
     return extensions;
 }
 
 // Rate device suitability
 static int rate_device_suitability(VkPhysicalDevice device) {
-    VkPhysicalDeviceProperties deviceProperties;
-    VkPhysicalDeviceFeatures deviceFeatures;
-    vkGetPhysicalDeviceProperties(device, &deviceProperties);
-    vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+    VkPhysicalDeviceProperties props;
+    VkPhysicalDeviceFeatures features;
+    vkGetPhysicalDeviceProperties(device, &props);
+    vkGetPhysicalDeviceFeatures(device, &features);
     
     int score = 0;
-    
-    // Discrete GPUs have a significant performance advantage
-    if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+    if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
         score += 1000;
     }
-    
-    // Maximum texture size
-    score += deviceProperties.limits.maxImageDimension2D;
-    
-    // Must support required features
-    if (!deviceFeatures.geometryShader) {
-        return 0;
-    }
-    
+    score += props.limits.maxImageDimension2D;
+    if (!features.geometryShader) return 0;
     return score;
 }
 
@@ -101,66 +123,54 @@ static int rate_device_suitability(VkPhysicalDevice device) {
 static bool check_device_extension_support(VkPhysicalDevice device) {
     uint32_t extensionCount;
     vkEnumerateDeviceExtensionProperties(device, NULL, &extensionCount, NULL);
-    
-    VkExtensionProperties* availableExtensions = 
+    VkExtensionProperties* available = 
         (VkExtensionProperties*)malloc(extensionCount * sizeof(VkExtensionProperties));
-    vkEnumerateDeviceExtensionProperties(device, NULL, &extensionCount, availableExtensions);
+    vkEnumerateDeviceExtensionProperties(device, NULL, &extensionCount, available);
     
     for (uint32_t i = 0; i < g_deviceExtensionCount; i++) {
         bool found = false;
         for (uint32_t j = 0; j < extensionCount; j++) {
-            if (strcmp(g_deviceExtensions[i], availableExtensions[j].extensionName) == 0) {
+            if (strcmp(g_deviceExtensions[i], available[j].extensionName) == 0) {
                 found = true;
                 break;
             }
         }
-        if (!found) {
-            free(availableExtensions);
-            return false;
-        }
+        if (!found) { free(available); return false; }
     }
-    
-    free(availableExtensions);
+    free(available);
     return true;
 }
 
 // Find queue families
 static void find_queue_families(VkPhysicalDevice device,
-                                uint32_t* graphicsFamily,
-                                uint32_t* presentFamily) {
+                                uint32_t* graphicsFamily, uint32_t* presentFamily) {
     uint32_t queueFamilyCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, NULL);
-    
-    VkQueueFamilyProperties* queueFamilies = 
+    VkQueueFamilyProperties* families = 
         (VkQueueFamilyProperties*)malloc(queueFamilyCount * sizeof(VkQueueFamilyProperties));
-    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies);
+    vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, families);
     
     *graphicsFamily = UINT32_MAX;
     *presentFamily = UINT32_MAX;
     
     for (uint32_t i = 0; i < queueFamilyCount; i++) {
-        if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+        if (families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
             *graphicsFamily = i;
-        }
-        
-        // For simplicity, use same family for present if it supports graphics
-        if (*graphicsFamily != UINT32_MAX) {
-            *presentFamily = *graphicsFamily;
+            *presentFamily = i;  // Use same family for simplicity
             break;
         }
     }
-    
-    free(queueFamilies);
+    free(families);
 }
 
 // Create instance
-static VkResult create_instance(struct VulkanRenderer* renderer,
-                                struct VulkanRendererConfig* config) {
+static VkResult create_instance(struct VulkanRendererInternal* renderer,
+                                const VulkanRendererConfig* config) {
     VkApplicationInfo appInfo = {0};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName = "Havel WM";
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.pEngineName = "Havel Vulkan Renderer";
+    appInfo.pEngineName = "Havel Vulkan";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.apiVersion = VK_API_VERSION_1_2;
     
@@ -168,39 +178,31 @@ static VkResult create_instance(struct VulkanRenderer* renderer,
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     createInfo.pApplicationInfo = &appInfo;
     
-    // Extensions
     uint32_t extensionCount;
     const char** extensions = get_required_extensions(&extensionCount);
     createInfo.enabledExtensionCount = extensionCount;
     createInfo.ppEnabledExtensionNames = extensions;
     
-    // Validation layers
     if (config->enableValidation) {
         if (!check_validation_layer_support()) {
-            LOG_ERROR("[Vulkan] Validation layers requested but not available");
+            LOG_ERROR("[Vulkan] Validation layers not available");
             return VK_ERROR_LAYER_NOT_PRESENT;
         }
-        
-        createInfo.enabledLayerCount = g_validationLayerCount;
+        createInfo.enabledLayerCount = 1;
         createInfo.ppEnabledLayerNames = g_validationLayers;
         
-        // Debug messenger
         VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo = {0};
         debugCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
         debugCreateInfo.messageSeverity = 
-            VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
             VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
             VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
         debugCreateInfo.messageType = 
             VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-            VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-            VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+            VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
         debugCreateInfo.pfnUserCallback = vulkan_debug_callback;
-        
         createInfo.pNext = &debugCreateInfo;
     } else {
         createInfo.enabledLayerCount = 0;
-        createInfo.pNext = NULL;
     }
     
     VkResult result = vkCreateInstance(&createInfo, NULL, &renderer->instance);
@@ -208,35 +210,28 @@ static VkResult create_instance(struct VulkanRenderer* renderer,
         LOG_ERROR("[Vulkan] Failed to create instance: %d", result);
         return result;
     }
-    
     LOG_INFO("[Vulkan] Instance created");
     return VK_SUCCESS;
 }
 
 // Setup debug messenger
-static VkResult setup_debug_messenger(struct VulkanRenderer* renderer) {
-    if (!renderer->config.enableValidation) {
-        return VK_SUCCESS;
-    }
+static VkResult setup_debug_messenger(struct VulkanRendererInternal* renderer) {
+    if (!renderer->config.enableValidation) return VK_SUCCESS;
     
     VkDebugUtilsMessengerCreateInfoEXT createInfo = {0};
     createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
     createInfo.messageSeverity = 
-        VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
         VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
         VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
     createInfo.messageType = 
         VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-        VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-        VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+        VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT;
     createInfo.pfnUserCallback = vulkan_debug_callback;
     
-    // Get function pointer
     PFN_vkCreateDebugUtilsMessengerEXT func = 
         (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
             renderer->instance, "vkCreateDebugUtilsMessengerEXT");
-    
-    if (func == NULL) {
+    if (!func) {
         LOG_WARN("[Vulkan] Debug messenger not available");
         return VK_SUCCESS;
     }
@@ -244,20 +239,16 @@ static VkResult setup_debug_messenger(struct VulkanRenderer* renderer) {
     VkResult result = func(renderer->instance, &createInfo, NULL, &renderer->debugMessenger);
     if (result != VK_SUCCESS) {
         LOG_WARN("[Vulkan] Failed to create debug messenger: %d", result);
-        return result;
     }
-    
-    LOG_INFO("[Vulkan] Debug messenger created");
-    return VK_SUCCESS;
+    return result;
 }
 
 // Pick physical device
-static VkResult pick_physical_device(struct VulkanRenderer* renderer) {
+static VkResult pick_physical_device(struct VulkanRendererInternal* renderer) {
     uint32_t deviceCount = 0;
     vkEnumeratePhysicalDevices(renderer->instance, &deviceCount, NULL);
-    
     if (deviceCount == 0) {
-        LOG_ERROR("[Vulkan] Failed to find GPUs with Vulkan support");
+        LOG_ERROR("[Vulkan] No GPUs with Vulkan support");
         return VK_ERROR_INCOMPATIBLE_DRIVER;
     }
     
@@ -275,30 +266,27 @@ static VkResult pick_physical_device(struct VulkanRenderer* renderer) {
             bestDevice = devices[i];
         }
     }
-    
     free(devices);
     
     if (bestDevice == VK_NULL_HANDLE) {
-        LOG_ERROR("[Vulkan] Failed to find a suitable GPU");
+        LOG_ERROR("[Vulkan] No suitable GPU found");
         return VK_ERROR_INCOMPATIBLE_DRIVER;
     }
     
     renderer->physicalDevice = bestDevice;
-    
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(bestDevice, &props);
     LOG_INFO("[Vulkan] Selected GPU: %s (score: %d)", props.deviceName, bestScore);
-    
     return VK_SUCCESS;
 }
 
 // Create logical device
-static VkResult create_logical_device(struct VulkanRenderer* renderer) {
+static VkResult create_logical_device(struct VulkanRendererInternal* renderer) {
     uint32_t graphicsFamily, presentFamily;
     find_queue_families(renderer->physicalDevice, &graphicsFamily, &presentFamily);
     
-    if (graphicsFamily == UINT32_MAX || presentFamily == UINT32_MAX) {
-        LOG_ERROR("[Vulkan] Failed to find required queue families");
+    if (graphicsFamily == UINT32_MAX) {
+        LOG_ERROR("[Vulkan] No graphics queue family");
         return VK_ERROR_INCOMPATIBLE_DRIVER;
     }
     
@@ -306,7 +294,6 @@ static VkResult create_logical_device(struct VulkanRenderer* renderer) {
     renderer->presentFamilyIndex = presentFamily;
     
     float queuePriority = 1.0f;
-    
     VkDeviceQueueCreateInfo queueCreateInfo = {0};
     queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
     queueCreateInfo.queueFamilyIndex = graphicsFamily;
@@ -317,7 +304,7 @@ static VkResult create_logical_device(struct VulkanRenderer* renderer) {
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.queueCreateInfoCount = 1;
     createInfo.pQueueCreateInfos = &queueCreateInfo;
-    createInfo.enabledExtensionCount = g_deviceExtensionCount;
+    createInfo.enabledExtensionCount = 1;
     createInfo.ppEnabledExtensionNames = g_deviceExtensions;
     
     VkResult result = vkCreateDevice(renderer->physicalDevice, &createInfo, NULL, &renderer->device);
@@ -328,34 +315,20 @@ static VkResult create_logical_device(struct VulkanRenderer* renderer) {
     
     vkGetDeviceQueue(renderer->device, graphicsFamily, 0, &renderer->graphicsQueue);
     vkGetDeviceQueue(renderer->device, presentFamily, 0, &renderer->presentQueue);
-    
     LOG_INFO("[Vulkan] Logical device created");
     return VK_SUCCESS;
 }
 
 // Create swapchain
-static VkResult create_swapchain(struct VulkanRenderer* renderer,
+static VkResult create_swapchain(struct VulkanRendererInternal* renderer,
                                  uint32_t width, uint32_t height) {
-    // Get surface capabilities (would need actual surface)
-    VkSurfaceCapabilitiesKHR capabilities = {0};
-    capabilities.currentExtent.width = width;
-    capabilities.currentExtent.height = height;
-    capabilities.minImageCount = 2;
-    capabilities.maxImageCount = 8;
-    
-    VkExtent2D extent = capabilities.currentExtent;
-    
+    VkExtent2D extent = {width, height};
     uint32_t imageCount = renderer->config.desiredImageCount;
-    if (imageCount < capabilities.minImageCount) {
-        imageCount = capabilities.minImageCount;
-    }
-    if (imageCount > capabilities.maxImageCount) {
-        imageCount = capabilities.maxImageCount;
-    }
+    if (imageCount < 2) imageCount = 2;
+    if (imageCount > 8) imageCount = 8;
     
     VkSwapchainCreateInfoKHR createInfo = {0};
     createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    createInfo.surface = VK_NULL_HANDLE;  // Would need actual surface
     createInfo.minImageCount = imageCount;
     createInfo.imageFormat = VK_FORMAT_B8G8R8A8_SRGB;
     createInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
@@ -367,7 +340,6 @@ static VkResult create_swapchain(struct VulkanRenderer* renderer,
     createInfo.presentMode = renderer->config.enableVSync ? 
         VK_PRESENT_MODE_FIFO_KHR : VK_PRESENT_MODE_MAILBOX_KHR;
     createInfo.clipped = VK_TRUE;
-    createInfo.oldSwapchain = VK_NULL_HANDLE;
     
     VkResult result = vkCreateSwapchainKHR(renderer->device, &createInfo, NULL, &renderer->swapchain);
     if (result != VK_SUCCESS) {
@@ -383,14 +355,12 @@ static VkResult create_swapchain(struct VulkanRenderer* renderer,
     vkGetSwapchainImagesKHR(renderer->device, renderer->swapchain, &imageCount, renderer->swapchainImages);
     renderer->swapchainImageCount = imageCount;
     
-    LOG_INFO("[Vulkan] Swapchain created: %dx%d, %d images", 
-             extent.width, extent.height, imageCount);
-    
+    LOG_INFO("[Vulkan] Swapchain created: %dx%d, %d images", extent.width, extent.height, imageCount);
     return VK_SUCCESS;
 }
 
 // Create image views
-static VkResult create_image_views(struct VulkanRenderer* renderer) {
+static VkResult create_image_views(struct VulkanRendererInternal* renderer) {
     renderer->swapchainImageViews = 
         (VkImageView*)malloc(renderer->swapchainImageCount * sizeof(VkImageView));
     
@@ -413,13 +383,12 @@ static VkResult create_image_views(struct VulkanRenderer* renderer) {
             return result;
         }
     }
-    
     LOG_INFO("[Vulkan] Image views created");
     return VK_SUCCESS;
 }
 
 // Create render pass
-static VkResult create_render_pass(struct VulkanRenderer* renderer) {
+static VkResult create_render_pass(struct VulkanRendererInternal* renderer) {
     VkAttachmentDescription colorAttachment = {0};
     colorAttachment.format = renderer->swapchainFormat;
     colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -461,16 +430,12 @@ static VkResult create_render_pass(struct VulkanRenderer* renderer) {
         LOG_ERROR("[Vulkan] Failed to create render pass: %d", result);
         return result;
     }
-    
     LOG_INFO("[Vulkan] Render pass created");
     return VK_SUCCESS;
 }
 
 // Create graphics pipeline (placeholder)
-static VkResult create_graphics_pipeline(struct VulkanRenderer* renderer) {
-    // This would create actual pipeline with shaders
-    // For now, create a minimal pipeline layout
-    
+static VkResult create_graphics_pipeline(struct VulkanRendererInternal* renderer) {
     VkPipelineLayoutCreateInfo createInfo = {0};
     createInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     
@@ -480,13 +445,12 @@ static VkResult create_graphics_pipeline(struct VulkanRenderer* renderer) {
         LOG_ERROR("[Vulkan] Failed to create pipeline layout: %d", result);
         return result;
     }
-    
     LOG_INFO("[Vulkan] Pipeline layout created");
     return VK_SUCCESS;
 }
 
 // Create framebuffers
-static VkResult create_framebuffers(struct VulkanRenderer* renderer) {
+static VkResult create_framebuffers(struct VulkanRendererInternal* renderer) {
     renderer->framebuffers = 
         (VkFramebuffer*)malloc(renderer->swapchainImageCount * sizeof(VkFramebuffer));
     
@@ -507,13 +471,12 @@ static VkResult create_framebuffers(struct VulkanRenderer* renderer) {
             return result;
         }
     }
-    
     LOG_INFO("[Vulkan] Framebuffers created");
     return VK_SUCCESS;
 }
 
 // Create command pool
-static VkResult create_command_pool(struct VulkanRenderer* renderer) {
+static VkResult create_command_pool(struct VulkanRendererInternal* renderer) {
     VkCommandPoolCreateInfo createInfo = {0};
     createInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     createInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -525,13 +488,12 @@ static VkResult create_command_pool(struct VulkanRenderer* renderer) {
         LOG_ERROR("[Vulkan] Failed to create command pool: %d", result);
         return result;
     }
-    
     LOG_INFO("[Vulkan] Command pool created");
     return VK_SUCCESS;
 }
 
 // Create command buffers
-static VkResult create_command_buffers(struct VulkanRenderer* renderer) {
+static VkResult create_command_buffers(struct VulkanRendererInternal* renderer) {
     renderer->commandBuffers = 
         (VkCommandBuffer*)malloc(renderer->swapchainImageCount * sizeof(VkCommandBuffer));
     
@@ -546,13 +508,12 @@ static VkResult create_command_buffers(struct VulkanRenderer* renderer) {
         LOG_ERROR("[Vulkan] Failed to create command buffers: %d", result);
         return result;
     }
-    
     LOG_INFO("[Vulkan] Command buffers created");
     return VK_SUCCESS;
 }
 
-// Create synchronization objects
-static VkResult create_sync_objects(struct VulkanRenderer* renderer) {
+// Create sync objects
+static VkResult create_sync_objects(struct VulkanRendererInternal* renderer) {
     renderer->imageAvailableSemaphores = 
         (VkSemaphore*)malloc(renderer->swapchainImageCount * sizeof(VkSemaphore));
     renderer->renderFinishedSemaphores = 
@@ -574,148 +535,111 @@ static VkResult create_sync_objects(struct VulkanRenderer* renderer) {
                              &renderer->renderFinishedSemaphores[i]) != VK_SUCCESS ||
             vkCreateFence(renderer->device, &fenceInfo, NULL, 
                          &renderer->inFlightFences[i]) != VK_SUCCESS) {
-            LOG_ERROR("[Vulkan] Failed to create synchronization objects");
+            LOG_ERROR("[Vulkan] Failed to create sync objects");
             return VK_ERROR_INITIALIZATION_FAILED;
         }
     }
-    
     LOG_INFO("[Vulkan] Synchronization objects created");
     return VK_SUCCESS;
 }
 
-// Public API implementation
-bool vulkan_renderer_init(struct VulkanRenderer* renderer, 
-                          struct VulkanRendererConfig* config) {
-    if (!renderer || !config) {
-        LOG_ERROR("[Vulkan] Invalid parameters");
-        return false;
+// ============================================================================
+// Public API Implementation
+// ============================================================================
+
+VulkanRenderer* vulkan_renderer_create(const VulkanRendererConfig* config) {
+    if (!config) {
+        LOG_ERROR("[Vulkan] Invalid config");
+        return NULL;
     }
     
-    memset(renderer, 0, sizeof(struct VulkanRenderer));
-    renderer->config = *config;
+    struct VulkanRendererInternal* renderer = 
+        (struct VulkanRendererInternal*)calloc(1, sizeof(struct VulkanRendererInternal));
+    if (!renderer) {
+        LOG_ERROR("[Vulkan] Failed to allocate renderer");
+        return NULL;
+    }
     
-    LOG_INFO("[Vulkan] Initializing...");
+    renderer->config = *config;
+    renderer->clearColor[0] = 0.0f;
+    renderer->clearColor[1] = 0.0f;
+    renderer->clearColor[2] = 0.0f;
+    renderer->clearColor[3] = 1.0f;
+    
+    LOG_INFO("[Vulkan] Creating renderer...");
     
     VkResult result;
     
-    // Create instance
     result = create_instance(renderer, config);
-    if (result != VK_SUCCESS) return false;
+    if (result != VK_SUCCESS) { free(renderer); return NULL; }
     
-    // Setup debug messenger
     result = setup_debug_messenger(renderer);
-    if (result != VK_SUCCESS) {
-        vulkan_renderer_cleanup(renderer);
-        return false;
-    }
+    if (result != VK_SUCCESS) { vulkan_renderer_destroy((VulkanRenderer*)renderer); return NULL; }
     
-    // Pick physical device
     result = pick_physical_device(renderer);
-    if (result != VK_SUCCESS) {
-        vulkan_renderer_cleanup(renderer);
-        return false;
-    }
+    if (result != VK_SUCCESS) { vulkan_renderer_destroy((VulkanRenderer*)renderer); return NULL; }
     
-    // Create logical device
     result = create_logical_device(renderer);
-    if (result != VK_SUCCESS) {
-        vulkan_renderer_cleanup(renderer);
-        return false;
-    }
+    if (result != VK_SUCCESS) { vulkan_renderer_destroy((VulkanRenderer*)renderer); return NULL; }
     
-    // Create swapchain (with default size)
     result = create_swapchain(renderer, 1920, 1080);
-    if (result != VK_SUCCESS) {
-        vulkan_renderer_cleanup(renderer);
-        return false;
-    }
+    if (result != VK_SUCCESS) { vulkan_renderer_destroy((VulkanRenderer*)renderer); return NULL; }
     
-    // Create image views
     result = create_image_views(renderer);
-    if (result != VK_SUCCESS) {
-        vulkan_renderer_cleanup(renderer);
-        return false;
-    }
+    if (result != VK_SUCCESS) { vulkan_renderer_destroy((VulkanRenderer*)renderer); return NULL; }
     
-    // Create render pass
     result = create_render_pass(renderer);
-    if (result != VK_SUCCESS) {
-        vulkan_renderer_cleanup(renderer);
-        return false;
-    }
+    if (result != VK_SUCCESS) { vulkan_renderer_destroy((VulkanRenderer*)renderer); return NULL; }
     
-    // Create graphics pipeline
     result = create_graphics_pipeline(renderer);
-    if (result != VK_SUCCESS) {
-        vulkan_renderer_cleanup(renderer);
-        return false;
-    }
+    if (result != VK_SUCCESS) { vulkan_renderer_destroy((VulkanRenderer*)renderer); return NULL; }
     
-    // Create framebuffers
     result = create_framebuffers(renderer);
-    if (result != VK_SUCCESS) {
-        vulkan_renderer_cleanup(renderer);
-        return false;
-    }
+    if (result != VK_SUCCESS) { vulkan_renderer_destroy((VulkanRenderer*)renderer); return NULL; }
     
-    // Create command pool
     result = create_command_pool(renderer);
-    if (result != VK_SUCCESS) {
-        vulkan_renderer_cleanup(renderer);
-        return false;
-    }
+    if (result != VK_SUCCESS) { vulkan_renderer_destroy((VulkanRenderer*)renderer); return NULL; }
     
-    // Create command buffers
     result = create_command_buffers(renderer);
-    if (result != VK_SUCCESS) {
-        vulkan_renderer_cleanup(renderer);
-        return false;
-    }
+    if (result != VK_SUCCESS) { vulkan_renderer_destroy((VulkanRenderer*)renderer); return NULL; }
     
-    // Create sync objects
     result = create_sync_objects(renderer);
-    if (result != VK_SUCCESS) {
-        vulkan_renderer_cleanup(renderer);
-        return false;
-    }
+    if (result != VK_SUCCESS) { vulkan_renderer_destroy((VulkanRenderer*)renderer); return NULL; }
     
     renderer->currentFrame = 0;
     renderer->framebufferResized = false;
     
-    LOG_INFO("[Vulkan] Initialization complete");
-    return true;
+    LOG_INFO("[Vulkan] Renderer created successfully");
+    return (VulkanRenderer*)renderer;
 }
 
-void vulkan_renderer_cleanup(struct VulkanRenderer* renderer) {
+void vulkan_renderer_destroy(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
     if (!renderer) return;
     
-    vulkan_renderer_wait_idle(renderer);
+    vulkan_renderer_wait_idle(renderer_ptr);
     
-    // Free synchronization objects
     if (renderer->device != VK_NULL_HANDLE) {
         for (size_t i = 0; i < renderer->swapchainImageCount; i++) {
-            if (renderer->imageAvailableSemaphores[i] != VK_NULL_HANDLE) {
+            if (renderer->imageAvailableSemaphores[i]) {
                 vkDestroySemaphore(renderer->device, renderer->imageAvailableSemaphores[i], NULL);
             }
-            if (renderer->renderFinishedSemaphores[i] != VK_NULL_HANDLE) {
+            if (renderer->renderFinishedSemaphores[i]) {
                 vkDestroySemaphore(renderer->device, renderer->renderFinishedSemaphores[i], NULL);
             }
-            if (renderer->inFlightFences[i] != VK_NULL_HANDLE) {
+            if (renderer->inFlightFences[i]) {
                 vkDestroyFence(renderer->device, renderer->inFlightFences[i], NULL);
             }
         }
-        
         free(renderer->imageAvailableSemaphores);
         free(renderer->renderFinishedSemaphores);
         free(renderer->inFlightFences);
         
-        // Free command buffers and pool
-        if (renderer->commandPool != VK_NULL_HANDLE) {
+        if (renderer->commandPool) {
             vkDestroyCommandPool(renderer->device, renderer->commandPool, NULL);
         }
         free(renderer->commandBuffers);
         
-        // Free framebuffers
         if (renderer->framebuffers) {
             for (uint32_t i = 0; i < renderer->swapchainImageCount; i++) {
                 vkDestroyFramebuffer(renderer->device, renderer->framebuffers[i], NULL);
@@ -723,17 +647,14 @@ void vulkan_renderer_cleanup(struct VulkanRenderer* renderer) {
             free(renderer->framebuffers);
         }
         
-        // Free pipeline
-        if (renderer->pipelineLayout != VK_NULL_HANDLE) {
+        if (renderer->pipelineLayout) {
             vkDestroyPipelineLayout(renderer->device, renderer->pipelineLayout, NULL);
         }
         
-        // Free render pass
-        if (renderer->renderPass != VK_NULL_HANDLE) {
+        if (renderer->renderPass) {
             vkDestroyRenderPass(renderer->device, renderer->renderPass, NULL);
         }
         
-        // Free image views
         if (renderer->swapchainImageViews) {
             for (uint32_t i = 0; i < renderer->swapchainImageCount; i++) {
                 vkDestroyImageView(renderer->device, renderer->swapchainImageViews[i], NULL);
@@ -741,8 +662,7 @@ void vulkan_renderer_cleanup(struct VulkanRenderer* renderer) {
             free(renderer->swapchainImageViews);
         }
         
-        // Free swapchain
-        if (renderer->swapchain != VK_NULL_HANDLE) {
+        if (renderer->swapchain) {
             vkDestroySwapchainKHR(renderer->device, renderer->swapchain, NULL);
         }
         free(renderer->swapchainImages);
@@ -750,33 +670,29 @@ void vulkan_renderer_cleanup(struct VulkanRenderer* renderer) {
         vkDestroyDevice(renderer->device, NULL);
     }
     
-    // Free debug messenger
-    if (renderer->debugMessenger != VK_NULL_HANDLE) {
+    if (renderer->debugMessenger) {
         PFN_vkDestroyDebugUtilsMessengerEXT func = 
             (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
                 renderer->instance, "vkDestroyDebugUtilsMessengerEXT");
-        if (func) {
-            func(renderer->instance, renderer->debugMessenger, NULL);
-        }
+        if (func) func(renderer->instance, renderer->debugMessenger, NULL);
     }
     
-    // Free instance
-    if (renderer->instance != VK_NULL_HANDLE) {
+    if (renderer->instance) {
         vkDestroyInstance(renderer->instance, NULL);
     }
     
-    memset(renderer, 0, sizeof(struct VulkanRenderer));
-    LOG_INFO("[Vulkan] Cleanup complete");
+    memset(renderer, 0, sizeof(struct VulkanRendererInternal));
+    free(renderer);
+    LOG_INFO("[Vulkan] Renderer destroyed");
 }
 
-bool vulkan_renderer_begin_frame(struct VulkanRenderer* renderer) {
-    if (!renderer || renderer->device == VK_NULL_HANDLE) return false;
+bool vulkan_renderer_begin_frame(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    if (!renderer || !renderer->device) return false;
     
-    // Wait for previous frame
     vkWaitForFences(renderer->device, 1, &renderer->inFlightFences[renderer->currentFrame], 
                    VK_TRUE, UINT64_MAX);
     
-    // Acquire next image
     uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(renderer->device, renderer->swapchain, 
                                            UINT64_MAX,
@@ -785,17 +701,15 @@ bool vulkan_renderer_begin_frame(struct VulkanRenderer* renderer) {
                                            &imageIndex);
     
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
-        vulkan_renderer_resize_swapchain(renderer, 1920, 1080);
+        vulkan_renderer_resize(renderer_ptr, 1920, 1080);
         return false;
     } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-        LOG_ERROR("[Vulkan] Failed to acquire swapchain image: %d", result);
+        LOG_ERROR("[Vulkan] Failed to acquire image: %d", result);
         return false;
     }
     
-    // Reset command buffer
     vkResetCommandBuffer(renderer->commandBuffers[imageIndex], 0);
     
-    // Begin command buffer recording
     VkCommandBufferBeginInfo beginInfo = {0};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     
@@ -807,18 +721,17 @@ bool vulkan_renderer_begin_frame(struct VulkanRenderer* renderer) {
     return true;
 }
 
-bool vulkan_renderer_end_frame(struct VulkanRenderer* renderer) {
-    if (!renderer || renderer->device == VK_NULL_HANDLE) return false;
+bool vulkan_renderer_end_frame(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    if (!renderer || !renderer->device) return false;
     
     uint32_t imageIndex = renderer->currentFrame;
     
-    // End command buffer
     if (vkEndCommandBuffer(renderer->commandBuffers[imageIndex]) != VK_SUCCESS) {
         LOG_ERROR("[Vulkan] Failed to end command buffer");
         return false;
     }
     
-    // Submit command buffer
     VkSubmitInfo submitInfo = {0};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     
@@ -842,7 +755,6 @@ bool vulkan_renderer_end_frame(struct VulkanRenderer* renderer) {
         return false;
     }
     
-    // Present
     VkPresentInfoKHR presentInfo = {0};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     presentInfo.waitSemaphoreCount = 1;
@@ -856,30 +768,28 @@ bool vulkan_renderer_end_frame(struct VulkanRenderer* renderer) {
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || 
         renderer->framebufferResized) {
         renderer->framebufferResized = false;
-        vulkan_renderer_resize_swapchain(renderer, 1920, 1080);
+        vulkan_renderer_resize(renderer_ptr, 1920, 1080);
     } else if (result != VK_SUCCESS) {
         LOG_ERROR("[Vulkan] Failed to present: %d", result);
         return false;
     }
     
     renderer->currentFrame = (renderer->currentFrame + 1) % renderer->swapchainImageCount;
-    
     return true;
 }
 
-void vulkan_renderer_wait_idle(struct VulkanRenderer* renderer) {
-    if (!renderer || renderer->device == VK_NULL_HANDLE) return;
-    
+void vulkan_renderer_wait_idle(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    if (!renderer || !renderer->device) return;
     vkDeviceWaitIdle(renderer->device);
 }
 
-void vulkan_renderer_resize_swapchain(struct VulkanRenderer* renderer,
-                                      uint32_t width, uint32_t height) {
+void vulkan_renderer_resize(VulkanRenderer* renderer_ptr, uint32_t width, uint32_t height) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
     if (!renderer) return;
     
-    vulkan_renderer_wait_idle(renderer);
+    vulkan_renderer_wait_idle(renderer_ptr);
     
-    // Cleanup old swapchain resources
     for (uint32_t i = 0; i < renderer->swapchainImageCount; i++) {
         vkDestroyImageView(renderer->device, renderer->swapchainImageViews[i], NULL);
         vkDestroyFramebuffer(renderer->device, renderer->framebuffers[i], NULL);
@@ -888,86 +798,69 @@ void vulkan_renderer_resize_swapchain(struct VulkanRenderer* renderer,
     free(renderer->framebuffers);
     free(renderer->swapchainImages);
     
-    // Recreate swapchain
     create_swapchain(renderer, width, height);
     create_image_views(renderer);
     create_framebuffers(renderer);
     
-    LOG_INFO("[Vulkan] Swapchain resized to %dx%d", width, height);
+    LOG_INFO("[Vulkan] Resized to %dx%d", width, height);
 }
 
-void vulkan_renderer_set_clear_color(struct VulkanRenderer* renderer,
+void vulkan_renderer_set_clear_color(VulkanRenderer* renderer_ptr,
                                      float r, float g, float b, float a) {
-    // Would set clear color in render pass
-    (void)renderer;
-    (void)r;
-    (void)g;
-    (void)b;
-    (void)a;
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    if (!renderer) return;
+    renderer->clearColor[0] = r;
+    renderer->clearColor[1] = g;
+    renderer->clearColor[2] = b;
+    renderer->clearColor[3] = a;
 }
 
-void vulkan_renderer_draw_quad(struct VulkanRenderer* renderer,
-                               float x, float y, float w, float h,
-                               VkDescriptorSet descriptorSet) {
-    // Would record draw commands
-    (void)renderer;
-    (void)x;
-    (void)y;
-    (void)w;
-    (void)h;
-    (void)descriptorSet;
+void vulkan_renderer_draw_quad(VulkanRenderer* renderer_ptr,
+                               float x, float y, float w, float h) {
+    (void)renderer_ptr;
+    (void)x; (void)y; (void)w; (void)h;
+    // Would record draw commands here
 }
 
-VkResult vulkan_renderer_create_texture(struct VulkanRenderer* renderer,
-                                        struct wlr_buffer* buffer,
-                                        VkImage* image,
-                                        VkImageView* view,
-                                        VkSampler* sampler) {
-    // Would create texture from wlroots buffer
-    (void)renderer;
-    (void)buffer;
-    (void)image;
-    (void)view;
-    (void)sampler;
-    return VK_SUCCESS;
+VulkanTexture* vulkan_renderer_create_texture_from_buffer(VulkanRenderer* renderer_ptr,
+                                                          void* wlr_buffer) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    (void)wlr_buffer;
+    
+    struct VulkanTextureInternal* texture = 
+        (struct VulkanTextureInternal*)calloc(1, sizeof(struct VulkanTextureInternal));
+    if (texture) {
+        texture->width = 1920;
+        texture->height = 1080;
+        texture->format = VK_FORMAT_B8G8R8A8_SRGB;
+    }
+    return (VulkanTexture*)texture;
 }
 
-void vulkan_renderer_destroy_texture(struct VulkanRenderer* renderer,
-                                     VkImage image,
-                                     VkImageView view,
-                                     VkSampler sampler) {
-    // Would destroy texture
-    (void)renderer;
-    (void)image;
-    (void)view;
-    (void)sampler;
+void vulkan_renderer_destroy_texture(VulkanRenderer* renderer_ptr, VulkanTexture* texture_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    struct VulkanTextureInternal* texture = (struct VulkanTextureInternal*)texture_ptr;
+    if (!renderer || !texture) return;
+    
+    if (renderer->device != VK_NULL_HANDLE) {
+        if (texture->view) vkDestroyImageView(renderer->device, texture->view, NULL);
+        if (texture->sampler) vkDestroySampler(renderer->device, texture->sampler, NULL);
+        if (texture->memory) vkFreeMemory(renderer->device, texture->memory, NULL);
+    }
+    free(texture);
 }
 
-VkInstance vulkan_renderer_get_instance(struct VulkanRenderer* renderer) {
-    return renderer ? renderer->instance : VK_NULL_HANDLE;
+void vulkan_renderer_bind_texture(VulkanRenderer* renderer_ptr, VulkanTexture* texture_ptr) {
+    (void)renderer_ptr;
+    (void)texture_ptr;
+    // Would bind texture for rendering
 }
 
-VkDevice vulkan_renderer_get_device(struct VulkanRenderer* renderer) {
-    return renderer ? renderer->device : VK_NULL_HANDLE;
-}
-
-VkPhysicalDevice vulkan_renderer_get_physical_device(struct VulkanRenderer* renderer) {
-    return renderer ? renderer->physicalDevice : VK_NULL_HANDLE;
-}
-
-VkQueue vulkan_renderer_get_graphics_queue(struct VulkanRenderer* renderer) {
-    return renderer ? renderer->graphicsQueue : VK_NULL_HANDLE;
-}
-
-bool vulkan_renderer_is_available(void) {
-    uint32_t extensionCount;
-    vkEnumerateInstanceExtensionProperties(NULL, &extensionCount, NULL);
-    return extensionCount > 0;
-}
-
-const char* vulkan_renderer_get_info(struct VulkanRenderer* renderer) {
+const char* vulkan_renderer_get_gpu_info(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
     static char info[512];
-    if (!renderer || renderer->physicalDevice == VK_NULL_HANDLE) {
+    
+    if (!renderer || !renderer->physicalDevice) {
         return "Vulkan not initialized";
     }
     
@@ -985,4 +878,30 @@ const char* vulkan_renderer_get_info(struct VulkanRenderer* renderer) {
              VK_VERSION_PATCH(props.apiVersion));
     
     return info;
+}
+
+bool vulkan_renderer_is_available(void) {
+    uint32_t extensionCount;
+    vkEnumerateInstanceExtensionProperties(NULL, &extensionCount, NULL);
+    return extensionCount > 0;
+}
+
+void* vulkan_renderer_get_instance(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    return renderer ? (void*)renderer->instance : NULL;
+}
+
+void* vulkan_renderer_get_device(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    return renderer ? (void*)renderer->device : NULL;
+}
+
+void* vulkan_renderer_get_physical_device(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    return renderer ? (void*)renderer->physicalDevice : NULL;
+}
+
+void* vulkan_renderer_get_graphics_queue(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    return renderer ? (void*)renderer->graphicsQueue : NULL;
 }

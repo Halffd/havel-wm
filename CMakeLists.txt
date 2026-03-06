@@ -208,9 +208,8 @@ set(WM_CORE_SOURCES
     src/wm/plugins/DrawPlugin.cpp
     src/wm/plugins/FPSPlugin.cpp
     src/wm/plugins/GammaPlugin.cpp
-    # Vulkan renderer (WIP - needs C bridge integration)
-    # src/wm/render/VulkanRenderer.c
-    # src/wm/render/VulkanRendererBridge.h
+    src/wm/render/VulkanRenderer.c
+    src/wm/render/VulkanRendererBridge.h
     # Animation plugins (WIP - need interface adjustments)
     # src/wm/plugins/WobblyWindowsPlugin.cpp
     # src/wm/plugins/DestroyOnClosePlugin.cpp
@@ -245,13 +244,13 @@ target_include_directories(wlr_bridge PUBLIC
 target_include_directories(wlr_bridge PRIVATE
     ${WLROOTS_INCLUDE_DIRS}
     ${PROTOCOL_HEADERS_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm
+    ${VULKAN_INCLUDE_DIRS}
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
 )
 target_compile_definitions(wlr_bridge PRIVATE WLR_USE_UNSTABLE)
 target_link_libraries(wlr_bridge
     ${WLROOTS_LIBRARIES}
+    ${VULKAN_LIBRARIES}
 )
 set_target_properties(wlr_bridge PROPERTIES
     LINKER_LANGUAGE C
