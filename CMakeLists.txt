@@ -210,6 +210,10 @@ set(WM_CORE_SOURCES
     src/wm/plugins/GammaPlugin.cpp
     src/wm/render/VulkanRenderer.c
     src/wm/render/VulkanRendererBridge.h
+    src/wm/render/VulkanSceneCompositor.c
+    src/wm/render/VulkanSceneCompositor.h
+    src/wm/render/VulkanOverlayRenderer.c
+    src/wm/render/VulkanOverlayRenderer.h
     # Animation plugins (WIP - need interface adjustments)
     # src/wm/plugins/WobblyWindowsPlugin.cpp
     # src/wm/plugins/DestroyOnClosePlugin.cpp
