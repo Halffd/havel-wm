@@ -4,6 +4,7 @@
 #include <wm/wlr_bridge.h>
 #include <Logger.h>
 #include <wm/render_c.h>
+#include <core/LoadingScreen.h>
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -1683,11 +1684,23 @@ havel_wlr_server_t* havel_wlr_create(void) {
         return NULL;
     }
     LOG_INFO("[ALLOCATOR] Allocator created successfully");
+    
+    // Update loading screen
+    if (loading_screen_is_visible()) {
+        loading_screen_set_status("Initializing shell and plugins...");
+        loading_screen_set_progress(50);
+    }
     server->compositor = wlr_compositor_create(server->display, 5, server->renderer);
     struct wlr_subcompositor *sub = wlr_subcompositor_create(server->display);
     fprintf(stderr, "subcompositor_create: %p\n", (void *)sub);
     // wl_shm is auto-created by wlroots 0.20 with renderer - don't create twice
     wlr_data_device_manager_create(server->display);
+
+    // Update loading screen
+    if (loading_screen_is_visible()) {
+        loading_screen_set_status("Creating allocator and compositor...");
+        loading_screen_set_progress(30);
+    }
 
     server->output_layout = wlr_output_layout_create(server->display);
     server->scene = wlr_scene_create();
@@ -1716,6 +1729,16 @@ havel_wlr_server_t* havel_wlr_create(void) {
     wlr_scene_node_raise_to_top(&server->overlay_layer->node);
     wlr_scene_node_set_enabled(&server->overlay_layer->node, true);  // ENABLED for testing
     LOG_INFO("[Overlay] Overlay layer created (ENABLED for testing)");
+
+    // Initialize loading screen (before outputs are created)
+    loading_screen_init(server->overlay_layer);
+    
+    // Show loading screen
+    if (loading_screen_get_config()->enabled) {
+        loading_screen_show();
+        loading_screen_set_status("Initializing compositor...");
+        loading_screen_set_progress(10);
+    }
 
     // Pass overlay layer to C++ server for plugin rendering
     havel_cpp_server_set_overlay_layer(server->cpp_server, server->overlay_layer);
@@ -1794,6 +1817,12 @@ havel_wlr_server_t* havel_wlr_create(void) {
     server->new_input.notify = server_new_input;
     wl_signal_add(&server->backend->events.new_input, &server->new_input);
 
+    // Update loading screen - almost ready
+    if (loading_screen_is_visible()) {
+        loading_screen_set_status("Finalizing initialization...");
+        loading_screen_set_progress(90);
+    }
+
     return server;
 }
 
@@ -1836,6 +1865,17 @@ int havel_wlr_run(havel_wlr_server_t *server) {
     setenv("WAYLAND_DISPLAY", socket, true);
     LOG_INFO("=== Havel Compositor running on %s ===", socket);
     printf("Havel Compositor running on %s\n", socket);
+
+    // Hide loading screen once compositor is fully running
+    if (loading_screen_is_visible()) {
+        loading_screen_set_progress(100);
+        loading_screen_set_status("Ready!");
+        
+        // Auto-hide after 1 second
+        struct LoadingScreenConfig* config = loading_screen_get_config();
+        config->timeout_ms = 1000;
+        loading_screen_start_timer();
+    }
 
     wl_display_run(server->display);
     

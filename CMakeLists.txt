@@ -153,6 +153,8 @@ set(WM_CORE_SOURCES
     # XWaylandDnD - WIP, needs wlroots integration
     # src/wm/core/XWaylandDnD.cpp
     # src/wm/core/XWaylandDnD.hpp
+    src/wm/core/LoadingScreen.c
+    src/wm/core/LoadingScreen.h
     src/wm/render/RenderPipeline.cpp
     src/wm/render/render_c_wrappers.c
     src/wm/render/ShaderEffect.cpp

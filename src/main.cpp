@@ -1,4 +1,5 @@
 #include <wm/wlr_bridge.h>
+#include <core/LoadingScreen.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,14 +9,17 @@ static void print_usage(const char* prog) {
     printf("Usage: %s [OPTIONS]\n", prog);
     printf("\nOptions:\n");
     printf("  -s, --startup <command>  Command to execute on startup\n");
+    printf("  --no-loading-screen      Disable loading screen\n");
     printf("  -h, --help               Show this help message\n");
     printf("\nExamples:\n");
     printf("  %s -s 'foot'             Start foot terminal on launch\n", prog);
     printf("  %s -s 'swaybg -i bg.png' Start with wallpaper\n", prog);
+    printf("  %s --no-loading-screen   Start without loading screen\n", prog);
 }
 
 int main(int argc, char* argv[]) {
     const char* startup_cmd = NULL;
+    bool loading_screen_enabled = true;
 
     // Parse command-line arguments
     for (int i = 1; i < argc; i++) {
@@ -27,6 +31,8 @@ int main(int argc, char* argv[]) {
                 print_usage(argv[0]);
                 return 1;
             }
+        } else if (strcmp(argv[i], "--no-loading-screen") == 0) {
+            loading_screen_enabled = false;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -40,6 +46,12 @@ int main(int argc, char* argv[]) {
     havel_wlr_server_t* server = havel_wlr_create();
     if (!server) {
         return 1;
+    }
+
+    // Disable loading screen if requested
+    if (!loading_screen_enabled) {
+        struct LoadingScreenConfig* config = loading_screen_get_config();
+        config->enabled = false;
     }
 
     // Execute startup command if specified
