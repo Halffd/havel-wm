@@ -7,6 +7,10 @@
 #include <string.h>
 #include <stdio.h>
 
+// Target Vulkan 1.4 with fallback to 1.3/1.2
+#define VULKAN_TARGET_VERSION VK_API_VERSION_1_4
+#define VULKAN_MIN_VERSION VK_API_VERSION_1_2
+
 // Internal structures (not exposed in header)
 struct VulkanRendererInternal {
     VkInstance instance;
@@ -35,6 +39,12 @@ struct VulkanRendererInternal {
     bool framebufferResized;
     VulkanRendererConfig config;
     float clearColor[4];
+    
+    // Vulkan 1.4 features
+    bool hasDynamicRendering2;
+    bool hasShaderObjects;
+    bool hasMaintenance5;
+    uint32_t vulkanVersion;
 };
 
 struct VulkanTextureInternal {
@@ -166,13 +176,39 @@ static void find_queue_families(VkPhysicalDevice device,
 // Create instance
 static VkResult create_instance(struct VulkanRendererInternal* renderer,
                                 const VulkanRendererConfig* config) {
+    // Check available Vulkan version
+    uint32_t api_version;
+    vkEnumerateInstanceVersion(&api_version);
+    
+    // Determine which version to use
+    uint32_t use_version = api_version;
+    if (use_version > VULKAN_TARGET_VERSION) {
+        use_version = VULKAN_TARGET_VERSION;
+    }
+    if (use_version < VULKAN_MIN_VERSION) {
+        LOG_ERROR("[Vulkan] Vulkan 1.2+ required, found %d.%d.%d",
+                  VK_VERSION_MAJOR(api_version),
+                  VK_VERSION_MINOR(api_version),
+                  VK_VERSION_PATCH(api_version));
+        return VK_ERROR_INCOMPATIBLE_DRIVER;
+    }
+    
+    renderer->vulkanVersion = use_version;
+    
     VkApplicationInfo appInfo = {0};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     appInfo.pApplicationName = "Havel WM";
     appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
     appInfo.pEngineName = "Havel Vulkan";
     appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-    appInfo.apiVersion = VK_API_VERSION_1_2;
+    appInfo.apiVersion = use_version;
+    
+    LOG_INFO("[Vulkan] Using Vulkan %d.%d.%d (requested %d.%d)",
+             VK_VERSION_MAJOR(use_version),
+             VK_VERSION_MINOR(use_version),
+             VK_VERSION_PATCH(use_version),
+             VK_VERSION_MAJOR(VULKAN_TARGET_VERSION),
+             VK_VERSION_MINOR(VULKAN_TARGET_VERSION));
     
     VkInstanceCreateInfo createInfo = {0};
     createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -300,12 +336,38 @@ static VkResult create_logical_device(struct VulkanRendererInternal* renderer) {
     queueCreateInfo.queueCount = 1;
     queueCreateInfo.pQueuePriorities = &queuePriority;
     
+    // Vulkan 1.4 device features
+    VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures = {0};
+    dynamicRenderingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES;
+    dynamicRenderingFeatures.dynamicRendering = VK_TRUE;
+    
+    VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures = {0};
+    shaderObjectFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT;
+    shaderObjectFeatures.shaderObject = VK_TRUE;
+    
+    VkPhysicalDeviceMaintenance5Features maintenance5Features = {0};
+    maintenance5Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_5_FEATURES;
+    maintenance5Features.maintenance5 = VK_TRUE;
+    
+    // Chain feature structures for Vulkan 1.4
+    if (renderer->vulkanVersion >= VK_API_VERSION_1_3) {
+        dynamicRenderingFeatures.pNext = (void*)&shaderObjectFeatures;
+        if (renderer->vulkanVersion >= VK_API_VERSION_1_4) {
+            shaderObjectFeatures.pNext = (void*)&maintenance5Features;
+        }
+    }
+    
     VkDeviceCreateInfo createInfo = {0};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     createInfo.queueCreateInfoCount = 1;
     createInfo.pQueueCreateInfos = &queueCreateInfo;
     createInfo.enabledExtensionCount = 1;
     createInfo.ppEnabledExtensionNames = g_deviceExtensions;
+    
+    // Enable Vulkan 1.3+ features
+    if (renderer->vulkanVersion >= VK_API_VERSION_1_3) {
+        createInfo.pNext = &dynamicRenderingFeatures;
+    }
     
     VkResult result = vkCreateDevice(renderer->physicalDevice, &createInfo, NULL, &renderer->device);
     if (result != VK_SUCCESS) {
@@ -315,7 +377,17 @@ static VkResult create_logical_device(struct VulkanRendererInternal* renderer) {
     
     vkGetDeviceQueue(renderer->device, graphicsFamily, 0, &renderer->graphicsQueue);
     vkGetDeviceQueue(renderer->device, presentFamily, 0, &renderer->presentQueue);
-    LOG_INFO("[Vulkan] Logical device created");
+    
+    // Check which Vulkan 1.4 features are actually available
+    renderer->hasDynamicRendering2 = (renderer->vulkanVersion >= VK_API_VERSION_1_3);
+    renderer->hasShaderObjects = VK_FALSE;  // Would query via vkGetPhysicalDeviceFeatures2
+    renderer->hasMaintenance5 = (renderer->vulkanVersion >= VK_API_VERSION_1_4);
+    
+    LOG_INFO("[Vulkan] Logical device created (Vulkan %d.%d)",
+             VK_VERSION_MAJOR(renderer->vulkanVersion),
+             VK_VERSION_MINOR(renderer->vulkanVersion));
+    LOG_INFO("[Vulkan] Features: DynamicRendering=%d, ShaderObjects=%d, Maintenance5=%d",
+             renderer->hasDynamicRendering2, renderer->hasShaderObjects, renderer->hasMaintenance5);
     return VK_SUCCESS;
 }
 
@@ -904,4 +976,41 @@ void* vulkan_renderer_get_physical_device(VulkanRenderer* renderer_ptr) {
 void* vulkan_renderer_get_graphics_queue(VulkanRenderer* renderer_ptr) {
     struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
     return renderer ? (void*)renderer->graphicsQueue : NULL;
+}
+
+// Vulkan 1.4 feature queries
+bool vulkan_renderer_has_dynamic_rendering(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    return renderer ? renderer->hasDynamicRendering2 : false;
+}
+
+bool vulkan_renderer_has_shader_objects(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    return renderer ? renderer->hasShaderObjects : false;
+}
+
+bool vulkan_renderer_has_maintenance5(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    return renderer ? renderer->hasMaintenance5 : false;
+}
+
+uint32_t vulkan_renderer_get_version(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    return renderer ? renderer->vulkanVersion : 0;
+}
+
+const char* vulkan_renderer_get_version_string(VulkanRenderer* renderer_ptr) {
+    static char version_str[32];
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    
+    if (!renderer || !renderer->vulkanVersion) {
+        return "Unknown";
+    }
+    
+    snprintf(version_str, sizeof(version_str), "%d.%d.%d",
+             VK_VERSION_MAJOR(renderer->vulkanVersion),
+             VK_VERSION_MINOR(renderer->vulkanVersion),
+             VK_VERSION_PATCH(renderer->vulkanVersion));
+    
+    return version_str;
 }

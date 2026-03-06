@@ -61,6 +61,13 @@ void* vulkan_renderer_get_device(VulkanRenderer* renderer);
 void* vulkan_renderer_get_physical_device(VulkanRenderer* renderer);
 void* vulkan_renderer_get_graphics_queue(VulkanRenderer* renderer);
 
+// Vulkan 1.4 feature queries
+bool vulkan_renderer_has_dynamic_rendering(VulkanRenderer* renderer);
+bool vulkan_renderer_has_shader_objects(VulkanRenderer* renderer);
+bool vulkan_renderer_has_maintenance5(VulkanRenderer* renderer);
+uint32_t vulkan_renderer_get_version(VulkanRenderer* renderer);
+const char* vulkan_renderer_get_version_string(VulkanRenderer* renderer);
+
 #ifdef __cplusplus
 }
 #endif
