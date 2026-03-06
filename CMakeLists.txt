@@ -240,6 +240,8 @@ set(WM_CORE_SOURCES
     src/wm/render/GLES2Renderer.h
     src/wm/render/UnifiedRenderer.c
     src/wm/render/UnifiedRenderer.h
+    src/wm/render/WlrBinding.c
+    src/wm/render/WlrBinding.h
     # Animation plugins (WIP - need interface adjustments)
     # src/wm/plugins/WobblyWindowsPlugin.cpp
     # src/wm/plugins/DestroyOnClosePlugin.cpp
