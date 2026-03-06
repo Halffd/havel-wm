@@ -263,6 +263,24 @@ void unified_renderer_set_clear_color(UnifiedRenderer* renderer, float r, float 
     }
 }
 
+void unified_renderer_set_vsync_enabled(UnifiedRenderer* renderer, bool enabled) {
+    if (!renderer) return;
+    
+    if (renderer->backend == RENDERER_VULKAN && renderer->vulkan) {
+        vulkan_renderer_set_vsync_enabled(renderer->vulkan, enabled);
+    }
+    // GLES2 VSync handled by wlroots
+}
+
+bool unified_renderer_is_vsync_enabled(UnifiedRenderer* renderer) {
+    if (!renderer) return false;
+    
+    if (renderer->backend == RENDERER_VULKAN && renderer->vulkan) {
+        return vulkan_renderer_is_vsync_enabled(renderer->vulkan);
+    }
+    return false;  // GLES2 VSync state unknown
+}
+
 UnifiedTexture* unified_renderer_create_texture(UnifiedRenderer* renderer, uint32_t width, uint32_t height) {
     if (!renderer) return NULL;
     

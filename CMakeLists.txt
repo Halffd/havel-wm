@@ -246,6 +246,8 @@ set(WM_CORE_SOURCES
     src/wm/render/DamageTracker.h
     src/wm/render/MultiGPU.c
     src/wm/render/MultiGPU.h
+    src/wm/render/CompositorRenderer.c
+    src/wm/render/CompositorRenderer.h
     # Animation plugins (WIP - need interface adjustments)
     # src/wm/plugins/WobblyWindowsPlugin.cpp
     # src/wm/plugins/DestroyOnClosePlugin.cpp

@@ -43,6 +43,10 @@ bool unified_renderer_begin_frame(UnifiedRenderer* renderer, int width, int heig
 bool unified_renderer_end_frame(UnifiedRenderer* renderer);
 void unified_renderer_set_clear_color(UnifiedRenderer* renderer, float r, float g, float b, float a);
 
+// VSync control
+void unified_renderer_set_vsync_enabled(UnifiedRenderer* renderer, bool enabled);
+bool unified_renderer_is_vsync_enabled(UnifiedRenderer* renderer);
+
 // Texture operations
 typedef struct UnifiedTexture UnifiedTexture;
 
