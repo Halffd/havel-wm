@@ -68,6 +68,21 @@ static const char* g_deviceExtensions[] = {
 };
 static const uint32_t g_deviceExtensionCount = 1;
 
+// Instance extensions (for surface/presentation)
+static const char* g_instanceExtensions[] = {
+    VK_KHR_SURFACE_EXTENSION_NAME,
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+    VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
+#endif
+#ifdef VK_USE_PLATFORM_XLIB_KHR
+    VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
+#endif
+#ifdef VK_USE_PLATFORM_XCB_KHR
+    VK_KHR_XCB_SURFACE_EXTENSION_NAME,
+#endif
+};
+static const uint32_t g_instanceExtensionCount = sizeof(g_instanceExtensions) / sizeof(g_instanceExtensions[0]);
+
 // Debug callback
 static VKAPI_ATTR VkBool32 VKAPI_CALL vulkan_debug_callback(
     VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
@@ -103,14 +118,8 @@ static bool check_validation_layer_support(void) {
 
 // Get required extensions
 static const char** get_required_extensions(uint32_t* extensionCount) {
-    static const char* extensions[] = {
-        VK_KHR_SURFACE_EXTENSION_NAME,
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
-        VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
-#endif
-    };
-    *extensionCount = sizeof(extensions) / sizeof(extensions[0]);
-    return extensions;
+    *extensionCount = g_instanceExtensionCount;
+    return g_instanceExtensions;
 }
 
 // Rate device suitability
@@ -1013,4 +1022,82 @@ const char* vulkan_renderer_get_version_string(VulkanRenderer* renderer_ptr) {
              VK_VERSION_PATCH(renderer->vulkanVersion));
     
     return version_str;
+}
+
+// KHR_surface/presentation queries
+bool vulkan_renderer_get_surface_formats(VulkanRenderer* renderer_ptr, void* surface,
+                                         VkSurfaceFormatKHR** formats, uint32_t* count) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    
+    if (!renderer || !surface || !formats || !count) return false;
+    
+    // Query number of formats
+    VkResult result = vkGetPhysicalDeviceSurfaceFormatsKHR(
+        renderer->physicalDevice, (VkSurfaceKHR)surface, count, NULL);
+    
+    if (result != VK_SUCCESS || *count == 0) {
+        return false;
+    }
+    
+    // Allocate and query formats
+    *formats = (VkSurfaceFormatKHR*)malloc(*count * sizeof(VkSurfaceFormatKHR));
+    if (!*formats) {
+        *count = 0;
+        return false;
+    }
+    
+    result = vkGetPhysicalDeviceSurfaceFormatsKHR(
+        renderer->physicalDevice, (VkSurfaceKHR)surface, count, *formats);
+    
+    return (result == VK_SUCCESS);
+}
+
+bool vulkan_renderer_get_surface_present_modes(VulkanRenderer* renderer_ptr, void* surface,
+                                               VkPresentModeKHR** modes, uint32_t* count) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    
+    if (!renderer || !surface || !modes || !count) return false;
+    
+    // Query number of modes
+    VkResult result = vkGetPhysicalDeviceSurfacePresentModesKHR(
+        renderer->physicalDevice, (VkSurfaceKHR)surface, count, NULL);
+    
+    if (result != VK_SUCCESS || *count == 0) {
+        return false;
+    }
+    
+    // Allocate and query modes
+    *modes = (VkPresentModeKHR*)malloc(*count * sizeof(VkPresentModeKHR));
+    if (!*modes) {
+        *count = 0;
+        return false;
+    }
+    
+    result = vkGetPhysicalDeviceSurfacePresentModesKHR(
+        renderer->physicalDevice, (VkSurfaceKHR)surface, count, *modes);
+    
+    return (result == VK_SUCCESS);
+}
+
+bool vulkan_renderer_select_present_mode(VulkanRenderer* renderer_ptr, void* surface,
+                                         VkPresentModeKHR* selected_mode) {
+    VkPresentModeKHR* modes;
+    uint32_t mode_count;
+    
+    if (!vulkan_renderer_get_surface_present_modes(renderer_ptr, surface, &modes, &mode_count)) {
+        return false;
+    }
+    
+    // Prefer mailbox (tear-free, non-blocking), then FIFO (tear-free), then immediate
+    *selected_mode = VK_PRESENT_MODE_FIFO_KHR;  // Default (always supported)
+    
+    for (uint32_t i = 0; i < mode_count; i++) {
+        if (modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
+            *selected_mode = VK_PRESENT_MODE_MAILBOX_KHR;
+            break;
+        }
+    }
+    
+    free(modes);
+    return true;
 }

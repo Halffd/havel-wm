@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <vulkan/vulkan.h>
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -67,6 +68,14 @@ bool vulkan_renderer_has_shader_objects(VulkanRenderer* renderer);
 bool vulkan_renderer_has_maintenance5(VulkanRenderer* renderer);
 uint32_t vulkan_renderer_get_version(VulkanRenderer* renderer);
 const char* vulkan_renderer_get_version_string(VulkanRenderer* renderer);
+
+// KHR_surface/presentation queries
+bool vulkan_renderer_get_surface_formats(VulkanRenderer* renderer, void* surface,
+                                         VkSurfaceFormatKHR** formats, uint32_t* count);
+bool vulkan_renderer_get_surface_present_modes(VulkanRenderer* renderer, void* surface,
+                                               VkPresentModeKHR** modes, uint32_t* count);
+bool vulkan_renderer_select_present_mode(VulkanRenderer* renderer, void* surface,
+                                         VkPresentModeKHR* selected_mode);
 
 #ifdef __cplusplus
 }
