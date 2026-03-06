@@ -214,6 +214,8 @@ set(WM_CORE_SOURCES
     src/wm/render/VulkanSceneCompositor.h
     src/wm/render/VulkanOverlayRenderer.c
     src/wm/render/VulkanOverlayRenderer.h
+    src/wm/render/VulkanDmaBuf.c
+    src/wm/render/VulkanDmaBuf.h
     # Animation plugins (WIP - need interface adjustments)
     # src/wm/plugins/WobblyWindowsPlugin.cpp
     # src/wm/plugins/DestroyOnClosePlugin.cpp
