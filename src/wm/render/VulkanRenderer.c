@@ -1,6 +1,7 @@
 // Vulkan Renderer Implementation - C only
 
 #include "VulkanRendererBridge.h"
+#include <utils/Common.h>
 #include <vulkan/vulkan.h>
 #include <Logger.h>
 #include <stdlib.h>
@@ -683,9 +684,8 @@ VulkanRenderer* vulkan_renderer_create(const VulkanRendererConfig* config) {
         LOG_ERROR("[Vulkan] Invalid config");
         return NULL;
     }
-    
-    struct VulkanRendererInternal* renderer = 
-        (struct VulkanRendererInternal*)calloc(1, sizeof(struct VulkanRendererInternal));
+
+    struct VulkanRendererInternal* renderer = CALLOC_T(struct VulkanRendererInternal, 1);
     if (!renderer) {
         LOG_ERROR("[Vulkan] Failed to allocate renderer");
         return NULL;
