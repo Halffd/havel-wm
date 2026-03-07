@@ -175,24 +175,51 @@ FileManagerWindow::~FileManagerWindow() {
 }
 
 void FileManagerWindow::setupUI() {
-    // Create file system models
+    // Create file system models - DON'T show hidden files by default
     m_fileModel = new QFileSystemModel(this);
     m_fileModel->setRootPath("");
-    m_fileModel->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden);
-    
+    m_fileModel->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot);  // No Hidden!
+
     m_directoryModel = new QFileSystemModel(this);
     m_directoryModel->setRootPath("");
-    m_directoryModel->setFilter(QDir::AllDirs | QDir::NoDotAndDotDot | QDir::Hidden);
+    m_directoryModel->setFilter(QDir::AllDirs | QDir::NoDotAndDotDot);  // No Hidden!
     
+    // Set dark theme colors
+    QPalette darkPalette;
+    darkPalette.setColor(QPalette::Window, QColor(30, 30, 30));
+    darkPalette.setColor(QPalette::WindowText, QColor(200, 200, 200));
+    darkPalette.setColor(QPalette::Base, QColor(40, 40, 40));
+    darkPalette.setColor(QPalette::AlternateBase, QColor(50, 50, 50));
+    darkPalette.setColor(QPalette::Text, QColor(200, 200, 200));
+    darkPalette.setColor(QPalette::Button, QColor(50, 50, 50));
+    darkPalette.setColor(QPalette::ButtonText, QColor(200, 200, 200));
+    darkPalette.setColor(QPalette::Highlight, QColor(70, 130, 180));
+    darkPalette.setColor(QPalette::HighlightedText, Qt::white);
+    
+    setPalette(darkPalette);
+    setStyleSheet(
+        "QTreeView { "
+        "    background-color: #282828; "
+        "    color: #c8c8c8; "
+        "    border: none; "
+        "} "
+        "QTreeView::item:selected { "
+        "    background-color: #4682b4; "
+        "} "
+        "QTreeView::item:hover { "
+        "    background-color: #3a3a3a; "
+        "}"
+    );
+
     // Create tab widget
     m_tabWidget = new QTabWidget();
     m_tabWidget->setTabsClosable(true);
     m_tabWidget->setMovable(true);
     m_tabWidget->setDocumentMode(true);
-    
+
     connect(m_tabWidget, &QTabWidget::tabCloseRequested, this, &FileManagerWindow::closeTab);
     connect(m_tabWidget, &QTabWidget::currentChanged, this, &FileManagerWindow::currentTabChanged);
-    
+
     setCentralWidget(m_tabWidget);
 }
 
