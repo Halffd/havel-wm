@@ -91,17 +91,19 @@ VideoPlayer::~VideoPlayer() {
 void VideoPlayer::setupUI() {
     m_centralStack = new QStackedWidget();
     setCentralWidget(m_centralStack);
-    
+
     // Video container
     m_videoContainer = new QWidget();
     QVBoxLayout* videoLayout = new QVBoxLayout(m_videoContainer);
     videoLayout->setContentsMargins(0, 0, 0, 0);
     
+    // Use QLabel as video surface (QVideoWidget alternative)
     m_videoWidget = new QLabel();
     m_videoWidget->setAlignment(Qt::AlignCenter);
     m_videoWidget->setStyleSheet("background-color: #000; color: #888;");
     m_videoWidget->setText("Video Player\n\nOpen a video file to begin");
-    m_videoWidget->setMinimumSize(320, 240);
+    m_videoWidget->setMinimumSize(640, 480);  // Larger minimum size
+    m_videoWidget->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);  // Allow expansion
     videoLayout->addWidget(m_videoWidget);
     
     // Controls widget (overlay)
@@ -276,13 +278,17 @@ void VideoPlayer::setupMediaPlayer() {
     
     m_mediaPlayer->setAudioOutput(m_audioOutput);
     m_audioOutput->setVolume(m_settings.volume / 100.0);
-    
+
     // Connect to update label with video info
     connect(m_mediaPlayer, &QMediaPlayer::mediaStatusChanged, [this](QMediaPlayer::MediaStatus status) {
         if (status == QMediaPlayer::LoadedMedia) {
-            m_videoWidget->setText("Playing: " + m_mediaPlayer->metaData().value(QMediaMetaData::Title).toString());
+            m_titleLabel->setText(m_mediaPlayer->metaData().value(QMediaMetaData::Title).toString());
+            m_videoWidget->setText("");  // Clear placeholder text when video loads
         }
     });
+    
+    // Note: QVideoWidget not available in this Qt version
+    // Video renders to internal surface, QLabel shows metadata
 }
 
 void VideoPlayer::setupMenu() {

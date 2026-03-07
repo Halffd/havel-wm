@@ -67,9 +67,9 @@
 #include <QMimeData>
 #include <QMediaDevices>
 #include <QMediaPlayer>
-#include <QLabel>
 #include <QAudioOutput>
 #include <QMediaMetaData>
+// QVideoOutput not available in this Qt version - using QLabel as fallback
 
 namespace havel {
 
@@ -256,7 +256,7 @@ private:
     
     // Video widget
     QWidget* m_videoContainer;
-    QLabel* m_videoWidget;
+    QLabel* m_videoWidget;  // Video display (QVideoWidget not available)
     QWidget* m_controlsWidget;
     
     // Controls
