@@ -429,4 +429,12 @@ if(PANEL_ENABLED)
 
     # Build and install lock screen
     add_subdirectory(src/shell/lockscreen)
+
+    # Build utilities test
+    add_executable(test-utilities tests/test_utilities.c)
+    target_include_directories(test-utilities PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+    )
+    target_link_libraries(test-utilities m)
 endif()
