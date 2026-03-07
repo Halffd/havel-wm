@@ -28,12 +28,15 @@ int main(int argc, char* argv[]) {
     // Create and show panel
     havel::PanelWindow panel;
     panel.show();
-    
-    // Connect to compositor
+
+    // Try to connect to compositor IPC
+    // Note: This will fail if compositor isn't running - that's OK
+    // Panel will work in standalone mode (clock, launcher, etc.)
     if (!panel.connectToCompositor(socketPath)) {
-        qWarning("Failed to connect to IPC socket: %s", qPrintable(socketPath));
-        qWarning("Make sure havel compositor is running with IPC enabled");
+        // Silent failure - panel works without compositor
+        // Just show clock and launcher, no window list
+        panel.showStandaloneMode();
     }
-    
+
     return app.exec();
 }

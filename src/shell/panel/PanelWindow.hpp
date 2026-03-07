@@ -27,6 +27,9 @@ public:
 
     // Connect to compositor IPC
     bool connectToCompositor(const QString& socketPath);
+    
+    // Show standalone mode (no window list)
+    void showStandaloneMode();
 
 private slots:
     void onWindowsUpdated(const QVector<WindowInfo>& windows);

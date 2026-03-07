@@ -62,6 +62,14 @@ bool PanelWindow::connectToCompositor(const QString& socketPath) {
     return m_ipcClient->connectToSocket(socketPath);
 }
 
+void PanelWindow::showStandaloneMode() {
+    // Standalone mode: no window list, just clock and launcher
+    m_statusLabel->setText("Standalone");
+    // Disable window-related features
+    m_windowList.clear();
+    m_focusedWindow = 0;
+}
+
 void PanelWindow::setupUI() {
     setCentralWidget(m_centralWidget);
     
