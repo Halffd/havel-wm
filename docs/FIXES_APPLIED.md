@@ -15,45 +15,15 @@
 - `src/shell/terminal/Terminal.hpp` - Fixed handleSpecialKey return type
 - `src/shell/terminal/Terminal.cpp` - All fixes
 
-**Changes:**
-```cpp
-// Before
-setReadOnly(true);  // Can't type!
-m_foreground = Qt::white;  // Blinding white
-m_background = Qt::black;
-
-// After
-setReadOnly(false);  // Can type!
-m_foreground = QColor(200, 200, 200);  // Easy on eyes
-m_background = QColor(30, 30, 30);  // Dark gray
-setStyleSheet("QPlainTextEdit { border: none; ... }");
-```
-
 ### 2. File Manager
 **Problems Fixed:**
 - ❌ Pure white background → ✅ Dark theme (#282828)
 - ❌ White text on white → ✅ Gray text on dark background
 - ❌ Shows ALL dotfiles → ✅ Hidden files hidden by default
-- ❌ White thumbnails → ✅ Will be fixed with dark theme
+- ❌ White thumbnails → ✅ Fixed with dark theme
 
 **Files Modified:**
 - `src/shell/filemanager/FileManager.cpp`
-
-**Changes:**
-```cpp
-// Before
-m_fileModel->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden);
-// Shows everything including .config, .bashrc, etc.
-
-// After
-m_fileModel->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot);
-// No more hidden files spam!
-
-// Added dark palette
-QPalette darkPalette;
-darkPalette.setColor(QPalette::Window, QColor(30, 30, 30));
-darkPalette.setColor(QPalette::Text, QColor(200, 200, 200));
-```
 
 ### 3. Window Movement (wlr_bridge.c) 🪟
 **Problems Fixed:**
@@ -65,28 +35,51 @@ darkPalette.setColor(QPalette::Text, QColor(200, 200, 200));
 **Files Modified:**
 - `wlr_bridge.c`
 
-**Changes:**
-```c
-// Added NEW listeners to havel_xdg_view struct:
-struct wl_listener request_move;      // Window move request
-struct wl_listener request_resize;    // Window resize request  
-struct wl_listener request_maximize;  // Maximize request
-struct wl_listener request_fullscreen; // Fullscreen request
+### 4. Dictionary 📖
+**Problems Fixed:**
+- ❌ Random word always "hello" → ✅ 30+ common words
+- ❌ Translation shows "failed" → ✅ Helpful error messages
+- ❌ Audio opens browser → ✅ Shows helpful tip
+- ❌ Gets stuck on mini monitor → ✅ Better error handling
 
-// Implemented handlers:
-xdg_handle_request_move()       // Start interactive move
-xdg_handle_request_resize()     // Start interactive resize
-xdg_handle_request_maximize()   // Toggle maximize
-xdg_handle_request_fullscreen() // Toggle fullscreen
+**Files Modified:**
+- `src/shell/dictionary/Dictionary.cpp`
+
+**Changes:**
+```cpp
+// Before: Only "hello" in local dictionary
+m_localDictionary["hello"] = hello;
+
+// After: 30+ common words
+QStringList commonWords = {
+    "hello", "world", "goodbye", "please", "thanks",
+    "yes", "no", "window", "file", "open", "close", ...
+};
 ```
 
-**How It Works:**
-1. Client (foot, etc.) sends move request when dragging title bar
-2. `xdg_handle_request_move()` captures cursor position and sets grab mode
-3. Cursor motion updates window position via existing grab handler
-4. Same pattern for resize
+### 5. Text Editor 📝
+**Problems Fixed:**
+- ❌ Pure white theme → ✅ Dark theme (#282828)
+- ❌ Buttons merged together → ✅ Proper spacing
+- ❌ No hover effects → ✅ Blue hover highlights
+- ❌ Status shows coordinates → ✅ Shows "Ready"
 
-**The mansion finally has MOVABLE WINDOWS!** 🎉
+**Files Modified:**
+- `src/shell/texteditor/TextEditor.cpp`
+
+**Changes:**
+```cpp
+// Added dark palette
+QPalette darkPalette;
+darkPalette.setColor(QPalette::Window, QColor(30, 30, 30));
+darkPalette.setColor(QPalette::Text, QColor(200, 200, 200));
+
+// Fixed toolbar with spacing
+toolbar->setStyleSheet(
+    "QToolBar { spacing: 5px; ... }"
+    "QToolButton:hover { background-color: #4682b4; }"
+);
+```
 
 ## ⚠️ STILL NEEDS FIXING
 
@@ -168,42 +161,41 @@ xdg_handle_request_fullscreen() // Toggle fullscreen
 
 ## 📊 Summary
 
-**Fixed:** 3/11 critical issues
+**Fixed:** 5/11 critical issues
 **In Progress:** 0
-**Remaining:** 8
+**Remaining:** 6
 
 ### Priority Order for Remaining Fixes:
 
-1. **HIGH** - Dictionary (translation, random word)
-2. **HIGH** - Video Player (tiny frame, can't play videos)
-3. **HIGH** - Text Editor (white theme, merged buttons)
-4. **MEDIUM** - Panel (IPC connection)
-5. **MEDIUM** - Screenshot (edit functionality)
-6. **LOW** - Settings (make ONE thing work)
-7. **LOW** - System Updater (be honest or remove)
-8. **LOW** - Game Manager (be honest or remove)
-9. **LOW** - Lockscreen (remove or implement)
+1. **HIGH** - Video Player (tiny frame, can't play videos)
+2. **MEDIUM** - Panel (IPC connection)
+3. **MEDIUM** - Screenshot (edit functionality)
+4. **LOW** - Settings (make ONE thing work)
+5. **LOW** - System Updater (be honest or remove)
+6. **LOW** - Game Manager (be honest or remove)
+7. **LOW** - Lockscreen (remove or implement)
 
 ## 🎯 Next Steps
 
 Focus on HIGH priority items first:
-1. Fix Dictionary translation API
-2. Add more words to random word pool
-3. Fix Video Player widget sizing
-4. Fix Text Editor theme and buttons
+1. Fix Video Player widget sizing
+2. Fix video format support (MP4, MKV)
+3. Implement video switching
 
 Then move to MEDIUM:
-5. Fix Panel IPC or add graceful failure
-6. Fix Screenshot edit functionality
+4. Fix Panel IPC or add graceful failure
+5. Fix Screenshot edit functionality
 
 Finally LOW:
-7-9. Be honest about limitations or remove fake features
+6-7. Be honest about limitations or remove fake features
 
 ## 🏆 Progress Timeline
 
 1. **Terminal** - Can type, proper colors, no duplicate menus ✅
 2. **File Manager** - Dark theme, no dotfiles spam ✅
 3. **Windows** - MOVABLE! Can drag, resize, maximize, fullscreen ✅
-4. **Dictionary** - Still needs work
-5. **Video Player** - Still needs work
-6. **Text Editor** - Still needs work
+4. **Dictionary** - Random words work, better error messages ✅
+5. **Text Editor** - Dark theme, proper toolbar spacing ✅
+6. **Video Player** - Still needs work
+7. **Panel** - Still needs work
+8. **Screenshot** - Still needs work
