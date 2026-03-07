@@ -30,26 +30,51 @@ public:
         setWindowTitle("Text Editor - Havel WM");
         setMinimumSize(800, 600);
         
-        // Create editor
+        // Set dark theme colors
+        QPalette darkPalette;
+        darkPalette.setColor(QPalette::Window, QColor(30, 30, 30));
+        darkPalette.setColor(QPalette::WindowText, QColor(200, 200, 200));
+        darkPalette.setColor(QPalette::Base, QColor(40, 40, 40));
+        darkPalette.setColor(QPalette::Text, QColor(200, 200, 200));
+        darkPalette.setColor(QPalette::Highlight, QColor(70, 130, 180));
+        darkPalette.setColor(QPalette::HighlightedText, Qt::white);
+        setPalette(darkPalette);
+        
+        // Create editor with dark theme
         m_editor = new QPlainTextEdit();
         m_editor->setFont(QFont("Monospace", 11));
         m_editor->setLineWrapMode(QPlainTextEdit::NoWrap);
+        m_editor->setStyleSheet(
+            "QPlainTextEdit { "
+            "    background-color: #282828; "
+            "    color: #c8c8c8; "
+            "    selection-background-color: #4682b4; "
+            "} "
+            "QPlainTextEdit QScrollBar { "
+            "    background: #282828; "
+            "    width: 10px; "
+            "} "
+            "QPlainTextEdit QScrollBar::handle { "
+            "    background: #505050; "
+            "    border-radius: 5px; "
+            "}"
+        );
         setCentralWidget(m_editor);
-        
+
         // Status bar
-        m_statusLabel = new QLabel("Line: 1, Col: 1");
+        m_statusLabel = new QLabel("Ready");
         statusBar()->addWidget(m_statusLabel);
-        
+
         connect(m_editor, &QPlainTextEdit::cursorPositionChanged, this, &TextEditor::updateStatus);
-        
+
         setupMenu();
         setupToolbar();
         loadSettings();
-        
+
         m_modified = false;
-        connect(m_editor, &QPlainTextEdit::modificationChanged, 
+        connect(m_editor, &QPlainTextEdit::modificationChanged,
                 [this](bool changed) { m_modified = changed; updateTitle(); });
-        
+
         newFile();
     }
     
@@ -251,6 +276,10 @@ private:
     
     void setupToolbar() {
         QToolBar* toolbar = addToolBar("Main");
+        toolbar->setMovable(false);
+        toolbar->setIconSize(QSize(16, 16));
+        toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        
         toolbar->addAction("New", this, &TextEditor::newFile);
         toolbar->addAction("Open", this, &TextEditor::openFile);
         toolbar->addAction("Save", this, &TextEditor::save);
@@ -261,6 +290,29 @@ private:
         toolbar->addAction("Cut", this, &TextEditor::cut);
         toolbar->addAction("Copy", this, &TextEditor::copy);
         toolbar->addAction("Paste", this, &TextEditor::paste);
+        
+        // Set toolbar style
+        toolbar->setStyleSheet(
+            "QToolBar { "
+            "    background-color: #323232; "
+            "    border: none; "
+            "    spacing: 5px; "
+            "    padding: 5px; "
+            "} "
+            "QToolBar QToolButton { "
+            "    color: #c8c8c8; "
+            "    background-color: transparent; "
+            "    border: 1px solid transparent; "
+            "    padding: 5px 10px; "
+            "    border-radius: 3px; "
+            "} "
+            "QToolBar QToolButton:hover { "
+            "    background-color: #4682b4; "
+            "} "
+            "QToolBar QToolButton:pressed { "
+            "    background-color: #3a6ea5; "
+            "}"
+        );
     }
     
     bool maybeSave() {
