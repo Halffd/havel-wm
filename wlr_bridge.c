@@ -241,6 +241,10 @@ struct havel_xdg_view {
     struct wl_listener surface_commit;  // Waits for first commit before sending configure
     struct wl_listener set_app_id;      // Called when app_id is set
     struct wl_listener set_title;       // Called when title is set
+    struct wl_listener request_move;    // Window move request
+    struct wl_listener request_resize;  // Window resize request
+    struct wl_listener request_maximize; // Maximize request
+    struct wl_listener request_fullscreen; // Fullscreen request
 };
 
 struct havel_xwayland_view {
@@ -517,13 +521,80 @@ static void xdg_handle_app_id(struct wl_listener *listener, void *data) {
 
 static void xdg_handle_title(struct wl_listener *listener, void *data) {
     struct havel_xdg_view *view = wl_container_of(listener, view, set_title);
-    
+
     if (!view || !view->cpp_view || !view->xdg_surface->toplevel) return;
-    
+
     const char *title = view->xdg_surface->toplevel->title;
     LOG_INFO("[XDG] Title set: %s", title ? title : "(null)");
-    
+
     // C++ layer owns View metadata - it will query via CompositorAPI
+}
+
+// NEW: Window move request handler - THIS IS WHY WINDOWS CAN NOW MOVE!
+static void xdg_handle_request_move(struct wl_listener *listener, void *data) {
+    struct havel_xdg_view *view = wl_container_of(listener, view, request_move);
+    struct havel_wlr_server *server = view->server;
+    
+    if (!server->seat || !server->cursor) return;
+    
+    LOG_INFO("[XDG] Move request for view %p", (void*)view);
+    
+    // Start interactive move using the same grab system as Meta+click
+    server->grab.view = view;
+    server->grab.mode = INTERACTIVE_MOVE;
+    server->grab.start_x = server->cursor->x;
+    server->grab.start_y = server->cursor->y;
+    server->grab.view_start_x = view->scene_tree->node.x;
+    server->grab.view_start_y = view->scene_tree->node.y;
+}
+
+// NEW: Window resize request handler
+static void xdg_handle_request_resize(struct wl_listener *listener, void *data) {
+    struct havel_xdg_view *view = wl_container_of(listener, view, request_resize);
+    struct havel_wlr_server *server = view->server;
+    struct wlr_xdg_toplevel_resize_event *event = data;
+    
+    if (!server->seat || !server->cursor) return;
+    
+    LOG_INFO("[XDG] Resize request for view %p (edges: %d)", (void*)view, event->edges);
+    
+    // Start interactive resize using the same grab system as Meta+click
+    server->grab.view = view;
+    server->grab.mode = INTERACTIVE_RESIZE;
+    server->grab.start_x = server->cursor->x;
+    server->grab.start_y = server->cursor->y;
+    // Get current size from xdg surface geometry
+    struct wlr_box geo = view->xdg_surface->current.geometry;
+    server->grab.view_start_w = geo.width > 0 ? geo.width : 800;
+    server->grab.view_start_h = geo.height > 0 ? geo.height : 600;
+}
+
+// NEW: Maximize request handler
+static void xdg_handle_request_maximize(struct wl_listener *listener, void *data) {
+    struct havel_xdg_view *view = wl_container_of(listener, view, request_maximize);
+    
+    if (!view || !view->xdg_surface->toplevel) return;
+    
+    LOG_INFO("[XDG] Maximize request for view %p", (void*)view);
+    
+    // Toggle maximized state
+    struct wlr_xdg_toplevel *toplevel = view->xdg_surface->toplevel;
+    bool maximized = toplevel->current.maximized;
+    wlr_xdg_toplevel_set_maximized(toplevel, !maximized);
+}
+
+// NEW: Fullscreen request handler
+static void xdg_handle_request_fullscreen(struct wl_listener *listener, void *data) {
+    struct havel_xdg_view *view = wl_container_of(listener, view, request_fullscreen);
+    
+    if (!view || !view->xdg_surface->toplevel) return;
+    
+    LOG_INFO("[XDG] Fullscreen request for view %p", (void*)view);
+    
+    // Toggle fullscreen state
+    struct wlr_xdg_toplevel *toplevel = view->xdg_surface->toplevel;
+    bool fullscreen = toplevel->current.fullscreen;
+    wlr_xdg_toplevel_set_fullscreen(toplevel, !fullscreen);
 }
 
 static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
@@ -531,11 +602,14 @@ static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
 
     LOG_INFO("[XDG] DESTROY: %p (cpp_view=%p)", (void*)view, view->cpp_view);
 
-    // CRITICAL: Remove set_app_id and set_title listeners FIRST
+    // CRITICAL: Remove ALL listeners from toplevel->events FIRST
     // These are on toplevel->events which wlroots cleans up during destroy
-    // wlroots asserts that these lists are empty
     wl_list_remove(&view->set_app_id.link);
     wl_list_remove(&view->set_title.link);
+    wl_list_remove(&view->request_move.link);
+    wl_list_remove(&view->request_resize.link);
+    wl_list_remove(&view->request_maximize.link);
+    wl_list_remove(&view->request_fullscreen.link);
 
     // Remove remaining listeners
     wl_list_remove(&view->map.link);
@@ -612,6 +686,23 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
     LOG_INFO("[XDG] Adding set_title listener");
     view->set_title.notify = xdg_handle_title;
     wl_signal_add(&toplevel->events.set_title, &view->set_title);
+    
+    // Add move/resize request listeners - THIS IS WHY WINDOWS CAN'T MOVE!
+    LOG_INFO("[XDG] Adding move request listener");
+    view->request_move.notify = xdg_handle_request_move;
+    wl_signal_add(&toplevel->events.request_move, &view->request_move);
+    
+    LOG_INFO("[XDG] Adding resize request listener");
+    view->request_resize.notify = xdg_handle_request_resize;
+    wl_signal_add(&toplevel->events.request_resize, &view->request_resize);
+    
+    LOG_INFO("[XDG] Adding maximize request listener");
+    view->request_maximize.notify = xdg_handle_request_maximize;
+    wl_signal_add(&toplevel->events.request_maximize, &view->request_maximize);
+    
+    LOG_INFO("[XDG] Adding fullscreen request listener");
+    view->request_fullscreen.notify = xdg_handle_request_fullscreen;
+    wl_signal_add(&toplevel->events.request_fullscreen, &view->request_fullscreen);
 
     // NOW create scene surface attached to workspace tree (SINGLE CALL)
     LOG_INFO("[XDG] Calling wlr_scene_xdg_surface_create (parent=%p)...", (void*)parent);
