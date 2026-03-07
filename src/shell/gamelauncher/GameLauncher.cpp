@@ -217,14 +217,26 @@ public:
             }
         }
     }
-    
+
     void importFromSteam() {
-        QMessageBox::information(this, "Import Steam", "Steam import would scan ~/.steam/steam for installed games");
+        QMessageBox::information(this, "Steam Import",
+            "Steam integration requires Steam to be installed.\n\n"
+            "To add Steam games:\n"
+            "  1. Launch Steam and install games\n"
+            "  2. Add Steam games manually using 'Add Game'\n"
+            "  3. Point to: ~/.steam/steam/steamapps/common/GAME_NAME/game.exe\n\n"
+            "Note: Automatic Steam import not yet implemented.");
         // Would scan Steam library
     }
-    
+
     void importFromLutris() {
-        QMessageBox::information(this, "Import Lutris", "Lutris import would scan ~/.config/lutris/games for installed games");
+        QMessageBox::information(this, "Lutris Import",
+            "Lutris integration requires Lutris to be installed.\n\n"
+            "To add Lutris games:\n"
+            "  1. Install games via Lutris\n"
+            "  2. Add games manually using 'Add Game'\n"
+            "  3. Point to the game executable\n\n"
+            "Note: Automatic Lutris import not yet implemented.");
         // Would scan Lutris library
     }
     

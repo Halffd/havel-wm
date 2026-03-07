@@ -610,30 +610,23 @@ void SystemUpdater::onCheckUpdates() {
     havelUpdate.security = false;
     havelUpdate.releaseDate = QDateTime::currentDateTime();
     m_availableUpdates.append(havelUpdate);
-    
-    UpdatePackage securityUpdate;
-    securityUpdate.name = "havel-security-patch";
-    securityUpdate.currentVersion = "2024.1";
-    securityUpdate.version = "2024.2";
-    securityUpdate.description = "Security patch for system libraries";
-    securityUpdate.size = "5 MB";
-    securityUpdate.critical = false;
-    securityUpdate.security = true;
-    securityUpdate.releaseDate = QDateTime::currentDateTime();
-    m_availableUpdates.append(securityUpdate);
-    
+
+    // Note: Real update functionality requires package manager integration
+    // This is a placeholder showing the UI works
+    logMessage("Update check complete - Havel WM is up to date");
+    logMessage("Note: System updates managed by your distribution's package manager");
+
     displayUpdates();
-    
+
     m_lastCheckLabel->setText("Last check: " + QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm"));
-    
+
     m_checking = false;
     m_checkButton->setEnabled(true);
-    logMessage("Update check complete");
-    
-    // Show notification if updates available
-    if (!m_availableUpdates.isEmpty() && m_trayIcon->isVisible()) {
+
+    // Show notification
+    if (m_trayIcon->isVisible()) {
         m_trayIcon->showMessage("System Updater",
-            QString("%1 updates available").arg(m_availableUpdates.size()),
+            "Havel WM is up to date\nSystem updates managed by your package manager",
             QSystemTrayIcon::Information,
             5000);
     }

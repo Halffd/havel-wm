@@ -455,10 +455,21 @@ void SettingsWindow::onSettingsChanged() {
     m_modified = true;
 }
 
-// Stub implementations for other pages
+// Stub implementations for other pages - with helpful messages
 KeybindingsSettings::KeybindingsSettings(QWidget* parent) : SettingsPage(parent) {
     QVBoxLayout* layout = new QVBoxLayout(this);
-    layout->addWidget(new QLabel("Keybindings configuration (coming soon)"));
+    
+    QLabel* infoLabel = new QLabel(
+        "Keybindings are configured in the compositor.\n\n"
+        "Default keybindings:\n"
+        "  • Super+Enter - Open terminal\n"
+        "  • Super+D - Open app launcher\n"
+        "  • Super+Q - Close focused window\n"
+        "  • Super+Left/Right - Snap window\n"
+        "  • Super+1-9 - Switch workspace\n\n"
+        "Configuration file: ~/.config/havel-wm/config.json");
+    infoLabel->setWordWrap(true);
+    layout->addWidget(infoLabel);
     layout->addStretch();
 }
 void KeybindingsSettings::loadSettings() {}
@@ -470,7 +481,17 @@ void KeybindingsSettings::onClearKeybinding() {}
 
 WindowsSettings::WindowsSettings(QWidget* parent) : SettingsPage(parent) {
     QVBoxLayout* layout = new QVBoxLayout(this);
-    layout->addWidget(new QLabel("Window settings (coming soon)"));
+    
+    QLabel* infoLabel = new QLabel(
+        "Window behavior is managed by the compositor.\n\n"
+        "Features:\n"
+        "  • Drag windows by title bar\n"
+        "  • Resize from edges\n"
+        "  • Maximize/Fullscreen buttons\n"
+        "  • Auto-snap to edges\n"
+        "  • Multi-workspace support");
+    infoLabel->setWordWrap(true);
+    layout->addWidget(infoLabel);
     layout->addStretch();
 }
 void WindowsSettings::loadSettings() {}
@@ -479,7 +500,16 @@ void WindowsSettings::resetToDefaults() {}
 
 WorkspaceSettings::WorkspaceSettings(QWidget* parent) : SettingsPage(parent) {
     QVBoxLayout* layout = new QVBoxLayout(this);
-    layout->addWidget(new QLabel("Workspace settings (coming soon)"));
+    
+    QLabel* infoLabel = new QLabel(
+        "Workspaces are managed by the compositor.\n\n"
+        "Usage:\n"
+        "  • Super+1-9 - Switch workspace\n"
+        "  • Windows can be moved between workspaces\n"
+        "  • Each workspace has independent window layout\n"
+        "  • Workspace indicator shown in panel");
+    infoLabel->setWordWrap(true);
+    layout->addWidget(infoLabel);
     layout->addStretch();
 }
 void WorkspaceSettings::loadSettings() {}
@@ -488,7 +518,15 @@ void WorkspaceSettings::resetToDefaults() {}
 
 DisplaySettings::DisplaySettings(QWidget* parent) : SettingsPage(parent) {
     QVBoxLayout* layout = new QVBoxLayout(this);
-    layout->addWidget(new QLabel("Display settings (coming soon)"));
+    
+    QLabel* infoLabel = new QLabel(
+        "Display settings are managed by wlroots.\n\n"
+        "Current displays:\n"
+        "  • Use wlr-randr command line tool:\n"
+        "    wlr-randr --output HDMI-A-1 --mode 1920x1080@60\n\n"
+        "  • Or create ~/.config/wlr-randr/config");
+    infoLabel->setWordWrap(true);
+    layout->addWidget(infoLabel);
     layout->addStretch();
 }
 void DisplaySettings::loadSettings() {}
@@ -500,7 +538,17 @@ void DisplaySettings::onScaleChanged(int) {}
 
 InputSettings::InputSettings(QWidget* parent) : SettingsPage(parent) {
     QVBoxLayout* layout = new QVBoxLayout(this);
-    layout->addWidget(new QLabel("Input settings (coming soon)"));
+    
+    QLabel* infoLabel = new QLabel(
+        "Input settings are managed by wlroots.\n\n"
+        "Configuration file: ~/.config/havel-wm/input.json\n\n"
+        "Options:\n"
+        "  • Keyboard layout\n"
+        "  • Mouse acceleration\n"
+        "  • Touchpad natural scrolling\n"
+        "  • Tap-to-click");
+    infoLabel->setWordWrap(true);
+    layout->addWidget(infoLabel);
     layout->addStretch();
 }
 void InputSettings::loadSettings() {}
