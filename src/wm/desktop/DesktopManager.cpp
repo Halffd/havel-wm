@@ -61,10 +61,10 @@ bool DesktopManager::initialize() {
     if (m_nasaWallpaperEnabled) {
         m_nasaWallpaperManager = std::make_unique<NASAWallpaperManager>();
         m_nasaWallpaperManager->initialize();
-        
-        // Fetch NASA wallpapers by default
-        fetchNASAWallpapers(10);
-        
+
+        // DISABLED: Fetch NASA wallpapers (crashes with libcurl)
+        // fetchNASAWallpapers(10);
+
         // Set up NASA wallpaper slideshow
         setNASAWallpaperSlideshow(300);  // 5 minutes
     }
