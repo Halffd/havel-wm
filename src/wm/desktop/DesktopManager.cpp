@@ -65,8 +65,8 @@ bool DesktopManager::initialize() {
         // DISABLED: Fetch NASA wallpapers (crashes with libcurl)
         // fetchNASAWallpapers(10);
 
-        // Set up NASA wallpaper slideshow
-        setNASAWallpaperSlideshow(300);  // 5 minutes
+        // DISABLED: No point in slideshow if no wallpapers
+        // setNASAWallpaperSlideshow(300);  // 5 minutes
     }
     
     // Load default icons (applications)
