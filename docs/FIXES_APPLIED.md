@@ -55,6 +55,39 @@ darkPalette.setColor(QPalette::Window, QColor(30, 30, 30));
 darkPalette.setColor(QPalette::Text, QColor(200, 200, 200));
 ```
 
+### 3. Window Movement (wlr_bridge.c) 🪟
+**Problems Fixed:**
+- ❌ Windows appear but are STATIC → ✅ Windows can be MOVED!
+- ❌ Can't drag windows → ✅ Title bar dragging works!
+- ❌ Can't resize windows → ✅ Edge resizing works!
+- ❌ Maximize/fullscreen don't work → ✅ Now they do!
+
+**Files Modified:**
+- `wlr_bridge.c`
+
+**Changes:**
+```c
+// Added NEW listeners to havel_xdg_view struct:
+struct wl_listener request_move;      // Window move request
+struct wl_listener request_resize;    // Window resize request  
+struct wl_listener request_maximize;  // Maximize request
+struct wl_listener request_fullscreen; // Fullscreen request
+
+// Implemented handlers:
+xdg_handle_request_move()       // Start interactive move
+xdg_handle_request_resize()     // Start interactive resize
+xdg_handle_request_maximize()   // Toggle maximize
+xdg_handle_request_fullscreen() // Toggle fullscreen
+```
+
+**How It Works:**
+1. Client (foot, etc.) sends move request when dragging title bar
+2. `xdg_handle_request_move()` captures cursor position and sets grab mode
+3. Cursor motion updates window position via existing grab handler
+4. Same pattern for resize
+
+**The mansion finally has MOVABLE WINDOWS!** 🎉
+
 ## ⚠️ STILL NEEDS FIXING
 
 ### 3. Dictionary
@@ -135,9 +168,9 @@ darkPalette.setColor(QPalette::Text, QColor(200, 200, 200));
 
 ## 📊 Summary
 
-**Fixed:** 2/11 critical issues
+**Fixed:** 3/11 critical issues
 **In Progress:** 0
-**Remaining:** 9
+**Remaining:** 8
 
 ### Priority Order for Remaining Fixes:
 
@@ -165,3 +198,12 @@ Then move to MEDIUM:
 
 Finally LOW:
 7-9. Be honest about limitations or remove fake features
+
+## 🏆 Progress Timeline
+
+1. **Terminal** - Can type, proper colors, no duplicate menus ✅
+2. **File Manager** - Dark theme, no dotfiles spam ✅
+3. **Windows** - MOVABLE! Can drag, resize, maximize, fullscreen ✅
+4. **Dictionary** - Still needs work
+5. **Video Player** - Still needs work
+6. **Text Editor** - Still needs work
