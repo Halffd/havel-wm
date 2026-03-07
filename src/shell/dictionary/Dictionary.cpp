@@ -218,17 +218,39 @@ private slots:
     }
     
     void onRandomWord() {
-        if (m_localDictionary.isEmpty()) {
-            QStringList commonWords = {"serendipity", "ephemeral", "ubiquitous", "eloquent", "resilient"};
-            QString word = commonWords[QRandomGenerator::global()->bounded(commonWords.size())];
-            m_searchEdit->setText(word);
-            onSearch();
-        } else {
+        // Always use local dictionary now (it's populated with common words)
+        if (!m_localDictionary.isEmpty()) {
             QStringList words = m_localDictionary.keys();
-            QString word = words[QRandomGenerator::global()->bounded(words.size())];
-            m_searchEdit->setText(word);
-            onSearch();
+            if (!words.isEmpty()) {
+                QString word = words[QRandomGenerator::global()->bounded(words.size())];
+                m_searchEdit->setText(word);
+                onSearch();
+                return;
+            }
         }
+        
+        // Fallback: use online API for random word
+        QUrl url("https://random-word-api.herokuapp.com/word?number=1");
+        QNetworkReply* reply = m_networkManager->get(QNetworkRequest(url));
+        connect(reply, &QNetworkReply::finished, [this, reply]() {
+            if (reply->error() != QNetworkReply::NoError) {
+                // Show a random word from a hardcoded list
+                QStringList fallback = {"serendipity", "ephemeral", "ubiquitous", 
+                                       "eloquent", "resilient", "mysterious"};
+                QString word = fallback[QRandomGenerator::global()->bounded(fallback.size())];
+                m_searchEdit->setText(word);
+                onSearch();
+            } else {
+                QByteArray data = reply->readAll();
+                QJsonDocument json = QJsonDocument::fromJson(data);
+                QJsonArray arr = json.array();
+                if (!arr.isEmpty()) {
+                    m_searchEdit->setText(arr[0].toString());
+                    onSearch();
+                }
+            }
+            reply->deleteLater();
+        });
     }
     
     void onToggleFavorite(bool checked) {
@@ -273,9 +295,13 @@ private slots:
     }
     
     void onPlayAudio() {
-        if (!m_currentAudioUrl.isEmpty()) {
-            QDesktopServices::openUrl(QUrl(m_currentAudioUrl));
-        }
+        // Don't open browser - just beep or do nothing
+        // Audio playback would require QMediaPlayer which is heavy
+        // For now, just show a message
+        QMessageBox::information(this, "Audio", 
+            "Audio pronunciation not available.\n\n"
+            "Tip: Use an external TTS engine like espeak:\n"
+            "  espeak '" + m_wordLabel->text() + "'");
     }
     
     void onNetworkReply(QNetworkReply* reply) {
@@ -349,48 +375,64 @@ private slots:
             QMessageBox::warning(this, "Warning", "Please enter text to translate");
             return;
         }
-        
+
         QString fromLang = m_translateFrom->currentData().toString();
         QString toLang = m_translateTo->currentData().toString();
-        
+
         m_statusLabel->setText("Translating...");
-        
+
         // Use MyMemory Translation API (free, no key required)
+        // Note: Free tier has limits, may fail for some language pairs
         QUrl url("https://api.mymemory.translated.net/get");
         QUrlQuery query;
         query.addQueryItem("q", text);
         query.addQueryItem("langpair", fromLang + "|" + toLang);
         url.setQuery(query);
-        
+
         QNetworkReply* reply = m_networkManager->get(QNetworkRequest(url));
-        connect(reply, &QNetworkReply::finished, [this, reply, toLang]() {
+        connect(reply, &QNetworkReply::finished, [this, reply, toLang, text, fromLang]() {
             if (reply->error() != QNetworkReply::NoError) {
-                m_translateResult->setText("Translation error: " + reply->errorString());
+                m_translateResult->setText(
+                    "Translation error: " + reply->errorString() + "\n\n"
+                    "Tip: This service requires internet connection.\n"
+                    "For better translation, use a web browser.");
+                m_statusLabel->setText("Translation failed");
                 reply->deleteLater();
                 return;
             }
-            
+
             QByteArray data = reply->readAll();
             QJsonDocument json = QJsonDocument::fromJson(data);
             QJsonObject obj = json.object();
-            
+
             if (obj.contains("responseData")) {
                 QJsonObject responseData = obj["responseData"].toObject();
                 QString translatedText = responseData["translatedText"].toString();
                 
-                // Detect language if auto
-                if (m_translateFrom->currentData().toString() == "auto") {
-                    QString detectedLang = responseData["match"].toString();
-                    m_translateResult->setHtml(
-                        QString("<p><b>Detected Language:</b> %1</p><p>%2</p>")
-                        .arg(detectedLang).arg(translatedText));
+                // Check if translation quality is poor (common issue)
+                if (translatedText.isEmpty() || translatedText == text) {
+                    m_translateResult->setText(
+                        "Translation not available for this language pair.\n\n"
+                        "Supported pairs: en|es, en|fr, en|de, en|it, en|pt, etc.\n"
+                        "Try a different language combination.");
                 } else {
-                    m_translateResult->setText(translatedText);
+                    // Detect language if auto
+                    if (m_translateFrom->currentData().toString() == "auto") {
+                        QString detectedLang = responseData["match"].toString();
+                        m_translateResult->setHtml(
+                            QString("<p><b>Detected Language:</b> %1</p><p>%2</p>")
+                            .arg(detectedLang).arg(translatedText));
+                    } else {
+                        m_translateResult->setText(translatedText);
+                    }
                 }
             } else {
-                m_translateResult->setText("Translation failed");
+                m_translateResult->setText(
+                    "Translation failed: No response from server.\n\n"
+                    "The free translation API may be unavailable.\n"
+                    "Please try again later or use an online translator.");
             }
-            
+
             m_statusLabel->setText("Translation complete");
             reply->deleteLater();
         });
@@ -1279,15 +1321,29 @@ private:
             }
         }
         
+        // Initialize local dictionary with common words
         if (m_localDictionary.isEmpty()) {
-            WordDefinition hello;
-            hello.word = "hello";
-            hello.phonetic = "/həˈləʊ/";
-            WordDefinition::Meaning m1;
-            m1.partOfSpeech = "exclamation";
-            m1.definitions.append("used as a greeting.");
-            hello.meanings.append(m1);
-            m_localDictionary["hello"] = hello;
+            // Add multiple common words, not just "hello"
+            QStringList commonWords = {
+                "hello", "world", "goodbye", "please", "thanks", "sorry",
+                "yes", "no", "maybe", "always", "never", "sometimes",
+                "window", "door", "screen", "keyboard", "mouse", "file",
+                "open", "close", "save", "load", "edit", "copy", "paste",
+                "search", "find", "replace", "delete", "create", "modify"
+            };
+            
+            for (const QString& word : commonWords) {
+                WordDefinition def;
+                def.word = word;
+                def.phonetic = "/" + word + "/";
+                
+                WordDefinition::Meaning meaning;
+                meaning.partOfSpeech = "noun";
+                meaning.definitions.append("A common word: " + word);
+                def.meanings.append(meaning);
+                
+                m_localDictionary[word] = def;
+            }
         }
     }
     
