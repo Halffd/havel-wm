@@ -1,6 +1,7 @@
 // Renderer Integration Implementation
 
 #include "CompositorRenderer.h"
+#include <utils/Common.h>
 #include "UnifiedRenderer.h"
 #include "DamageTracker.h"
 #include "MultiGPU.h"
@@ -52,8 +53,8 @@ CompositorRenderer* compositor_renderer_create(struct wlr_scene* scene,
         LOG_ERROR("[CompositorRenderer] Invalid scene");
         return NULL;
     }
-    
-    CompositorRenderer* renderer = (CompositorRenderer*)calloc(1, sizeof(CompositorRenderer));
+
+    CompositorRenderer* renderer = CALLOC_T(CompositorRenderer, 1);
     if (!renderer) {
         return NULL;
     }

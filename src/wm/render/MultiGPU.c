@@ -1,6 +1,7 @@
 // Multi-GPU Support Implementation
 
 #include "MultiGPU.h"
+#include <utils/Common.h>
 #include <Logger.h>
 #include <stdlib.h>
 #include <string.h>
@@ -70,7 +71,7 @@ static int rate_gpu(const GPUInfo* gpu, GPUPolicy policy) {
 }
 
 MultiGPUManager* multigpu_manager_create(void) {
-    MultiGPUManager* manager = (MultiGPUManager*)calloc(1, sizeof(MultiGPUManager));
+    MultiGPUManager* manager = CALLOC_T(MultiGPUManager, 1);
     if (!manager) {
         return NULL;
     }

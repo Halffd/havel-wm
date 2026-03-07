@@ -1,6 +1,7 @@
 // Damage Tracking Implementation - Efficient partial screen updates
 
 #include "DamageTracker.h"
+#include <utils/Common.h>
 #include <Logger.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,8 +37,8 @@ DamageTracker* damage_tracker_create(int screen_width, int screen_height) {
         LOG_ERROR("[DamageTracker] Invalid screen size: %dx%d", screen_width, screen_height);
         return NULL;
     }
-    
-    DamageTracker* tracker = (DamageTracker*)calloc(1, sizeof(DamageTracker));
+
+    DamageTracker* tracker = CALLOC_T(DamageTracker, 1);
     if (!tracker) {
         return NULL;
     }
