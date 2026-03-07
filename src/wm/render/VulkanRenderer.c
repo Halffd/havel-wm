@@ -58,6 +58,12 @@ struct VulkanRendererInternal {
     uint64_t lastFrameTime;
     uint64_t frameTimeAccum;
     uint32_t frameTimeCount;
+    
+    // Graphics pipeline for quad rendering
+    VkPipeline quadPipeline;
+    VkDescriptorSetLayout descriptorSetLayout;
+    VkDescriptorPool descriptorPool;
+    VkSampler textureSampler;
 };
 
 struct VulkanTextureInternal {
@@ -72,6 +78,34 @@ struct VulkanTextureInternal {
 
 // Forward declarations
 static void update_frame_timing(struct VulkanRendererInternal* renderer);
+static VkResult create_graphics_pipeline(struct VulkanRendererInternal* renderer);
+static void destroy_graphics_pipeline(struct VulkanRendererInternal* renderer);
+
+// For now, we'll use the existing render pass approach
+// Full shader pipeline requires external shader compilation
+static void record_draw_command(struct VulkanRendererInternal* renderer, 
+                                VkCommandBuffer cmd, uint32_t imageIndex,
+                                float x, float y, float w, float h) {
+    (void)x; (void)y; (void)w; (void)h;
+    
+    // Begin render pass
+    VkRenderPassBeginInfo renderPassInfo = {0};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    renderPassInfo.renderPass = renderer->renderPass;
+    renderPassInfo.framebuffer = renderer->framebuffers[imageIndex];
+    renderPassInfo.renderArea.extent = renderer->swapchainExtent;
+    
+    VkClearValue clearColor = {{{0.1f, 0.1f, 0.15f, 1.0f}}};
+    renderPassInfo.clearValueCount = 1;
+    renderPassInfo.pClearValues = &clearColor;
+    
+    vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+    
+    // Draw a simple colored quad (would use shaders in full implementation)
+    // For now, just clear the screen with the background color
+    
+    vkCmdEndRenderPass(cmd);
+}
 
 // Validation layers
 static const char* g_validationLayers[] = {
@@ -829,7 +863,11 @@ bool vulkan_renderer_begin_frame(VulkanRenderer* renderer_ptr) {
         LOG_ERROR("[Vulkan] Failed to begin command buffer");
         return false;
     }
-    
+
+    // Record rendering commands - clear screen with background color
+    record_draw_command(renderer, renderer->commandBuffers[imageIndex], imageIndex,
+                       0, 0, renderer->swapchainExtent.width, renderer->swapchainExtent.height);
+
     return true;
 }
 
