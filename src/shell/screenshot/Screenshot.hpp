@@ -28,6 +28,7 @@
 #include <QDateTime>
 #include <QScrollArea>
 #include <QToolBar>
+#include <QStatusBar>
 #include <QKeyEvent>
 #include <QMouseEvent>
 

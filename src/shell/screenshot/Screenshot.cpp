@@ -391,7 +391,7 @@ void ScreenshotWindow::setupUI() {
     QVBoxLayout* previewLayout = new QVBoxLayout(previewGroup);
     
     m_previewLabel = new QLabel();
-    m_previewLabel->setMinimumHeight(200);
+    m_previewLabel->setMinimumSize(400, 200);  // Proper minimum size
     m_previewLabel->setAlignment(Qt::AlignCenter);
     m_previewLabel->setText("No screenshot captured");
     m_previewLabel->setStyleSheet("QLabel { background-color: #202020; color: #808080; }");
@@ -698,38 +698,41 @@ void ScreenshotWindow::onCapturePerMonitor() {
 
 void ScreenshotWindow::onCaptureAllMonitors() {
     m_captureMode = CaptureMode::AllMonitors;
-    
+    statusBar()->showMessage("Capturing all monitors...", 1000);
+
     QList<QScreen*> screens = QApplication::screens();
-    
+
     if (screens.isEmpty()) {
+        statusBar()->showMessage("No screens found", 2000);
         return;
     }
-    
+
     // Calculate total bounding rect
     QRect totalRect;
     for (QScreen* screen : screens) {
         totalRect = totalRect.united(screen->geometry());
     }
-    
+
     // Capture all screens into one image
     QPixmap screenshot(totalRect.size());
     screenshot.fill(Qt::black);
-    
+
     QPainter painter(&screenshot);
-    
+
     for (QScreen* screen : screens) {
         QPixmap screenShot = screen->grabWindow(0,
             screen->geometry().x(),
             screen->geometry().y(),
             screen->geometry().width(),
             screen->geometry().height());
-        
+
         painter.drawPixmap(screen->geometry().topLeft() - totalRect.topLeft(), screenShot);
     }
-    
+
     painter.end();
-    
+
     saveScreenshot(screenshot);
+    statusBar()->showMessage("Screenshot captured! Click 'Edit...' to annotate", 3000);
 }
 
 void ScreenshotWindow::onCaptureDelayed() {
@@ -888,6 +891,11 @@ void ScreenshotWindow::onOpenEditor() {
     if (!m_lastScreenshot.isNull()) {
         ScreenshotEditor* editor = new ScreenshotEditor(m_lastScreenshot, this);
         editor->show();
+        statusBar()->showMessage("Opened screenshot editor", 2000);
+    } else {
+        QMessageBox::information(this, "No Screenshot",
+            "No screenshot available to edit.\n\n"
+            "Take a screenshot first, then click 'Edit...'");
     }
 }
 
