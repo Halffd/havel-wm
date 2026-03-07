@@ -86,7 +86,7 @@ private slots:
 
 private:
     void writeCommand(const QString& cmd);
-    void handleSpecialKey(int key, Qt::KeyboardModifiers modifiers);
+    QByteArray handleSpecialKey(int key, Qt::KeyboardModifiers modifiers);
     void updatePalette();
     
     QProcess* m_process;

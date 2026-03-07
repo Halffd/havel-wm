@@ -29,8 +29,8 @@ namespace havel {
 TerminalWidget::TerminalWidget(QWidget* parent)
     : QPlainTextEdit(parent)
     , m_process(nullptr)
-    , m_foreground(Qt::white)
-    , m_background(Qt::black)
+    , m_foreground(QColor(200, 200, 200))  // Light gray
+    , m_background(QColor(30, 30, 30))      // Dark gray
     , m_cursorColor(Qt::green)
     , m_scrollbackSize(10000)
     , m_cursorBlink(true)
@@ -41,13 +41,16 @@ TerminalWidget::TerminalWidget(QWidget* parent)
     QFont font("Monospace", 11);
     font.setStyleHint(QFont::Monospace);
     setFont(font);
-    
-    // Set colors
+
+    // Set colors - NO WHITE ON WHITE
     updatePalette();
     
+    // Remove any borders
+    setStyleSheet("QPlainTextEdit { border: none; background-color: #1e1e1e; color: #c8c8c8; }");
+
     // Terminal settings
     setLineWrapMode(QPlainTextEdit::NoWrap);
-    setReadOnly(true);
+    setReadOnly(false);  // Allow typing!
     setCursorBlink(m_cursorBlink);
     setMaximumBlockCount(m_scrollbackSize);
     
@@ -186,7 +189,7 @@ void TerminalWidget::resetZoom() {
 }
 
 void TerminalWidget::keyPressEvent(QKeyEvent* event) {
-    // Handle special key combinations
+    // First check for Ctrl shortcuts
     if (event->modifiers() & Qt::ControlModifier) {
         switch (event->key()) {
             case Qt::Key_C:
@@ -208,27 +211,10 @@ void TerminalWidget::keyPressEvent(QKeyEvent* event) {
             case Qt::Key_0:
                 resetZoom();
                 return;
-            case Qt::Key_1:
-            case Qt::Key_2:
-            case Qt::Key_3:
-            case Qt::Key_4:
-            case Qt::Key_5:
-            case Qt::Key_6:
-            case Qt::Key_7:
-            case Qt::Key_8:
-            case Qt::Key_9:
-                // Tab switching - signal to parent window
-                {
-                    int tabIndex = event->key() - Qt::Key_1;
-                    Q_EMIT tabSwitchRequested(tabIndex);
-                }
-                return;
-            case Qt::Key_T:
-                // New tab - signal to parent
-                break;
         }
     }
-    
+
+    // Shift for scrollback
     if (event->modifiers() & Qt::ShiftModifier) {
         switch (event->key()) {
             case Qt::Key_PageUp:
@@ -239,21 +225,33 @@ void TerminalWidget::keyPressEvent(QKeyEvent* event) {
                 return;
         }
     }
-    
-    // Pass to process
+
+    // Send text to shell - FIX: Actually allow typing!
     if (isRunning()) {
-        handleSpecialKey(event->key(), event->modifiers());
+        // Handle special keys first
+        QByteArray escape = handleSpecialKey(event->key(), event->modifiers());
+        if (!escape.isEmpty()) {
+            m_process->write(escape);
+            return;
+        }
         
+        // Send regular text
         QString text = event->text();
         if (!text.isEmpty()) {
             m_process->write(text.toLocal8Bit());
+        } else if (event->key() < 128 && event->key() > 0) {
+            // Handle ASCII keys
+            m_process->write(QByteArray(1, (char)event->key()));
         }
     }
+    
+    // Call base class for cursor movement etc.
+    QPlainTextEdit::keyPressEvent(event);
 }
 
-void TerminalWidget::handleSpecialKey(int key, Qt::KeyboardModifiers modifiers) {
+QByteArray TerminalWidget::handleSpecialKey(int key, Qt::KeyboardModifiers modifiers) {
     QByteArray escape;
-    
+
     switch (key) {
         case Qt::Key_Up:
             escape = "\x1b[A";
@@ -327,23 +325,21 @@ void TerminalWidget::handleSpecialKey(int key, Qt::KeyboardModifiers modifiers) 
         case Qt::Key_Backtab:
             escape = "\x1b[Z";
             break;
-        case Qt::Key_Return:
-        case Qt::Key_Enter:
-            escape = "\r";
-            break;
         case Qt::Key_Backspace:
             escape = "\x7f";
             break;
         case Qt::Key_Escape:
             escape = "\x1b";
             break;
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+            escape = "\r";
+            break;
         default:
-            return;
+            break;
     }
     
-    if (!escape.isEmpty()) {
-        m_process->write(escape);
-    }
+    return escape;
 }
 
 void TerminalWidget::contextMenuEvent(QContextMenuEvent* event) {
@@ -588,10 +584,8 @@ void TerminalWindow::setupMenuBar() {
     m_fileMenu->addAction(m_closeTabAction);
     m_fileMenu->addAction(m_renameTabAction);
     m_fileMenu->addSeparator();
-    m_fileMenu->addMenu(menuBar()->addMenu("&Edit"));
     
-    m_editMenu = menuBar()->findChild<QMenu*>();
-    m_editMenu->setTitle("&Edit");
+    m_editMenu = menuBar()->addMenu("&Edit");
     m_editMenu->addAction(m_copyAction);
     m_editMenu->addAction(m_pasteAction);
     m_editMenu->addAction(m_selectAllAction);
