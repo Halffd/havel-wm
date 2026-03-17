@@ -8,21 +8,21 @@
 namespace havel {
 
 /**
- * Zoom Plugin - Enhanced with cursor-centered zoom and push modes
+ * Zoom Plugin - Enhanced with proportional zoom and push/toggle modes
  *
  * Features:
  * - Per-monitor zoom (0.5x - 3.0x)
  * - Proportional zoom (multiplicative, not additive)
- * - Cursor-centered zoom (zooms toward cursor position)
  * - Push-to-zoom mode (hold key to zoom, release to return)
  * - Toggle zoom mode (press to enable, press to disable)
  *
  * Keybindings:
- * - Meta+Ctrl+Plus: Zoom in (proportional, cursor-centered)
- * - Meta+Ctrl+Minus: Zoom out (proportional, cursor-centered)
+ * - Meta+Ctrl+Plus: Zoom in (proportional)
+ * - Meta+Ctrl+Minus: Zoom out (proportional)
  * - Meta+Ctrl+0: Reset zoom
  * - Meta+Ctrl+Z: Toggle zoom (1.0x <-> 2.0x)
  * - Meta+Ctrl+Space: Push-to-zoom (hold to zoom)
+ * - Add Shift for secondary monitor
  */
 class ZoomPlugin : public Plugin {
 public:
@@ -48,11 +48,7 @@ public:
         m_toggleZoomActive = false;
         m_toggleZoomLevel = 2.0f;  // Default toggle zoom level
         
-        // Cursor position for centered zoom
-        m_cursorX = 0;
-        m_cursorY = 0;
-        
-        printf("[ZoomPlugin] Initialized v2.0 (proportional, cursor-centered, push modes)\n");
+        printf("[ZoomPlugin] Initialized v2.0 (proportional, push/toggle modes)\n");
         printf("[ZoomPlugin]   Primary: %.2f, Secondary: %.2f\n", m_zoomLevels[0], m_zoomLevels[1]);
     }
 
@@ -81,23 +77,19 @@ public:
         int targetOutput = (event.modifiers & MOD_SHIFT) ? 1 : 0;
         const char* targetName = targetOutput == 0 ? "primary" : "secondary";
 
-        // Get cursor position for centered zoom
-        m_cursorX = m_api->getCursorX();
-        m_cursorY = m_api->getCursorY();
-
         // Zoom in: Plus key (keycode 21) - PROPORTIONAL
         if (event.keycode == 21 && event.pressed) {
             zoomInProportional(targetOutput);
-            printf("[ZoomPlugin] Zoom %s: %.2f (cursor: %.0f,%.0f)\n", 
-                   targetName, m_zoomLevels[targetOutput], m_cursorX, m_cursorY);
+            printf("[ZoomPlugin] Zoom %s: %.2f\n", 
+                   targetName, m_zoomLevels[targetOutput]);
             return true;
         }
 
         // Zoom out: Minus key (keycode 20) - PROPORTIONAL
         if (event.keycode == 20 && event.pressed) {
             zoomOutProportional(targetOutput);
-            printf("[ZoomPlugin] Zoom %s: %.2f (cursor: %.0f,%.0f)\n", 
-                   targetName, m_zoomLevels[targetOutput], m_cursorX, m_cursorY);
+            printf("[ZoomPlugin] Zoom %s: %.2f\n", 
+                   targetName, m_zoomLevels[targetOutput]);
             return true;
         }
 
@@ -143,10 +135,6 @@ private:
     // Toggle zoom state
     bool m_toggleZoomActive;
     float m_toggleZoomLevel;
-    
-    // Cursor position for centered zoom
-    double m_cursorX;
-    double m_cursorY;
 
     // Proportional zoom in (multiply by 1.25)
     void zoomInProportional(int output_index) {
