@@ -148,6 +148,7 @@ void havel_cpp_register_server_callbacks(
 void havel_cpp_set_gamma_for_output(struct havel_cpp_server* server, int output_index, float gamma);
 void havel_cpp_set_temperature_for_output(struct havel_cpp_server* server, int output_index, int kelvin);
 void havel_cpp_set_brightness_for_output(struct havel_cpp_server* server, int output_index, float brightness);
+void havel_cpp_set_zoom_for_output(struct havel_cpp_server* server, int output_index, float zoom);
 
 #ifdef __cplusplus
 }

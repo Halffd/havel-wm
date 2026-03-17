@@ -85,6 +85,7 @@ public:
     void setGammaForOutput(int output_index, float gamma) override;
     void setTemperatureForOutput(int output_index, int kelvin) override;
     void setBrightnessForOutput(int output_index, float brightness) override;
+    void setZoomForOutput(int output_index, float zoom) override;
 
     void scheduleRedraw() override;
 

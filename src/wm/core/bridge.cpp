@@ -18,6 +18,7 @@ extern "C" {
     void havel_wlr_set_gamma(havel_wlr_server_t* server, float gamma);
     void havel_wlr_set_temperature(havel_wlr_server_t* server, int kelvin);
     void havel_wlr_set_brightness(havel_wlr_server_t* server, float brightness);
+    void havel_wlr_set_zoom_for_output(havel_wlr_server_t* server, int output_index, float zoom);
 }
 
 // Global callback pointers (accessible from Server.cpp)
@@ -236,6 +237,14 @@ void havel_cpp_set_brightness_for_output(struct havel_cpp_server* server, int ou
     server->server->setBrightness(brightness);
     if (server->nativeHandle) {
         havel_wlr_set_brightness_for_output((havel_wlr_server_t*)server->nativeHandle, output_index, brightness);
+    }
+}
+
+// Per-monitor zoom
+void havel_cpp_set_zoom_for_output(struct havel_cpp_server* server, int output_index, float zoom) {
+    if (!server) return;
+    if (server->nativeHandle) {
+        havel_wlr_set_zoom_for_output((havel_wlr_server_t*)server->nativeHandle, output_index, zoom);
     }
 }
 

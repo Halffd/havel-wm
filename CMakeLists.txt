@@ -230,6 +230,7 @@ set(WM_CORE_SOURCES
     src/wm/plugins/ServerDecorationPlugin.cpp
     src/wm/plugins/DrawPlugin.cpp
     src/wm/plugins/FPSPlugin.cpp
+    src/wm/plugins/ZoomPlugin.cpp
     src/wm/render/VulkanRenderer.c
     src/wm/render/VulkanRendererBridge.h
     src/wm/render/VulkanSceneCompositor.c

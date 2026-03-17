@@ -407,6 +407,14 @@ void PluginManager::setBrightnessForOutput(int output_index, float brightness) {
     }
 }
 
+void PluginManager::setZoomForOutput(int output_index, float zoom) {
+    if (!m_server) return;
+    void* nativeHandle = static_cast<Server*>(m_server)->nativeHandle();
+    if (nativeHandle) {
+        havel_cpp_set_zoom_for_output(static_cast<struct havel_cpp_server*>(nativeHandle), output_index, zoom);
+    }
+}
+
 void PluginManager::scheduleRedraw() {
     // Signal all outputs to redraw
     // This would typically be done through the C bridge

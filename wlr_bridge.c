@@ -201,6 +201,7 @@ struct havel_output {
     float gamma;
     int temperature;
     float brightness;
+    float zoom;  // Per-monitor zoom level
 
     // Gamma LUT buffers (allocated once per output)
     uint16_t *gamma_ramp_red;
@@ -1020,10 +1021,11 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     output->output = wlr_output;
     output->scene_output = wlr_scene_output_create(server->scene, wlr_output);
 
-    // Initialize gamma state to defaults
+    // Initialize gamma/temperature/brightness/zoom state to defaults
     output->gamma = 1.0f;
     output->temperature = 6500;
     output->brightness = 1.0f;
+    output->zoom = 1.0f;
 
     // Allocate gamma LUT buffers once per output
     size_t gamma_size = wlr_output_get_gamma_size(wlr_output);
@@ -2221,6 +2223,25 @@ void havel_wlr_set_brightness_for_output(havel_wlr_server_t *server, int output_
         i++;
     }
     LOG_WARN("[Brightness] Output %d not found", output_index);
+}
+
+// Per-monitor zoom control
+void havel_wlr_set_zoom_for_output(havel_wlr_server_t *server, int output_index, float zoom) {
+    if (!server) return;
+
+    int i = 0;
+    struct havel_output *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        if (i == output_index) {
+            output->zoom = zoom;
+            LOG_INFO("[Zoom] Output %d (%s) set to %.2f", output_index, output->output->name, zoom);
+            // Zoom would be applied via output scale transform
+            // For now, store the value for future use
+            return;
+        }
+        i++;
+    }
+    LOG_WARN("[Zoom] Output %d not found", output_index);
 }
 
 // ============================================================================

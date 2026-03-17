@@ -45,6 +45,7 @@ Server::Server() {
     registerPlugin(std::unique_ptr<Plugin>(create_server_decoration_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_draw_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_fps_plugin()));
+    registerPlugin(std::unique_ptr<Plugin>(create_zoom_plugin()));
 
     // Register built-in keybindings
     registerKeybindings();

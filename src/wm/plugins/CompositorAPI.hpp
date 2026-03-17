@@ -71,6 +71,7 @@ public:
     virtual void setGammaForOutput(int output_index, float gamma) = 0;
     virtual void setTemperatureForOutput(int output_index, int kelvin) = 0;
     virtual void setBrightnessForOutput(int output_index, float brightness) = 0;
+    virtual void setZoomForOutput(int output_index, float zoom) = 0;
     // Note: Scale requires scene graph extension (future)
     
     // Rendering
