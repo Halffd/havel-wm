@@ -1,6 +1,7 @@
 #include <wm/Server.hpp>
 #include <wm/Layout.hpp>
 #include <wm/plugins/Plugins.hpp>
+#include "core/CoreWindowManager.hpp"
 #include <Logger.h>
 #include <algorithm>
 #include <cstdlib>
@@ -55,6 +56,9 @@ Server::Server() {
 
     // Initialize window group manager
     m_windowGroupManager = nullptr;  // Will be initialized in wlr_bridge.c
+
+    // Initialize window manager and set server pointer
+    setCoreWindowManagerServer(this);
 
     LOG_INFO("Plugins initialized (%d plugins)", m_pluginManager.plugins().size());
 }
@@ -162,17 +166,21 @@ View* Server::createXwaylandView(void* xwaylandSurface) {
 void Server::onViewMapped(View* view) {
     if (!view) return;
 
-    LOG_INFO("[Server] onViewMapped: %p (workspace=%u, windowId=%lu)", 
+    LOG_INFO("[Server] onViewMapped: %p (workspace=%u, windowId=%lu)",
              (void*)view, view->workspaceId(), view->windowId());
 
     view->setMapped(true);
     LOG_INFO("[Server] View mapped=true");
 
+    // Add to window manager for tracking
+    m_coreWindowManager.addWindow(view);
+    LOG_INFO("[Server] Added to WindowManager");
+
     // Dispatch to plugins
     ViewEvent event;
     event.view = view;
-    event.appId = "";  // Would get from XDG surface
-    event.title = "";
+    event.appId = view->appId().c_str();
+    event.title = view->title().c_str();
     event.workspace = view->workspaceId();
     event.x = 0; event.y = 0; event.width = 0; event.height = 0;
     m_pluginManager.dispatchViewMap(event);
@@ -220,16 +228,17 @@ void Server::onViewDestroyed(View* view) {
     // Dispatch to plugins first (before removing from internal state)
     ViewEvent event;
     event.view = view;
-    event.appId = "";
-    event.title = "";
+    event.appId = view->appId().c_str();
+    event.title = view->title().c_str();
     event.workspace = view->workspaceId();
     event.x = 0; event.y = 0; event.width = 0; event.height = 0;
     m_pluginManager.dispatchViewDestroy(event);
 
-    // Unregister from window manager
+    // Unregister from window managers
     if (view->windowId() != 0) {
         m_windowManager.unregisterWindow(view->windowId());
     }
+    m_coreWindowManager.removeWindow(view);
 
     // CRITICAL: Cancel animations for this view to prevent UAF
     m_animator.cancelAll();
@@ -1151,6 +1160,12 @@ void Server::registerKeybindings() {
         "show_rofi", [this]() { spawnRofi(); }
     );
 
+    // Meta+Return: Spawn terminal
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, 28,
+        "spawn_terminal", [this]() { spawnTerminal(); }
+    );
+
     // Meta+Tab: Workspace switch forward
     m_keybindingManager.registerKeybinding(
         KeybindingManager::MOD_LOGO, 23,
@@ -1284,6 +1299,90 @@ void Server::registerKeybindings() {
     );
 
     LOG_INFO("Keybindings registered");
+}
+
+// ============================================================================
+// IPC Server Implementation
+// ============================================================================
+
+bool Server::startIPCServer(const std::string& socketPath) {
+    if (m_ipcServer) {
+        LOG_WARN("IPC server already running");
+        return false;
+    }
+    
+    m_ipcServer = std::make_unique<IPCServer>(m_windowManager);
+    
+    // Register built-in command handlers
+    m_ipcServer->registerCommand("get_windows", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleGetWindows();
+    });
+    
+    m_ipcServer->registerCommand("get_focused", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleGetFocused();
+    });
+    
+    m_ipcServer->registerCommand("focus", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleFocus(args);
+    });
+    
+    m_ipcServer->registerCommand("minimize", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleMinimize(args);
+    });
+    
+    m_ipcServer->registerCommand("restore", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleRestore(args);
+    });
+    
+    m_ipcServer->registerCommand("workspace", [this](const std::string& args) -> std::string {
+        try {
+            uint32_t ws = std::stoul(args);
+            if (ws < WORKSPACE_COUNT) {
+                setActiveWorkspace(ws);
+                return "OK\n";
+            } else {
+                return "ERROR Invalid workspace number\n";
+            }
+        } catch (const std::exception& e) {
+            return "ERROR Invalid workspace argument\n";
+        }
+    });
+    
+    m_ipcServer->registerCommand("spawn", [this](const std::string& args) -> std::string {
+        if (g_server_spawn) {
+            g_server_spawn(args.c_str());
+            return "OK\n";
+        } else {
+            return "ERROR Spawn function not available\n";
+        }
+    });
+    
+    if (m_ipcServer->start(socketPath)) {
+        LOG_INFO("IPC server started on: %s", socketPath.c_str());
+        return true;
+    } else {
+        LOG_ERROR("Failed to start IPC server on: %s", socketPath.c_str());
+        m_ipcServer.reset();
+        return false;
+    }
+}
+
+void Server::stopIPCServer() {
+    if (m_ipcServer) {
+        m_ipcServer->stop();
+        LOG_INFO("IPC server stopped");
+        m_ipcServer.reset();
+    }
+}
+
+bool Server::isIPCServerRunning() const {
+    return m_ipcServer && m_ipcServer->isRunning();
+}
+
+void Server::processIPCEvents() {
+    if (m_ipcServer) {
+        m_ipcServer->processEvents();
+    }
 }
 
 } // namespace havel

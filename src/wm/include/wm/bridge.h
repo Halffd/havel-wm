@@ -93,6 +93,9 @@ void havel_cpp_process_gesture_button(struct havel_cpp_server* server, int butto
 // Combo system
 void havel_cpp_process_combo_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers);
 
+// IPC server events
+void havel_cpp_process_ipc_events(struct havel_cpp_server* server);
+
 // Desktop management
 void havel_cpp_init_desktop(struct havel_cpp_server* server);
 void* havel_cpp_get_desktop_manager(struct havel_cpp_server* server);

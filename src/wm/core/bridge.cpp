@@ -8,6 +8,8 @@
 #include <Logger.h>
 #include <cstdint>
 #include <unistd.h>
+#include <string>
+#include <cstdlib>
 
 // Forward declare C server type and functions
 typedef struct havel_wlr_server havel_wlr_server_t;
@@ -43,11 +45,25 @@ struct havel_cpp_server* havel_cpp_server_create(void) {
     auto* cpp = new havel_cpp_server;
     cpp->server = new havel::Server();
     cpp->nativeHandle = nullptr;
+    
+    // Start IPC server for external tool communication
+    const char* runtime_dir = getenv("XDG_RUNTIME_DIR");
+    std::string socket_path;
+    if (runtime_dir) {
+        socket_path = std::string(runtime_dir) + "/havel-wm.sock";
+    } else {
+        // Fallback to /tmp
+        socket_path = "/tmp/havel-wm.sock";
+    }
+    
+    cpp->server->startIPCServer(socket_path);
+    
     return cpp;
 }
 
 void havel_cpp_server_destroy(struct havel_cpp_server* server) {
     if (!server) return;
+    server->server->stopIPCServer();
     delete server->server;
     delete server;
 }
@@ -76,6 +92,11 @@ void havel_cpp_server_init_text_input(struct havel_cpp_server* server, struct wl
     server->server->setTextInputManager(textInputManager);
     
     printf("[TextInput] IME support initialized\n");
+}
+
+void havel_cpp_process_ipc_events(struct havel_cpp_server* server) {
+    if (!server) return;
+    server->server->processIPCEvents();
 }
 
 void* havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* c_view, uint32_t workspace_id, const char* appId, const char* title) {

@@ -931,10 +931,13 @@ static void output_frame(struct wl_listener *listener, void *data) {
                  output->output->enabled, output->scene_output);
     }
 
-    LOG_INFO("[FRAME] %s: >>> START", output->output->name);
+    // LOG_INFO("[FRAME] %s: >>> START", output->output->name);  // Disabled to prevent log spam
 
     // Update animations before rendering
     havel_cpp_update_animations(server->cpp_server);
+    
+    // Process IPC events for external tool communication
+    havel_cpp_process_ipc_events(server->cpp_server);
 
     // Dispatch frame event to plugins (via C++ server)
     havel_cpp_dispatch_output_frame(server->cpp_server, output->output, output->scene_output);
@@ -962,13 +965,13 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // This ensures overlays are composited into the frame
     havel_cpp_draw_overlays(server->cpp_server, output->output->width, output->output->height);
 
-    LOG_INFO("[FRAME] %s: calling wlr_scene_output_commit", output->output->name);
-    LOG_INFO("[FRAME]   scene_output=%p, scene=%p", output->scene_output, output->scene_output->scene);
-    LOG_INFO("[FRAME]   scene->tree.enabled=%d", output->scene_output->scene->tree.node.enabled);
-    LOG_INFO("[FRAME]   output->enabled=%d", output->output->enabled);
+    // LOG_INFO("[FRAME] %s: calling wlr_scene_output_commit", output->output->name);  // Disabled to prevent log spam
+    // LOG_INFO("[FRAME]   scene_output=%p, scene=%p", output->scene_output, output->scene_output->scene);  // Disabled to prevent log spam
+    // LOG_INFO("[FRAME]   scene->tree.enabled=%d", output->scene_output->scene->tree.node.enabled);  // Disabled to prevent log spam
+    // LOG_INFO("[FRAME]   output->enabled=%d", output->output->enabled);  // Disabled to prevent log spam
 
     wlr_scene_output_commit(output->scene_output, &options);
-    LOG_INFO("[FRAME] %s: <<< COMMIT COMPLETE", output->output->name);
+    // LOG_INFO("[FRAME] %s: <<< COMMIT COMPLETE", output->output->name);  // Disabled to prevent log spam
 }
 
 static void output_destroy(struct wl_listener *listener, void *data) {
@@ -1058,7 +1061,30 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     output->destroy.notify = output_destroy;
     wl_signal_add(&wlr_output->events.destroy, &output->destroy);
 
-    wlr_output_layout_add_auto(server->output_layout, wlr_output);
+    // Fix dual monitor mirroring: position second monitor to the right
+    if (wl_list_empty(&server->outputs)) {
+        // First monitor - position at (0,0)
+        wlr_output_layout_add_auto(server->output_layout, wlr_output);
+    } else {
+        // Second (or subsequent) monitor - position to the right of previous
+        struct havel_output *last_output;
+        struct wlr_box last_box;
+        
+        // Get the last output in the list
+        struct wl_list *last_link = server->outputs.prev;
+        last_output = wl_container_of(last_link, last_output, link);
+        
+        // Get its position and size
+        wlr_output_layout_get_box(server->output_layout, last_output->output, &last_box);
+        
+        // Position this monitor to the right of the last one
+        int x = last_box.x + last_box.width;
+        int y = 0;
+        wlr_output_layout_add(server->output_layout, wlr_output, x, y);
+        
+        LOG_INFO("[OUTPUT] Positioned %s at (%d,%d) to the right of %s", 
+                 wlr_output->name, x, y, last_output->output->name);
+    }
 
     // Verify output state and scene graph
     LOG_INFO("[OUTPUT] %s setup COMPLETE (enabled=%d)",

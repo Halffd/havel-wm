@@ -12,6 +12,8 @@
 #include <input/KeybindingManager.hpp>
 #include <input/TextInputManager.hpp>
 #include <shell/WindowManager.hpp>
+#include <shell/IPCServer.hpp>
+#include "core/CoreWindowManager.hpp"
 #include <memory>
 #include <array>
 #include <unordered_map>
@@ -131,10 +133,6 @@ public:
     const PluginManager& pluginManager() const { return m_pluginManager; }
     void registerPlugin(std::unique_ptr<Plugin> plugin);
 
-    // Window management (for taskbar/panel)
-    WindowManager& windowManager() { return m_windowManager; }
-    const WindowManager& windowManager() const { return m_windowManager; }
-
     // CompositorAPI implementation (for plugins)
     void setViewPosition(View* view, int x, int y, bool animate = true);
     void setViewOpacity(View* view, float alpha);
@@ -161,15 +159,27 @@ public:
     void* windowGroupManager() const { return m_windowGroupManager; }
     void setWindowGroupManager(void* manager) { m_windowGroupManager = manager; }
 
+    // Window management (real window tracking and placement)
+    havel::CoreWindowManager& coreWindowManager() { return m_coreWindowManager; }
+    const havel::CoreWindowManager& coreWindowManager() const { return m_coreWindowManager; }
+    void setCoreWindowManagerServer(Server* server) { m_coreWindowManager.setServer(server); }
+
     // Desktop management
     void* desktopManager() const { return m_desktopManager; }
     void setDesktopManager(void* manager) { m_desktopManager = manager; }
+
+    // IPC server management
+    bool startIPCServer(const std::string& socketPath);
+    void stopIPCServer();
+    bool isIPCServerRunning() const;
+    void processIPCEvents();
 
 private:
     std::array<std::unique_ptr<Workspace>, WORKSPACE_COUNT> m_workspaces;
     uint32_t m_activeWorkspace = 0;
     FocusManager m_focusManager;
-    WindowManager m_windowManager;
+    havel::WindowManager m_windowManager;  // Shell window manager (IPC)
+    havel::CoreWindowManager m_coreWindowManager;  // Real window management
 
     // Keybindings
     KeybindingManager m_keybindingManager;
@@ -182,6 +192,9 @@ private:
     OverviewOverlay m_overviewOverlay;
     AppLauncherOverlay m_launcherOverlay;
     PluginManager m_pluginManager;
+    
+    // IPC server for external tool communication
+    std::unique_ptr<IPCServer> m_ipcServer;
 
     // Overlay scene layer (for Alt-Tab, Overview, etc.)
     void* m_overlayLayer = nullptr;  // wlr_scene_tree*
