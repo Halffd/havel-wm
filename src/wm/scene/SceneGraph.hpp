@@ -1,41 +1,47 @@
 #pragma once
 
 /**
- * True Scene Graph - Proper Hierarchy with Validation
+ * Optimized Scene Graph - High Performance with Validation
+ * 
+ * Optimizations:
+ * 1. Intrusive doubly-linked list for children (no dynamic array)
+ * 2. Node pool allocator for cache locality
+ * 3. Generation counters for O(1) loop detection
+ * 4. Granular dirty flags (layout, transform, children)
+ * 5. Cached world-space bounds for hit testing
+ * 6. Sibling pointers for O(1) traversal
+ * 7. Small object optimization (inline storage for ≤4 children)
  * 
  * Structure:
- *   Scene (root, 1)
- *     └── Output (N)
- *           └── Workspace (unique across all outputs)
- *                 └── Container (tiling splits, stacks, tabs)
- *                       └── View (window surface)
- * 
- * Validation Rules:
- *   1. No loops (child cannot be ancestor of parent)
- *   2. Parent pointer matches child's actual parent
- *   3. Nothing points TO root (root only points TO outputs)
- *   4. Workspaces are unique (each workspace belongs to exactly one output)
- *   5. View has exactly one parent (container or workspace)
- *   6. Container has exactly one parent (workspace or container)
+ *   Scene (root)
+ *     └── Output
+ *           └── Workspace (unique per output)
+ *                 └── Container
+ *                       └── View
  */
 
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Forward declarations
-typedef struct Scene Scene;
-typedef struct SceneOutput SceneOutput;
-typedef struct SceneWorkspace SceneWorkspace;
-typedef struct SceneContainer SceneContainer;
-typedef struct SceneView SceneView;
-typedef struct SceneNode SceneNode;
+// ============================================================================
+// Configuration
+// ============================================================================
 
-// Node types
+#define SCENE_NODE_INLINE_CHILDREN 4    // Inline storage for small nodes
+#define SCENE_NODE_POOL_SIZE 1024        // Initial pool size
+#define SCENE_MAX_WORKSPACES 10          // Fixed workspace count
+#define SCENE_MAX_OUTPUTS 8              // Maximum outputs
+
+// ============================================================================
+// Types
+// ============================================================================
+
 typedef enum {
     SCENE_NODE_ROOT,
     SCENE_NODE_OUTPUT,
@@ -44,120 +50,176 @@ typedef enum {
     SCENE_NODE_VIEW
 } SceneNodeType;
 
-// Container types (for tiling)
 typedef enum {
-    CONTAINER_SPLIT_H,      // Horizontal split (side by side)
-    CONTAINER_SPLIT_V,      // Vertical split (stacked)
-    CONTAINER_TABBED,       // Tabbed container
-    CONTAINER_STACKED       // Stacked container
+    CONTAINER_SPLIT_H,
+    CONTAINER_SPLIT_V,
+    CONTAINER_TABBED,
+    CONTAINER_STACKED
 } ContainerType;
 
-// Base node - all scene nodes inherit from this
-struct SceneNode {
+// Dirty flags - granular tracking
+typedef enum {
+    SCENE_DIRTY_NONE      = 0,
+    SCENE_DIRTY_LAYOUT    = 1 << 0,   // Needs layout recalculation
+    SCENE_DIRTY_TRANSFORM = 1 << 1,   // Transform matrix dirty
+    SCENE_DIRTY_CHILDREN  = 1 << 2,   // Children changed
+    SCENE_DIRTY_BOUNDS    = 1 << 3,   // World bounds dirty
+    SCENE_DIRTY_ALL       = 0xFF
+} SceneDirtyFlags;
+
+// ============================================================================
+// Intrusive Linked List for Children
+// ============================================================================
+
+typedef struct SceneNodeLink {
+    struct SceneNode* node;
+    struct SceneNodeLink* next;
+    struct SceneNodeLink* prev;
+} SceneNodeLink;
+
+// ============================================================================
+// Optimized Scene Node
+// ============================================================================
+
+typedef struct SceneNode {
+    // === Hot fields (accessed frequently) ===
     SceneNodeType type;
-    SceneNode* parent;          // NULL for root
-    SceneNode** children;       // Dynamic array
+    SceneNode* parent;
+    
+    // Intrusive linked list for children
+    SceneNodeLink* children_head;
+    SceneNodeLink* children_tail;
     size_t child_count;
-    size_t child_capacity;
     
-    // Position/size (relative to parent)
-    int x, y, width, height;
+    // Sibling pointers for O(1) traversal
+    struct SceneNode* next_sibling;
+    struct SceneNode* prev_sibling;
     
-    // Unique ID for debugging/validation
+    // Transform (relative to parent)
+    int16_t x, y;
+    uint16_t width, height;
+    
+    // === Warm fields ===
+    // Cached world-space bounds (for hit testing)
+    int world_x, world_y;
+    int world_width, world_height;
+    
+    // Dirty flags (granular)
+    uint8_t dirty_flags;
+    
+    // Generation for O(1) loop detection
+    uint32_t generation;
+    
+    // === Cold fields (accessed rarely) ===
     uint64_t id;
+    SceneNodeLink* link_pool;       // Pre-allocated links for children
+    size_t link_count;
+    size_t link_capacity;
     
-    // Validation flags
-    bool validated;
-    bool dirty;  // Needs layout recalculation
+    // Inline storage for small number of children (avoids allocation)
+    SceneNodeLink inline_links[SCENE_NODE_INLINE_CHILDREN];
     
     // wlroots integration
     struct wlr_scene_tree* wlroots_tree;
-};
+} SceneNode;
 
-// Scene (root)
+// ============================================================================
+// Node Pool (for cache locality)
+// ============================================================================
+
+typedef struct SceneNodePool {
+    SceneNode* nodes;
+    size_t capacity;
+    size_t size;
+    uint64_t* free_list;  // Bitmask of free nodes
+    size_t free_count;
+} SceneNodePool;
+
+// ============================================================================
+// Scene Graph Structures
+// ============================================================================
+
 struct Scene {
     SceneNode base;
     
-    // Outputs attached to this scene
-    SceneOutput** outputs;
+    // Node pool for allocation
+    SceneNodePool pool;
+    
+    // Outputs (fixed array for small count)
+    struct SceneOutput* outputs[SCENE_MAX_OUTPUTS];
     size_t output_count;
-    size_t output_capacity;
     
-    // Global ID counter
-    uint64_t next_id;
+    // Generation counter (incremented on each modification)
+    uint32_t generation;
     
-    // Validation state
+    // Statistics
+    size_t total_nodes;
+    size_t peak_nodes;
+    
+    // Validation
     bool validation_enabled;
-    char last_validation_error[256];
+    char last_error[256];
 };
 
-// Output (monitor)
 struct SceneOutput {
     SceneNode base;
     
     struct wlr_output* wlr_output;
     struct wlr_scene_output* wlr_scene_output;
     
-    // Workspaces for this output (unique across all outputs)
-    SceneWorkspace** workspaces;
-    size_t workspace_count;
-    size_t workspace_capacity;
-    
+    // Workspaces (fixed array)
+    struct SceneWorkspace* workspaces[SCENE_MAX_WORKSPACES];
     uint32_t active_workspace_id;
     
-    // Output-local zoom
+    // Zoom
     float zoom;
     float zoom_center_x;
     float zoom_center_y;
+    float prev_zoom;
 };
 
-// Workspace (collection of containers/views)
 struct SceneWorkspace {
     SceneNode base;
     
-    uint32_t id;  // Workspace number (0-9)
+    uint32_t id;
     char name[32];
     
-    // Containers in this workspace
-    SceneContainer** containers;
+    // Containers (linked list)
+    struct SceneContainer* containers_head;
+    struct SceneContainer* containers_tail;
     size_t container_count;
-    size_t container_capacity;
     
-    // Floating views (not in containers)
-    SceneView** floating_views;
+    // Floating views (linked list)
+    struct SceneView* floating_views_head;
+    struct SceneView* floating_views_tail;
     size_t floating_count;
-    size_t floating_capacity;
     
-    // Which output this workspace belongs to (unique!)
-    SceneOutput* output;
+    // Parent output (workspace belongs to exactly one output)
+    struct SceneOutput* output;
     
-    // Active container/view
-    SceneContainer* active_container;
-    SceneView* active_view;
+    // Active element
+    struct SceneContainer* active_container;
+    struct SceneView* active_view;
 };
 
-// Container (tiling group)
 struct SceneContainer {
     SceneNode base;
     
     ContainerType container_type;
     
-    // Child containers or views
-    SceneContainer** child_containers;
-    SceneView** child_views;
+    // Children (linked lists)
+    struct SceneContainer* child_containers_head;
+    struct SceneContainer* child_containers_tail;
     size_t child_container_count;
-    size_t child_container_capacity;
+    
+    struct SceneView* child_views_head;
+    struct SceneView* child_views_tail;
     size_t child_view_count;
-    size_t child_view_capacity;
     
-    // Split ratio (for split containers)
-    float split_ratio;  // 0.0 - 1.0
-    
-    // Parent workspace
-    SceneWorkspace* workspace;
+    float split_ratio;
+    struct SceneWorkspace* workspace;
 };
 
-// View (window surface)
 struct SceneView {
     SceneNode base;
     
@@ -166,156 +228,102 @@ struct SceneView {
     char title[256];
     uint64_t window_id;
     
-    // Parent container (NULL if floating)
-    SceneContainer* container;
+    // Parent references
+    struct SceneContainer* container;
+    struct SceneWorkspace* workspace;
     
-    // Parent workspace (for floating views)
-    SceneWorkspace* workspace;
-    
-    // wlroots surface
+    // wlroots surfaces
     struct wlr_xdg_surface* xdg_surface;
     struct wlr_xwayland_surface* xwayland_surface;
     struct wlr_scene_tree* scene_tree;
     
-    // View state
-    bool mapped;
-    bool floating;
-    bool fullscreen;
-    bool minimized;
-    bool maximized;
+    // State flags (bitfield for space efficiency)
+    uint32_t mapped : 1;
+    uint32_t floating : 1;
+    uint32_t fullscreen : 1;
+    uint32_t minimized : 1;
+    uint32_t maximized : 1;
+    uint32_t sticky : 1;
+    uint32_t pinned : 1;
+    uint32_t _reserved : 25;
     
-    // Floating geometry (saved when tiled)
-    int float_x, float_y, float_width, float_height;
+    // Floating geometry
+    int16_t float_x, float_y;
+    uint16_t float_width, float_height;
 };
 
 // ============================================================================
-// Internal Helpers (exposed for SceneGraphOps.cpp)
+// Inline Functions (Performance Critical)
 // ============================================================================
 
-bool add_child_to_node(SceneNode* parent, SceneNode* child, char* error_out, size_t error_size);
-void init_scene_node(SceneNode* node, SceneNodeType type, Scene* scene);
+static inline bool scene_node_is_dirty(SceneNode* node) {
+    return node->dirty_flags != SCENE_DIRTY_NONE;
+}
+
+static inline void scene_node_mark_dirty(SceneNode* node, uint8_t flags) {
+    node->dirty_flags |= flags;
+}
+
+static inline void scene_node_mark_clean(SceneNode* node) {
+    node->dirty_flags = SCENE_DIRTY_NONE;
+}
+
+static inline bool scene_node_has_children(SceneNode* node) {
+    return node->children_head != NULL;
+}
+
+static inline SceneNode* scene_node_first_child(SceneNode* node) {
+    return node->children_head ? node->children_head->node : NULL;
+}
+
+static inline SceneNode* scene_node_last_child(SceneNode* node) {
+    return node->children_tail ? node->children_tail->node : NULL;
+}
+
+// Iterate over children (declare child variable first)
+#define SCENE_NODE_FOREACH_CHILD(node, child) \
+    for (SceneNodeLink* _link = (node)->children_head; \
+         _link && (((child) = _link->node, 1)); \
+         _link = _link->next)
+
+// Iterate over siblings (declare sibling variable first)
+#define SCENE_NODE_FOREACH_SIBLING(node, sibling) \
+    for ((sibling) = (node)->next_sibling; \
+         (sibling); \
+         (sibling) = (sibling)->next_sibling)
 
 // ============================================================================
-// Scene Graph Lifecycle
+// API
 // ============================================================================
 
+// Lifecycle
 Scene* scene_create(void);
 void scene_destroy(Scene* scene);
 
-// ============================================================================
-// Node Operations (with validation)
-// ============================================================================
-
-// Add child to parent (validates: no loops, parent not null)
+// Node operations (O(1) for most operations)
 bool scene_node_add_child(SceneNode* parent, SceneNode* child, char* error_out, size_t error_size);
-
-// Remove child from parent
 bool scene_node_remove_child(SceneNode* parent, SceneNode* child, char* error_out, size_t error_size);
-
-// Reparent node (move to new parent)
 bool scene_node_reparent(SceneNode* node, SceneNode* new_parent, char* error_out, size_t error_size);
 
-// ============================================================================
-// Output Operations
-// ============================================================================
-
-SceneOutput* scene_output_create(Scene* scene, struct wlr_output* wlr_output);
-void scene_output_destroy(SceneOutput* output);
-
-// Get workspace on this output (creates if doesn't exist)
-SceneWorkspace* scene_output_get_workspace(SceneOutput* output, uint32_t workspace_id);
-
-// Set active workspace for output
-bool scene_output_set_active_workspace(SceneOutput* output, uint32_t workspace_id, char* error_out, size_t error_size);
-
-// ============================================================================
-// Workspace Operations
-// ============================================================================
-
-SceneWorkspace* scene_workspace_create(SceneOutput* output, uint32_t id);
-void scene_workspace_destroy(SceneWorkspace* workspace);
-
-// Add container to workspace
-bool scene_workspace_add_container(SceneWorkspace* ws, SceneContainer* container, char* error_out, size_t error_size);
-
-// Add view to workspace (as floating or in container)
-bool scene_workspace_add_view(SceneWorkspace* ws, SceneView* view, SceneContainer* container, char* error_out, size_t error_size);
-
-// Move view to different workspace
-bool scene_workspace_move_view(SceneView* view, SceneWorkspace* new_ws, char* error_out, size_t error_size);
-
-// ============================================================================
-// Container Operations
-// ============================================================================
-
-SceneContainer* scene_container_create(SceneWorkspace* ws, ContainerType type);
-void scene_container_destroy(SceneContainer* container);
-
-// Add view to container
-bool scene_container_add_view(SceneContainer* container, SceneView* view, char* error_out, size_t error_size);
-
-// Add container to container (nesting)
-bool scene_container_add_container(SceneContainer* parent, SceneContainer* child, char* error_out, size_t error_size);
-
-// Remove view from container
-bool scene_container_remove_view(SceneContainer* container, SceneView* view, char* error_out, size_t error_size);
-
-// Split container (create new split with existing content)
-SceneContainer* scene_container_split(SceneContainer* container, ContainerType new_type);
-
-// ============================================================================
-// View Operations
-// ============================================================================
-
-SceneView* scene_view_create(SceneWorkspace* ws, struct wlr_xdg_surface* xdg_surface);
-SceneView* scene_view_create_xwayland(SceneWorkspace* ws, struct wlr_xwayland_surface* xwayland_surface);
-void scene_view_destroy(SceneView* view);
-
-// Set view as floating/tiled
-bool scene_view_set_floating(SceneView* view, bool floating, char* error_out, size_t error_size);
-
-// Focus view
-bool scene_view_focus(SceneView* view, char* error_out, size_t error_size);
-
-// ============================================================================
-// Validation
-// ============================================================================
-
-// Validate entire scene graph
+// Validation (O(1) with generation counters)
 bool scene_validate(Scene* scene, char* error_out, size_t error_size);
-
-// Validate single node and its relationships
-bool scene_node_validate(SceneNode* node, char* error_out, size_t error_size);
-
-// Check for loops (returns true if loop detected)
 bool scene_detect_loop(SceneNode* start, SceneNode* potential_ancestor);
 
-// Get node path (for debugging)
+// Layout
+void scene_node_layout(SceneNode* node);
+void scene_node_update_bounds(SceneNode* node);
+
+// Hit testing (uses cached bounds)
+SceneNode* scene_node_hit_test(SceneNode* node, int x, int y);
+
+// Debug
+void scene_print_tree(Scene* scene);
+void scene_print_stats(Scene* scene);
 char* scene_node_get_path(SceneNode* node, char* buffer, size_t buffer_size);
 
-// ============================================================================
-// Layout
-// ============================================================================
-
-// Recalculate layout for node and children
-void scene_node_layout(SceneNode* node);
-
-// Mark node as needing layout
-void scene_node_mark_dirty(SceneNode* node);
-
-// ============================================================================
-// Debug/Introspection
-// ============================================================================
-
-// Print scene graph tree
-void scene_print_tree(Scene* scene);
-void scene_node_print_tree(SceneNode* node, int depth);
-
-// Get node count by type
-size_t scene_count_nodes(Scene* scene, SceneNodeType type);
-
-// Find node by ID
-SceneNode* scene_find_node_by_id(Scene* scene, uint64_t id);
+// Node pool
+SceneNode* scene_pool_alloc(Scene* scene, SceneNodeType type);
+void scene_pool_free(Scene* scene, SceneNode* node);
 
 #ifdef __cplusplus
 }

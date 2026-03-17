@@ -1,0 +1,34 @@
+// Test various object literal patterns to find comma bug
+
+// Basic object with trailing comma
+let obj1 = { 
+    name: "test", 
+    value: 42,
+}
+
+// Object without trailing comma
+let obj2 = { 
+    name: "test", 
+    value: 42
+}
+
+// Nested objects with commas
+let obj3 = {
+    config: {
+        enabled: true,
+        interval: 100,
+    },
+    data: {
+        items: [1, 2, 3,],
+    },
+}
+
+// Single property with comma
+let obj4 = {
+    only: "property",
+}
+
+// Empty object
+let obj5 = {}
+
+print("All objects parsed successfully")

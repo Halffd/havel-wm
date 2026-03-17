@@ -175,6 +175,8 @@ set(WM_CORE_SOURCES
     src/wm/core/Window.hpp
     src/wm/core/CoreWindowManager.cpp
     src/wm/core/CoreWindowManager.hpp
+    src/wm/scene/SceneGraph.hpp
+    src/wm/scene/SceneGraph.cpp
     # XWaylandDnD - WIP, needs wlroots integration
     # src/wm/core/XWaylandDnD.cpp
     # src/wm/core/XWaylandDnD.hpp
