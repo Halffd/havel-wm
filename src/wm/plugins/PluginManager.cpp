@@ -376,6 +376,37 @@ void PluginManager::setBrightness(float brightness) {
     server->setBrightness(brightness);
 }
 
+// Per-monitor control
+void PluginManager::setGammaForOutput(int output_index, float gamma) {
+    if (!m_server) return;
+    auto* server = static_cast<Server*>(m_server);
+    server->setGamma(gamma);
+    void* nativeHandle = server->nativeHandle();
+    if (nativeHandle) {
+        havel_cpp_set_gamma_for_output(static_cast<struct havel_cpp_server*>(nativeHandle), output_index, gamma);
+    }
+}
+
+void PluginManager::setTemperatureForOutput(int output_index, int kelvin) {
+    if (!m_server) return;
+    auto* server = static_cast<Server*>(m_server);
+    server->setTemperature(kelvin);
+    void* nativeHandle = server->nativeHandle();
+    if (nativeHandle) {
+        havel_cpp_set_temperature_for_output(static_cast<struct havel_cpp_server*>(nativeHandle), output_index, kelvin);
+    }
+}
+
+void PluginManager::setBrightnessForOutput(int output_index, float brightness) {
+    if (!m_server) return;
+    auto* server = static_cast<Server*>(m_server);
+    server->setBrightness(brightness);
+    void* nativeHandle = server->nativeHandle();
+    if (nativeHandle) {
+        havel_cpp_set_brightness_for_output(static_cast<struct havel_cpp_server*>(nativeHandle), output_index, brightness);
+    }
+}
+
 void PluginManager::scheduleRedraw() {
     // Signal all outputs to redraw
     // This would typically be done through the C bridge

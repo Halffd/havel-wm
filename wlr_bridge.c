@@ -2145,6 +2145,24 @@ void havel_wlr_set_gamma(havel_wlr_server_t *server, float gamma) {
     LOG_INFO("[Gamma] Set to %.2f on all outputs", gamma);
 }
 
+// Per-monitor gamma control
+void havel_wlr_set_gamma_for_output(havel_wlr_server_t *server, int output_index, float gamma) {
+    if (!server) return;
+
+    int i = 0;
+    struct havel_output *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        if (i == output_index) {
+            output->gamma = gamma;
+            havel_output_apply_gamma(output);
+            LOG_INFO("[Gamma] Output %d (%s) set to %.2f", output_index, output->output->name, gamma);
+            return;
+        }
+        i++;
+    }
+    LOG_WARN("[Gamma] Output %d not found", output_index);
+}
+
 void havel_wlr_set_temperature(havel_wlr_server_t *server, int kelvin) {
     if (!server) return;
 
@@ -2157,6 +2175,24 @@ void havel_wlr_set_temperature(havel_wlr_server_t *server, int kelvin) {
     LOG_INFO("[Temperature] Set to %dK on all outputs", kelvin);
 }
 
+// Per-monitor temperature control
+void havel_wlr_set_temperature_for_output(havel_wlr_server_t *server, int output_index, int kelvin) {
+    if (!server) return;
+
+    int i = 0;
+    struct havel_output *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        if (i == output_index) {
+            output->temperature = kelvin;
+            havel_output_apply_gamma(output);
+            LOG_INFO("[Temperature] Output %d (%s) set to %dK", output_index, output->output->name, kelvin);
+            return;
+        }
+        i++;
+    }
+    LOG_WARN("[Temperature] Output %d not found", output_index);
+}
+
 void havel_wlr_set_brightness(havel_wlr_server_t *server, float brightness) {
     if (!server) return;
 
@@ -2167,6 +2203,24 @@ void havel_wlr_set_brightness(havel_wlr_server_t *server, float brightness) {
     }
 
     LOG_INFO("[Brightness] Set to %.2f on all outputs", brightness);
+}
+
+// Per-monitor brightness control
+void havel_wlr_set_brightness_for_output(havel_wlr_server_t *server, int output_index, float brightness) {
+    if (!server) return;
+
+    int i = 0;
+    struct havel_output *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        if (i == output_index) {
+            output->brightness = brightness;
+            havel_output_apply_gamma(output);
+            LOG_INFO("[Brightness] Output %d (%s) set to %.2f", output_index, output->output->name, brightness);
+            return;
+        }
+        i++;
+    }
+    LOG_WARN("[Brightness] Output %d not found", output_index);
 }
 
 // ============================================================================

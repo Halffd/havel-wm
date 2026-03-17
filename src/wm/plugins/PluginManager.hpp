@@ -80,6 +80,11 @@ public:
     void setGamma(float gamma) override;
     void setTemperature(int kelvin) override;
     void setBrightness(float brightness) override;
+    
+    // Per-monitor control
+    void setGammaForOutput(int output_index, float gamma) override;
+    void setTemperatureForOutput(int output_index, int kelvin) override;
+    void setBrightnessForOutput(int output_index, float brightness) override;
 
     void scheduleRedraw() override;
 

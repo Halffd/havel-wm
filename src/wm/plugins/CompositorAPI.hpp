@@ -66,6 +66,11 @@ public:
     virtual void setGamma(float gamma) = 0;  // 0.1 - 2.0
     virtual void setTemperature(int kelvin) = 0;  // 3000K - 6500K
     virtual void setBrightness(float brightness) = 0;  // 0.1 - 1.0
+    
+    // Per-monitor control
+    virtual void setGammaForOutput(int output_index, float gamma) = 0;
+    virtual void setTemperatureForOutput(int output_index, int kelvin) = 0;
+    virtual void setBrightnessForOutput(int output_index, float brightness) = 0;
     // Note: Scale requires scene graph extension (future)
     
     // Rendering

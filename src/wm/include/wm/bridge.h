@@ -107,10 +107,15 @@ void havel_cpp_process_desktop_key(struct havel_cpp_server* server, uint32_t key
 void havel_cpp_init_window_groups(struct havel_cpp_server* server);
 void* havel_cpp_get_window_group_manager(struct havel_cpp_server* server);
 
-// C layer gamma application
+// C layer gamma application (global - all monitors)
 void havel_wlr_set_gamma(havel_wlr_server_t* server, float gamma);
 void havel_wlr_set_temperature(havel_wlr_server_t* server, int kelvin);
 void havel_wlr_set_brightness(havel_wlr_server_t* server, float brightness);
+
+// Per-monitor gamma/brightness control
+void havel_wlr_set_gamma_for_output(havel_wlr_server_t* server, int output_index, float gamma);
+void havel_wlr_set_temperature_for_output(havel_wlr_server_t* server, int output_index, int kelvin);
+void havel_wlr_set_brightness_for_output(havel_wlr_server_t* server, int output_index, float brightness);
 
 // Texture access for Alt-Tab thumbnails (called from C++ PluginManager)
 uint32_t havel_get_view_texture_id(void* c_view);
@@ -138,6 +143,11 @@ void havel_cpp_register_server_callbacks(
     cpp_server_quit_fn quit,
     cpp_server_spawn_fn spawn
 );
+
+// Per-monitor control functions
+void havel_cpp_set_gamma_for_output(struct havel_cpp_server* server, int output_index, float gamma);
+void havel_cpp_set_temperature_for_output(struct havel_cpp_server* server, int output_index, int kelvin);
+void havel_cpp_set_brightness_for_output(struct havel_cpp_server* server, int output_index, float brightness);
 
 #ifdef __cplusplus
 }

@@ -214,6 +214,31 @@ void havel_cpp_set_brightness(struct havel_cpp_server* server, float brightness)
     }
 }
 
+// Per-monitor control
+void havel_cpp_set_gamma_for_output(struct havel_cpp_server* server, int output_index, float gamma) {
+    if (!server) return;
+    server->server->setGamma(gamma);  // Also update global for new outputs
+    if (server->nativeHandle) {
+        havel_wlr_set_gamma_for_output((havel_wlr_server_t*)server->nativeHandle, output_index, gamma);
+    }
+}
+
+void havel_cpp_set_temperature_for_output(struct havel_cpp_server* server, int output_index, int kelvin) {
+    if (!server) return;
+    server->server->setTemperature(kelvin);
+    if (server->nativeHandle) {
+        havel_wlr_set_temperature_for_output((havel_wlr_server_t*)server->nativeHandle, output_index, kelvin);
+    }
+}
+
+void havel_cpp_set_brightness_for_output(struct havel_cpp_server* server, int output_index, float brightness) {
+    if (!server) return;
+    server->server->setBrightness(brightness);
+    if (server->nativeHandle) {
+        havel_wlr_set_brightness_for_output((havel_wlr_server_t*)server->nativeHandle, output_index, brightness);
+    }
+}
+
 void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int height) {
     if (!server || !server->server) return;
     
