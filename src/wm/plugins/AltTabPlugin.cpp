@@ -5,6 +5,7 @@
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
 #include <wm/render/AppIconLoader.hpp>
+#include <wm/View.hpp>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
@@ -172,14 +173,30 @@ private:
         uint32_t currentWorkspace = m_api->getActiveWorkspace();
         View* focused = m_api->getFocusedView();
 
-        // Collect views - use opaque IDs, don't dereference View pointers
+        printf("[AltTab] Collecting windows (workspace=%u, total views=%zu)\n", 
+               currentWorkspace, allViews.size());
+
+        // Collect views - filter by workspace and mapped state
         for (View* view : allViews) {
             if (!view) continue;
+            
+            // Skip unmapped windows
+            if (!view->isMapped()) {
+                printf("[AltTab] Skipping unmapped view %p\n", (void*)view);
+                continue;
+            }
+            
+            // Skip windows not on current workspace
+            if (view->workspaceId() != currentWorkspace) {
+                printf("[AltTab] Skipping view %p on workspace %u (current=%u)\n", 
+                       (void*)view, view->workspaceId(), currentWorkspace);
+                continue;
+            }
 
             WindowEntry entry;
-            entry.viewPtr = view;  // Keep for internal use
-            entry.viewId = 0;  // Would get from API in real impl
-            entry.workspace = currentWorkspace;  // Assume current workspace
+            entry.viewPtr = view;
+            entry.viewId = view->windowId();
+            entry.workspace = view->workspaceId();
             entry.isFocused = (view == focused);
 
             // Get app ID and title via CompositorAPI
@@ -195,38 +212,38 @@ private:
             entry.iconTextureId = havel::AppIconLoader::getInstance()->loadIcon(entry.appId);
             entry.iconSize = havel::AppIconLoader::getInstance()->getIconSize();
 
-            // Get geometry
-            entry.x = 0; entry.y = 0; entry.w = 800; entry.h = 600;
+            // Get actual geometry
+            entry.x = m_api->getViewX(view);
+            entry.y = m_api->getViewY(view);
+            entry.w = m_api->getViewWidth(view);
+            entry.h = m_api->getViewHeight(view);
+
+            printf("[AltTab] Added: %s - %s (mapped=%d, floating=%d)\n",
+                   entry.appId.c_str(), entry.title.c_str(),
+                   view->isMapped(), view->isFloating());
 
             m_windows.push_back(entry);
         }
 
-        // If no windows, add placeholder
+        // If no windows, don't show alt-tab
         if (m_windows.empty()) {
-            WindowEntry placeholder;
-            placeholder.viewPtr = nullptr;
-            placeholder.viewId = 0;
-            placeholder.appId = "none";
-            placeholder.title = "No windows";
-            placeholder.workspace = currentWorkspace;
-            placeholder.isFocused = false;
-            placeholder.x = 100; placeholder.y = 100;
-            placeholder.w = 400; placeholder.h = 200;
-            placeholder.textureId = 0;
-            placeholder.textureWidth = 0;
-            placeholder.textureHeight = 0;
-            m_windows.push_back(placeholder);
+            printf("[AltTab] No windows on workspace %u, hiding\n", currentWorkspace);
+            hide();
+            return;
         }
 
-        // Sort: focused first, then by workspace, then by title
+        printf("[AltTab] Collected %zu windows on workspace %u\n", 
+               m_windows.size(), currentWorkspace);
+
+        // Sort: focused first, then by title
         std::sort(m_windows.begin(), m_windows.end(),
             [focused](const WindowEntry& a, const WindowEntry& b) {
                 if (a.isFocused != b.isFocused) return a.isFocused;
-                if (a.workspace != b.workspace) return a.workspace < b.workspace;
                 return a.title < b.title;
             });
 
         // Find focused window index
+        m_selectedIndex = 0;
         for (size_t i = 0; i < m_windows.size(); ++i) {
             if (m_windows[i].isFocused) {
                 m_selectedIndex = (int)i;
@@ -264,20 +281,12 @@ private:
         }
 
         WindowEntry& selected = m_windows[m_selectedIndex];
-        printf("[AltTab] Selecting: %s (id=%lu)\n", 
+        printf("[AltTab] Selecting: %s (id=%lu)\n",
                selected.title.c_str(), (unsigned long)selected.viewId);
 
-        // Focus the selected window using opaque ID (no raw pointer!)
-        if (selected.viewId != 0) {
-            m_api->focusViewById(selected.viewId);
-        } else if (selected.viewPtr) {
-            // Fallback for placeholder entries
+        // Focus the selected window
+        if (selected.viewPtr) {
             m_api->focusView((View*)selected.viewPtr);
-        }
-
-        // Switch to its workspace if needed
-        if (selected.workspace != m_api->getActiveWorkspace()) {
-            m_api->setActiveWorkspace(selected.workspace);
         }
 
         hide();
@@ -295,6 +304,11 @@ private:
         renderer->drawRect(0, 0, screenWidth, screenHeight, Color(0.0f, 0.0f, 0.0f, 0.7f));
 
         if (m_windows.empty()) return;
+
+        // Bounds check on selected index
+        if (m_selectedIndex < 0 || m_selectedIndex >= (int)m_windows.size()) {
+            m_selectedIndex = 0;
+        }
 
         // Calculate thumbnail size and positions
         int thumbnailWidth = 200;
@@ -328,8 +342,8 @@ private:
 
             // Draw app icon at bottom-right corner (small, 32x32)
             if (entry.iconTextureId != 0) {
-                int iconX = x + thumbnailWidth - entry.iconSize - 8;  // 8px padding from right
-                int iconY = y + thumbnailHeight - entry.iconSize - 8;  // 8px padding from bottom
+                int iconX = x + thumbnailWidth - entry.iconSize - 8;
+                int iconY = y + thumbnailHeight - entry.iconSize - 8;
                 renderer->drawTexture(entry.iconTextureId,
                                       (float)iconX, (float)iconY,
                                       (float)entry.iconSize, (float)entry.iconSize,
