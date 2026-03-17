@@ -952,13 +952,23 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // TODO: Integrate with wlroots 0.20 render pass API for proper clear
     (void)bgR; (void)bgG; (void)bgB;
 
-    // Commit scene output using wlroots 0.20 API
+    // Commit scene output using wlroots 0.20 API with zoom transform
+    struct wlr_output_state state;
+    wlr_output_state_init(&state);
+
+    // Apply zoom as output scale transform
+    if (output->zoom != 1.0f && output->zoom > 0.0f) {
+        // Set scale for zoom (1.0 = normal, 2.0 = 2x zoom)
+        wlr_output_state_set_scale(&state, output->zoom);
+    }
+
     const struct wlr_scene_output_state_options options = {
         .timer = NULL,
     };
 
     if (!output->scene_output) {
         LOG_ERROR("[FRAME] %s: scene_output is NULL!", output->output->name);
+        wlr_output_state_finish(&state);
         return;
     }
 
@@ -966,13 +976,14 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // This ensures overlays are composited into the frame
     havel_cpp_draw_overlays(server->cpp_server, output->output->width, output->output->height);
 
-    // LOG_INFO("[FRAME] %s: calling wlr_scene_output_commit", output->output->name);  // Disabled to prevent log spam
-    // LOG_INFO("[FRAME]   scene_output=%p, scene=%p", output->scene_output, output->scene_output->scene);  // Disabled to prevent log spam
-    // LOG_INFO("[FRAME]   scene->tree.enabled=%d", output->scene_output->scene->tree.node.enabled);  // Disabled to prevent log spam
-    // LOG_INFO("[FRAME]   output->enabled=%d", output->output->enabled);  // Disabled to prevent log spam
-
-    wlr_scene_output_commit(output->scene_output, &options);
-    // LOG_INFO("[FRAME] %s: <<< COMMIT COMPLETE", output->output->name);  // Disabled to prevent log spam
+    // Commit with zoom transform applied via output state
+    if (output->zoom != 1.0f && output->zoom > 0.0f) {
+        LOG_DEBUG("[FRAME] %s: committing with zoom %.2f", output->output->name, output->zoom);
+        wlr_output_commit_state(output->output, &state);
+    } else {
+        wlr_scene_output_commit(output->scene_output, &options);
+    }
+    wlr_output_state_finish(&state);
 }
 
 static void output_destroy(struct wl_listener *listener, void *data) {
