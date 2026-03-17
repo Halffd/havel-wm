@@ -311,18 +311,32 @@ private:
         }
 
         // Calculate thumbnail size and positions
-        int thumbnailWidth = 200;
-        int thumbnailHeight = 150;
-        int spacing = 30;
-        int totalWidth = (int)m_windows.size() * (thumbnailWidth + spacing) - spacing;
+        int thumbnailWidth = 500;
+        int thumbnailHeight = 375;  // 4:3 aspect ratio
+        int spacing = 40;
+        int maxVisibleWindows = 5;  // Show max 5 at once
+        int visibleCount = std::min((int)m_windows.size(), maxVisibleWindows);
+        int totalWidth = visibleCount * (thumbnailWidth + spacing) - spacing;
         int startX = (screenWidth - totalWidth) / 2;
-        int y = (screenHeight - thumbnailHeight) / 2;
+        int y = (screenHeight - thumbnailHeight) / 2 - 50;  // Slightly higher for text
 
-        // Draw each window thumbnail
-        for (size_t i = 0; i < m_windows.size(); i++) {
-            int x = startX + (int)i * (thumbnailWidth + spacing);
-            bool isSelected = ((int)i == m_selectedIndex);
-            const WindowEntry& entry = m_windows[i];
+        // Scroll offset if more than maxVisibleWindows
+        int scrollOffset = 0;
+        if ((int)m_windows.size() > maxVisibleWindows) {
+            // Center on selected window
+            int firstVisible = std::max(0, m_selectedIndex - maxVisibleWindows / 2);
+            firstVisible = std::min(firstVisible, (int)m_windows.size() - maxVisibleWindows);
+            scrollOffset = firstVisible * (thumbnailWidth + spacing);
+        }
+
+        // Draw each visible window thumbnail
+        for (int i = 0; i < visibleCount; i++) {
+            int windowIndex = i + (scrollOffset / (thumbnailWidth + spacing));
+            if (windowIndex >= (int)m_windows.size()) break;
+            
+            int x = startX + i * (thumbnailWidth + spacing);
+            bool isSelected = (windowIndex == m_selectedIndex);
+            const WindowEntry& entry = m_windows[windowIndex];
 
             // Draw thumbnail background (fallback if no texture)
             Color bgColor = isSelected ? Color(0.3f, 0.4f, 0.5f, 0.9f) : Color(0.2f, 0.2f, 0.2f, 0.8f);
@@ -350,16 +364,26 @@ private:
                                       1.0f);
             }
 
-            // Draw app name
+            // Draw app name (larger font for bigger thumbnails)
             const std::string& name = entry.appId;
-            renderer->drawText(name.c_str(), (float)(x + 10), (float)(y + thumbnailHeight - 25), 16.0f, Color(1.0f, 1.0f, 1.0f, 1.0f));
+            renderer->drawText(name.c_str(), (float)(x + 15), (float)(y + thumbnailHeight - 35), 20.0f, Color(1.0f, 1.0f, 1.0f, 1.0f));
+            
+            // Draw window title (smaller, below app name)
+            if (!entry.title.empty() && entry.title != name) {
+                renderer->drawText(entry.title.c_str(), (float)(x + 15), (float)(y + thumbnailHeight - 15), 14.0f, Color(0.8f, 0.8f, 0.8f, 1.0f));
+            }
         }
 
         // Draw instruction text
         const char* instruction = "Alt+Tab: Cycle | Enter: Select | Esc: Cancel";
         float textWidth = strlen(instruction) * 10.0f;
         float textX = (screenWidth - textWidth) / 2.0f;
-        renderer->drawText(instruction, textX, (float)(screenHeight - 40), 14.0f, Color(0.8f, 0.8f, 0.8f, 1.0f));
+        renderer->drawText(instruction, textX, (float)(screenHeight - 50), 14.0f, Color(0.8f, 0.8f, 0.8f, 1.0f));
+        
+        // Draw window count
+        char countText[32];
+        snprintf(countText, sizeof(countText), "%d / %zu", m_selectedIndex + 1, m_windows.size());
+        renderer->drawText(countText, (float)(screenWidth - 80), (float)(screenHeight - 50), 14.0f, Color(0.6f, 0.6f, 0.6f, 1.0f));
     }
 };
 
