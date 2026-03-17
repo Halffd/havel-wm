@@ -85,6 +85,44 @@ void IPCServer::registerCommand(const std::string& cmd, CommandCallback cb) {
     m_commands.push_back(handler);
 }
 
+void IPCServer::processEvents() {
+    if (!m_running || m_serverFd < 0) return;
+
+    // Accept new client connection (non-blocking)
+    struct sockaddr_un clientAddr;
+    socklen_t clientLen = sizeof(clientAddr);
+    int clientFd = accept(m_serverFd, (struct sockaddr*)&clientAddr, &clientLen);
+    
+    if (clientFd >= 0) {
+        // Close previous client if any
+        if (m_clientFd >= 0) {
+            close(m_clientFd);
+        }
+        m_clientFd = clientFd;
+    }
+
+    // Read and process message from current client
+    if (m_clientFd >= 0) {
+        char buffer[1024];
+        ssize_t n = read(m_clientFd, buffer, sizeof(buffer) - 1);
+        if (n > 0) {
+            buffer[n] = '\0';
+            std::string msg(buffer);
+            // Trim newline
+            while (!msg.empty() && (msg.back() == '\n' || msg.back() == '\r')) {
+                msg.pop_back();
+            }
+            if (!msg.empty()) {
+                processMessage(msg);
+            }
+        } else if (n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
+            // Client disconnected or error
+            close(m_clientFd);
+            m_clientFd = -1;
+        }
+    }
+}
+
 void IPCServer::processMessage(const std::string& msg) {
     // Simple protocol: COMMAND [ARGS]
     // Responses: OK data or ERROR message
