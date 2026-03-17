@@ -409,9 +409,16 @@ void PluginManager::setBrightnessForOutput(int output_index, float brightness) {
 
 void PluginManager::setZoomForOutput(int output_index, float zoom) {
     if (!m_server) return;
-    void* nativeHandle = static_cast<Server*>(m_server)->nativeHandle();
+    auto* server = static_cast<Server*>(m_server);
+    
+    // Get cursor position for cursor-centered zoom
+    double cursorX = server->cursorX();
+    double cursorY = server->cursorY();
+    
+    void* nativeHandle = server->nativeHandle();
     if (nativeHandle) {
-        havel_cpp_set_zoom_for_output(static_cast<struct havel_cpp_server*>(nativeHandle), output_index, zoom);
+        havel_cpp_set_zoom_for_output(static_cast<struct havel_cpp_server*>(nativeHandle), 
+                                       output_index, zoom, cursorX, cursorY);
     }
 }
 

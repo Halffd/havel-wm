@@ -18,7 +18,9 @@ extern "C" {
     void havel_wlr_set_gamma(havel_wlr_server_t* server, float gamma);
     void havel_wlr_set_temperature(havel_wlr_server_t* server, int kelvin);
     void havel_wlr_set_brightness(havel_wlr_server_t* server, float brightness);
-    void havel_wlr_set_zoom_for_output(havel_wlr_server_t* server, int output_index, float zoom);
+    void havel_wlr_set_zoom_for_output(havel_wlr_server_t* server, int output_index, float zoom,
+                                        float cursor_x, float cursor_y);
+    void havel_wlr_set_zoom_for_output_simple(havel_wlr_server_t* server, int output_index, float zoom);
 }
 
 // Global callback pointers (accessible from Server.cpp)
@@ -240,11 +242,21 @@ void havel_cpp_set_brightness_for_output(struct havel_cpp_server* server, int ou
     }
 }
 
-// Per-monitor zoom
-void havel_cpp_set_zoom_for_output(struct havel_cpp_server* server, int output_index, float zoom) {
+// Per-monitor zoom with cursor-centered zoom
+void havel_cpp_set_zoom_for_output(struct havel_cpp_server* server, int output_index, float zoom,
+                                    double cursor_x, double cursor_y) {
     if (!server) return;
     if (server->nativeHandle) {
-        havel_wlr_set_zoom_for_output((havel_wlr_server_t*)server->nativeHandle, output_index, zoom);
+        havel_wlr_set_zoom_for_output((havel_wlr_server_t*)server->nativeHandle, 
+                                       output_index, zoom, (float)cursor_x, (float)cursor_y);
+    }
+}
+
+// Wrapper without cursor position
+void havel_cpp_set_zoom_for_output_simple(struct havel_cpp_server* server, int output_index, float zoom) {
+    if (!server) return;
+    if (server->nativeHandle) {
+        havel_wlr_set_zoom_for_output_simple((havel_wlr_server_t*)server->nativeHandle, output_index, zoom);
     }
 }
 

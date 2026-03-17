@@ -197,11 +197,14 @@ struct havel_output {
     // Gamma control v1 manager
     struct wlr_gamma_control_manager_v1 *gamma_control_manager;
 
-    // Gamma/temperature/brightness state
+    // Gamma/temperature/brightness/zoom state
     float gamma;
     int temperature;
     float brightness;
     float zoom;  // Per-monitor zoom level
+    float zoom_center_x;  // Cursor X for cursor-centered zoom (output-local)
+    float zoom_center_y;  // Cursor Y for cursor-centered zoom (output-local)
+    float prev_zoom;      // Previous zoom level for calculating offset
 
     // Gamma LUT buffers (allocated once per output)
     uint16_t *gamma_ramp_red;
@@ -952,7 +955,7 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // TODO: Integrate with wlroots 0.20 render pass API for proper clear
     (void)bgR; (void)bgG; (void)bgB;
 
-    // Commit scene output using wlroots 0.20 API with zoom transform
+    // Commit scene output using wlroots 0.20 API with cursor-centered zoom
     struct wlr_output_state state;
     wlr_output_state_init(&state);
 
@@ -960,6 +963,23 @@ static void output_frame(struct wl_listener *listener, void *data) {
     if (output->zoom != 1.0f && output->zoom > 0.0f) {
         // Set scale for zoom (1.0 = normal, 2.0 = 2x zoom)
         wlr_output_state_set_scale(&state, output->zoom);
+        
+        // Apply cursor-centered zoom translation
+        // When zooming, content under cursor should stay in place
+        // Translation offset = cursor_pos * (1 - prev_zoom / new_zoom)
+        if (output->zoom_center_x >= 0 && output->zoom_center_y >= 0 && 
+            output->prev_zoom > 0) {
+            float zoom_ratio = output->prev_zoom / output->zoom;
+            float offset_x = output->zoom_center_x * (1.0f - zoom_ratio);
+            float offset_y = output->zoom_center_y * (1.0f - zoom_ratio);
+            
+            // Apply offset to scene output position
+            wlr_scene_output_set_position(output->scene_output, 
+                                          (int)offset_x, (int)offset_y);
+            
+            LOG_DEBUG("[FRAME] %s: cursor-centered zoom offset (%.0f,%.0f)", 
+                      output->output->name, offset_x, offset_y);
+        }
     }
 
     const struct wlr_scene_output_state_options options = {
@@ -1037,6 +1057,9 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     output->temperature = 6500;
     output->brightness = 1.0f;
     output->zoom = 1.0f;
+    output->zoom_center_x = -1.0f;  // -1 = not set
+    output->zoom_center_y = -1.0f;
+    output->prev_zoom = 1.0f;
 
     // Allocate gamma LUT buffers once per output
     size_t gamma_size = wlr_output_get_gamma_size(wlr_output);
@@ -2236,23 +2259,38 @@ void havel_wlr_set_brightness_for_output(havel_wlr_server_t *server, int output_
     LOG_WARN("[Brightness] Output %d not found", output_index);
 }
 
-// Per-monitor zoom control
-void havel_wlr_set_zoom_for_output(havel_wlr_server_t *server, int output_index, float zoom) {
+// Per-monitor zoom control with cursor-centered zoom
+void havel_wlr_set_zoom_for_output(havel_wlr_server_t *server, int output_index, float zoom, 
+                                    float cursor_x, float cursor_y) {
     if (!server) return;
 
     int i = 0;
     struct havel_output *output;
     wl_list_for_each(output, &server->outputs, link) {
         if (i == output_index) {
+            // Store cursor position as zoom center (if valid)
+            if (cursor_x >= 0 && cursor_y >= 0) {
+                output->zoom_center_x = cursor_x;
+                output->zoom_center_y = cursor_y;
+            }
+            
+            // Store previous zoom for offset calculation
+            output->prev_zoom = output->zoom;
             output->zoom = zoom;
-            LOG_INFO("[Zoom] Output %d (%s) set to %.2f", output_index, output->output->name, zoom);
-            // Zoom would be applied via output scale transform
-            // For now, store the value for future use
+            
+            LOG_INFO("[Zoom] Output %d (%s) set to %.2f (center: %.0f,%.0f)", 
+                     output_index, output->output->name, zoom,
+                     output->zoom_center_x, output->zoom_center_y);
             return;
         }
         i++;
     }
     LOG_WARN("[Zoom] Output %d not found", output_index);
+}
+
+// Wrapper without cursor position (for backward compatibility)
+void havel_wlr_set_zoom_for_output_simple(havel_wlr_server_t *server, int output_index, float zoom) {
+    havel_wlr_set_zoom_for_output(server, output_index, zoom, -1.0f, -1.0f);
 }
 
 // ============================================================================
