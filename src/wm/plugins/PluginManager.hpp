@@ -57,6 +57,13 @@ public:
     std::string getViewAppId(View* view) override;
     std::string getViewTitle(View* view) override;
 
+    // Window geometry
+    int getViewX(View* view) override;
+    int getViewY(View* view) override;
+    int getViewWidth(View* view) override;
+    int getViewHeight(View* view) override;
+    bool isViewFloating(View* view) override;
+
     // Window texture for thumbnails
     uint32_t getViewTextureId(View* view) override;
     int getViewTextureWidth(View* view) override;

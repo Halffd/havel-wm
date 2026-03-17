@@ -290,6 +290,32 @@ int PluginManager::getViewTextureHeight(View* view) {
     return havel_get_view_texture_height(view->nativeHandle());
 }
 
+// Window geometry
+int PluginManager::getViewX(View* view) {
+    if (!view) return 0;
+    return view->geom().x;
+}
+
+int PluginManager::getViewY(View* view) {
+    if (!view) return 0;
+    return view->geom().y;
+}
+
+int PluginManager::getViewWidth(View* view) {
+    if (!view) return 0;
+    return view->geom().w;
+}
+
+int PluginManager::getViewHeight(View* view) {
+    if (!view) return 0;
+    return view->geom().h;
+}
+
+bool PluginManager::isViewFloating(View* view) {
+    if (!view) return false;
+    return view->isFloating();
+}
+
 uint32_t PluginManager::getActiveWorkspace() {
     if (!m_server) return 0;
     auto* server = static_cast<Server*>(m_server);

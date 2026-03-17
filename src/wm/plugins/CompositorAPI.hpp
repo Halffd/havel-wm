@@ -37,6 +37,13 @@ public:
     virtual std::string getViewAppId(View* view) = 0;
     virtual std::string getViewTitle(View* view) = 0;
 
+    // Window geometry
+    virtual int getViewX(View* view) = 0;
+    virtual int getViewY(View* view) = 0;
+    virtual int getViewWidth(View* view) = 0;
+    virtual int getViewHeight(View* view) = 0;
+    virtual bool isViewFloating(View* view) = 0;
+
     // Window texture for thumbnails (returns OpenGL texture ID, 0 if not available)
     virtual uint32_t getViewTextureId(View* view) = 0;
     virtual int getViewTextureWidth(View* view) = 0;

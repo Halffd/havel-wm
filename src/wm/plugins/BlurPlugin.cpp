@@ -31,7 +31,7 @@ namespace havel {
 class BlurPlugin : public Plugin {
 public:
     const char* name() const override { return "blur"; }
-    const char* version() const override { return "0.4.0"; }
+    const char* version() const override { return "1.0.0"; }
 
     void init(CompositorAPI* api) override {
         m_api = api;
@@ -71,7 +71,7 @@ public:
         if (!m_enabled) return;
 
         bool isFloating = isWindowFloating(event);
-        
+
         if (isFloating && m_blurFloating) {
             m_floatingWindows.insert(event.view);
             printf("[BlurPlugin] Floating window detected: %s\n",
@@ -84,7 +84,7 @@ public:
     }
 
     void renderOverlay(void* rendererPtr) override {
-        if (!m_enabled || !rendererPtr || m_floatingWindows.empty()) return;
+        if (!m_enabled || !rendererPtr) return;
 
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
         int outputW = m_api->getOutputWidth();
@@ -97,9 +97,9 @@ public:
         }
 
         // 2. Draw highlight borders around floating windows
-        if (m_showBorders) {
-            for (auto& fw : m_floatingWindows) {
-                drawFloatingWindowBorder(renderer, fw, outputW, outputH);
+        if (m_showBorders && !m_floatingWindows.empty()) {
+            for (auto* view : m_floatingWindows) {
+                drawFloatingWindowBorder(renderer, view, outputW, outputH);
             }
         }
     }
@@ -162,12 +162,6 @@ public:
         if ((event.modifiers & MOD_SHIFT) && event.keycode == 44) {  // L
             m_blurEnabled = !m_blurEnabled;
             printf("[BlurPlugin] Kawase blur %s\n", m_blurEnabled ? "enabled" : "disabled");
-            
-            // Initialize blur shader on first enable
-            if (m_blurEnabled && !m_blurShader) {
-                m_blurShader = new BlurShader();
-                // Will be initialized with proper size on first use
-            }
             return true;
         }
 
@@ -222,25 +216,31 @@ private:
     }
 
     bool isWindowFloating(const ViewEvent& event) const {
-        (void)event;
+        // Check if view is in our floating set
+        if (m_floatingWindows.find(event.view) != m_floatingWindows.end()) {
+            return true;
+        }
+        // Default: consider it floating (can be improved with proper tiling detection)
         return true;
     }
 
-    void drawFloatingWindowBorder(OverlayRenderer* renderer, void* view, 
+    void drawFloatingWindowBorder(OverlayRenderer* renderer, void* view,
                                    int outputW, int outputH) {
-        // Get actual window geometry from API (would need View geometry access)
-        // For now, use sample positions to demonstrate the effect
+        // Cast void* to View* for API calls
+        View* v = static_cast<View*>(view);
         
-        // In production, would iterate views and get their geometry
-        // This is a visual demonstration
-        int viewX = 100;
-        int viewY = 100;
-        int viewW = 400;
-        int viewH = 300;
+        // Get actual window geometry from API
+        int viewX = m_api->getViewX(v);
+        int viewY = m_api->getViewY(v);
+        int viewW = m_api->getViewWidth(v);
+        int viewH = m_api->getViewHeight(v);
+
+        // Skip if window has no valid geometry
+        if (viewW <= 0 || viewH <= 0) return;
 
         // Draw border lines
         float bw = static_cast<float>(m_borderWidth);
-        
+
         // Top border
         renderer->drawRect(viewX - bw, viewY - bw,
                           viewW + bw * 2, bw,
@@ -260,38 +260,30 @@ private:
 
         // Corner accents
         int accentLen = 20;
-        
+
         // Top-left
         renderer->drawRect(viewX - bw, viewY - bw, accentLen, 3,
                           Color(0.5f, 0.8f, 1.0f, 1.0f));
         renderer->drawRect(viewX - bw, viewY - bw, 3, accentLen,
                           Color(0.5f, 0.8f, 1.0f, 1.0f));
-        
+
         // Top-right
         renderer->drawRect(viewX + viewW - accentLen, viewY - bw, accentLen, 3,
                           Color(0.5f, 0.8f, 1.0f, 1.0f));
         renderer->drawRect(viewX + viewW - 3, viewY - bw, 3, accentLen,
                           Color(0.5f, 0.8f, 1.0f, 1.0f));
-    }
 
-    std::vector<float> generateGaussianKernel(int radius, float sigma) {
-        std::vector<float> kernel;
-        kernel.resize(radius * 2 + 1);
+        // Bottom-left
+        renderer->drawRect(viewX - bw, viewY + viewH - 3, accentLen, 3,
+                          Color(0.5f, 0.8f, 1.0f, 1.0f));
+        renderer->drawRect(viewX - bw, viewY + viewH - accentLen, 3, accentLen,
+                          Color(0.5f, 0.8f, 1.0f, 1.0f));
 
-        float sum = 0.0f;
-        float twoSigmaSq = 2.0f * sigma * sigma;
-
-        for (int i = -radius; i <= radius; i++) {
-            float weight = std::exp(-(i * i) / twoSigmaSq);
-            kernel[i + radius] = weight;
-            sum += weight;
-        }
-
-        for (float& w : kernel) {
-            w /= sum;
-        }
-
-        return kernel;
+        // Bottom-right
+        renderer->drawRect(viewX + viewW - accentLen, viewY + viewH - 3, accentLen, 3,
+                          Color(0.5f, 0.8f, 1.0f, 1.0f));
+        renderer->drawRect(viewX + viewW - 3, viewY + viewH - accentLen, 3, accentLen,
+                          Color(0.5f, 0.8f, 1.0f, 1.0f));
     }
 };
 
