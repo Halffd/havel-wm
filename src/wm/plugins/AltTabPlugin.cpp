@@ -79,6 +79,12 @@ public:
         bool alt = (event.modifiers & MOD_ALT) != 0;
         bool shift = (event.modifiers & MOD_SHIFT) != 0;
         
+        // Alt RELEASED - close alt-tab and select window
+        if (!event.pressed && !alt && m_visible) {
+            select();  // Select current window and hide
+            return true;
+        }
+        
         // Alt+Tab or Alt+Shift+Tab
         if (alt && event.keycode == 23 && event.pressed) {  // Tab
             if (!m_visible) {
