@@ -171,6 +171,10 @@ set(WM_CORE_SOURCES
     src/wm/core/DesktopPortal.hpp
     src/wm/core/WindowGroupManager.cpp
     src/wm/core/WindowGroupManager.hpp
+    src/wm/core/Window.cpp
+    src/wm/core/Window.hpp
+    src/wm/core/CoreWindowManager.cpp
+    src/wm/core/CoreWindowManager.hpp
     # XWaylandDnD - WIP, needs wlroots integration
     # src/wm/core/XWaylandDnD.cpp
     # src/wm/core/XWaylandDnD.hpp
@@ -179,7 +183,6 @@ set(WM_CORE_SOURCES
     src/wm/render/RenderPipeline.cpp
     src/wm/render/render_c_wrappers.c
     src/wm/render/ShaderEffect.cpp
-    src/wm/render/AdvancedShaderEffects.cpp
     src/wm/render/OverlayRenderer.cpp
     src/wm/render/OverlayRenderer.hpp
     src/wm/render/OverlayRendering.cpp
@@ -227,7 +230,6 @@ set(WM_CORE_SOURCES
     src/wm/plugins/ServerDecorationPlugin.cpp
     src/wm/plugins/DrawPlugin.cpp
     src/wm/plugins/FPSPlugin.cpp
-    src/wm/plugins/GammaPlugin.cpp
     src/wm/render/VulkanRenderer.c
     src/wm/render/VulkanRendererBridge.h
     src/wm/render/VulkanSceneCompositor.c
@@ -412,17 +414,11 @@ if(PANEL_ENABLED)
     # Build text editor
     add_subdirectory(src/shell/texteditor)
 
-    # Build game launcher
-    add_subdirectory(src/shell/gamelauncher)
-
-    # Build dictionary
-    add_subdirectory(src/shell/dictionary)
-
-    # Build updater
-    add_subdirectory(src/shell/updater)
-
-    # Build video player
-    add_subdirectory(src/shell/videoplayer)
+    # REMOVED: Broken agent-generated apps that don't work
+    # - gamelauncher (deleted)
+    # - dictionary (deleted) 
+    # - updater (deleted)
+    # - videoplayer (deleted)
 
     # Build and install settings
     add_subdirectory(src/shell/settings)
