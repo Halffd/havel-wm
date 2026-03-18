@@ -361,6 +361,10 @@ void scene_view_destroy(SceneView* view);
 bool scene_view_set_floating(SceneView* view, bool floating);
 bool scene_view_focus(SceneView* view);
 
+// Persistence
+bool scene_graph_save_layout(Scene* scene, const char* filename);
+bool scene_graph_load_layout(Scene* scene, const char* filename);
+
 #ifdef __cplusplus
 }
 #endif

@@ -346,17 +346,183 @@ bool scene_container_split(SceneContainer* container, ContainerType new_type) {
 
 void scene_graph_update(Scene* scene) {
     if (!scene) return;
-    
+
     // Update each output
     for (size_t i = 0; i < scene->output_count; i++) {
         SceneOutput* output = scene->outputs[i];
-        
+
         // Update active workspace
         SceneWorkspace* ws = scene_workspace_get_active(output);
         if (ws && (ws->base.dirty_flags & SCENE_DIRTY_LAYOUT)) {
-            scene_layout_workspace(ws, output->base.x, output->base.y, 
+            scene_layout_workspace(ws, output->base.x, output->base.y,
                                    output->base.width, output->base.height);
             ws->base.dirty_flags &= ~SCENE_DIRTY_LAYOUT;
         }
     }
+}
+
+// ============================================================================
+// Persistence - Save/Restore Layout
+// ============================================================================
+
+#include <stdio.h>
+#include <string.h>
+
+static void save_container_to_file(SceneContainer* container, FILE* f, int indent) {
+    if (!container || !f) return;
+
+    const char* type_str;
+    switch (container->container_type) {
+        case CONTAINER_SPLIT_H: type_str = "split_h"; break;
+        case CONTAINER_SPLIT_V: type_str = "split_v"; break;
+        case CONTAINER_TABBED: type_str = "tabbed"; break;
+        case CONTAINER_STACKED: type_str = "stacked"; break;
+        default: type_str = "unknown"; break;
+    }
+
+    // Write container opening
+    fprintf(f, "%*s{\n", indent, "");
+    fprintf(f, "%*s\"type\": \"container\",\n", indent + 2, "");
+    fprintf(f, "%*s\"container_type\": \"%s\",\n", indent + 2, "", type_str);
+
+    // Write children
+    if (container->child_views_head || container->child_containers_head) {
+        fprintf(f, "%*s\"children\": [\n", indent + 2, "");
+
+        int first = 1;
+
+        // Write view children
+        SceneView* view = container->child_views_head;
+        while (view) {
+            if (!first) fprintf(f, ",\n");
+            first = 0;
+            fprintf(f, "%*s{\"type\": \"view\", \"app_id\": \"%s\", \"title\": \"%s\", \"floating\": %s}",
+                    indent + 4, "",
+                    view->app_id[0] ? view->app_id : "",
+                    view->title[0] ? view->title : "",
+                    view->floating ? "true" : "false");
+            view = view->base.next_sibling ? (SceneView*)view->base.next_sibling : NULL;
+        }
+
+        // Write container children
+        SceneContainer* child = container->child_containers_head;
+        while (child) {
+            if (!first) fprintf(f, ",\n");
+            first = 0;
+            save_container_to_file(child, f, indent + 4);
+            child = child->base.next_sibling ? (SceneContainer*)child->base.next_sibling : NULL;
+        }
+
+        fprintf(f, "\n%*s]\n", indent + 2, "");
+    }
+
+    fprintf(f, "%*s}", indent, "");
+}
+
+bool scene_graph_save_layout(Scene* scene, const char* filename) {
+    if (!scene || !filename) return false;
+
+    FILE* f = fopen(filename, "w");
+    if (!f) {
+        LOG_ERROR("[Scene] Failed to open %s for writing", filename);
+        return false;
+    }
+
+    fprintf(f, "{\n");
+    fprintf(f, "  \"version\": 1,\n");
+    fprintf(f, "  \"outputs\": [\n");
+
+    int output_first = 1;
+    for (size_t i = 0; i < scene->output_count; i++) {
+        SceneOutput* output = scene->outputs[i];
+        if (!output) continue;
+
+        if (!output_first) fprintf(f, ",\n");
+        output_first = 0;
+
+        fprintf(f, "    {\n");
+        fprintf(f, "      \"name\": \"output_%zu\",\n", i);
+        fprintf(f, "      \"workspaces\": [\n");
+
+        int ws_first = 1;
+        for (uint32_t ws_id = 0; ws_id < SCENE_MAX_WORKSPACES; ws_id++) {
+            SceneWorkspace* ws = scene_workspace_get(output, ws_id);
+            if (!ws || (!ws->containers_head && !ws->floating_views_head)) continue;
+
+            if (!ws_first) fprintf(f, ",\n");
+            ws_first = 0;
+
+            fprintf(f, "        {\n");
+            fprintf(f, "          \"id\": %u,\n", ws_id);
+            fprintf(f, "          \"active\": %s,\n", (ws_id == output->active_workspace_id) ? "true" : "false");
+
+            // Save containers
+            if (ws->containers_head) {
+                fprintf(f, "          \"containers\": [\n");
+                SceneContainer* container = ws->containers_head;
+                int c_first = 1;
+                while (container) {
+                    if (!c_first) fprintf(f, ",\n");
+                    c_first = 0;
+                    save_container_to_file(container, f, 12);
+                    container = container->base.next_sibling ? (SceneContainer*)container->base.next_sibling : NULL;
+                }
+                fprintf(f, "\n          ]\n");
+            }
+
+            // Save floating views
+            if (ws->floating_views_head) {
+                fprintf(f, "          \"floating_views\": [\n");
+                SceneView* view = ws->floating_views_head;
+                int v_first = 1;
+                while (view) {
+                    if (!v_first) fprintf(f, ",\n");
+                    v_first = 0;
+                    fprintf(f, "            {\"app_id\": \"%s\", \"title\": \"%s\", \"x\": %d, \"y\": %d, \"w\": %d, \"h\": %d}",
+                            view->app_id[0] ? view->app_id : "",
+                            view->title[0] ? view->title : "",
+                            view->float_x, view->float_y,
+                            view->float_width, view->float_height);
+                    view = view->base.next_sibling ? (SceneView*)view->base.next_sibling : NULL;
+                }
+                fprintf(f, "\n          ]\n");
+            }
+
+            fprintf(f, "        }");
+        }
+
+        fprintf(f, "\n      ]\n");
+        fprintf(f, "    }");
+    }
+
+    fprintf(f, "\n  ]\n");
+    fprintf(f, "}\n");
+
+    fclose(f);
+    LOG_INFO("[Scene] Layout saved to %s", filename);
+    return true;
+}
+
+bool scene_graph_load_layout(Scene* scene, const char* filename) {
+    // TODO: Implement JSON parsing for layout restore
+    // For now, just log that the feature exists
+    if (!scene || !filename) return false;
+
+    FILE* f = fopen(filename, "r");
+    if (!f) {
+        LOG_INFO("[Scene] No saved layout found at %s (this is normal for first run)", filename);
+        return false;
+    }
+
+    fclose(f);
+    LOG_INFO("[Scene] Layout file exists at %s (parsing not yet implemented)", filename);
+
+    // Full implementation would:
+    // 1. Parse JSON
+    // 2. For each output, match by name or create
+    // 3. For each workspace, restore containers and views
+    // 4. Match views by app_id/title to existing windows
+    // 5. Restore container hierarchy and floating positions
+
+    return true;  // File exists
 }

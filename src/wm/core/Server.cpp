@@ -66,6 +66,14 @@ Server::Server() {
     m_sceneGraph = scene_create();
     if (m_sceneGraph) {
         LOG_INFO("[Scene] Scene graph created (pool=%d nodes)", SCENE_NODE_POOL_SIZE);
+
+        // Load saved layout if exists
+        const char* home = getenv("HOME");
+        if (home) {
+            char layoutPath[512];
+            snprintf(layoutPath, sizeof(layoutPath), "%s/.config/havel-wm/scene_layout.json", home);
+            scene_graph_load_layout(m_sceneGraph, layoutPath);
+        }
     }
 
     LOG_INFO("Plugins initialized (%d plugins)", m_pluginManager.plugins().size());
@@ -74,14 +82,21 @@ Server::Server() {
 Server::~Server() {
     LOG_INFO("Server destructor");
     m_pluginManager.shutdown();
-    
-    // Destroy scene graph
+
+    // Save scene graph layout before destroying
     if (m_sceneGraph) {
+        const char* home = getenv("HOME");
+        if (home) {
+            char layoutPath[512];
+            snprintf(layoutPath, sizeof(layoutPath), "%s/.config/havel-wm/scene_layout.json", home);
+            scene_graph_save_layout(m_sceneGraph, layoutPath);
+        }
+
         scene_destroy(m_sceneGraph);
         m_sceneGraph = nullptr;
         LOG_INFO("[Scene] Scene graph destroyed");
     }
-    
+
     // TextInputManager is owned by C layer, don't delete here
 }
 
@@ -1270,6 +1285,23 @@ void Server::registerKeybindings() {
                 printf("\n=== Scene Graph Stats ===\n");
                 scene_print_stats(m_sceneGraph);
                 printf("========================\n\n");
+            }
+        }
+    );
+
+    // Meta+Shift+L: Save scene graph layout
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 38,
+        "scene_graph_save", [this]() {
+            if (m_sceneGraph) {
+                const char* home = getenv("HOME");
+                if (home) {
+                    char layoutPath[512];
+                    snprintf(layoutPath, sizeof(layoutPath), "%s/.config/havel-wm/scene_layout.json", home);
+                    if (scene_graph_save_layout(m_sceneGraph, layoutPath)) {
+                        printf("[Debug] Layout saved to %s\n", layoutPath);
+                    }
+                }
             }
         }
     );
