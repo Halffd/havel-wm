@@ -33,7 +33,6 @@ extern "C" {
 // Configuration
 // ============================================================================
 
-#define SCENE_NODE_INLINE_CHILDREN 4    // Inline storage for small nodes
 #define SCENE_NODE_POOL_SIZE 1024        // Initial pool size
 #define SCENE_MAX_WORKSPACES 10          // Fixed workspace count
 #define SCENE_MAX_OUTPUTS 8              // Maximum outputs
@@ -112,13 +111,10 @@ typedef struct SceneNode {
     
     // === Cold fields (accessed rarely) ===
     uint64_t id;
-    SceneNodeLink* link_pool;       // Pre-allocated links for children
+    SceneNodeLink* link_pool;       // Dynamically allocated links for children
     size_t link_count;
     size_t link_capacity;
-    
-    // Inline storage for small number of children (avoids allocation)
-    SceneNodeLink inline_links[SCENE_NODE_INLINE_CHILDREN];
-    
+
     // wlroots integration
     struct wlr_scene_tree* wlroots_tree;
 } SceneNode;

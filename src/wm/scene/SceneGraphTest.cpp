@@ -136,27 +136,31 @@ TEST(loop_detection) {
 TEST(reparenting) {
     Scene* scene = scene_create();
     char error[256];
-    
-    // Create: root -> A, root -> B
+
+    // Create: root -> A -> C, root -> B
     SceneNode* a = scene_pool_alloc(scene, SCENE_NODE_CONTAINER);
     SceneNode* b = scene_pool_alloc(scene, SCENE_NODE_CONTAINER);
     SceneNode* c = scene_pool_alloc(scene, SCENE_NODE_VIEW);
-    
+
     scene_node_add_child(&scene->base, a, error, sizeof(error));
     scene_node_add_child(&scene->base, b, error, sizeof(error));
     scene_node_add_child(a, c, error, sizeof(error));
-    
+
     ASSERT(a->child_count == 1, "a should have 1 child");
     ASSERT(c->parent == a, "c's parent should be a");
-    
-    // Note: reparenting with link pool reallocation has a bug
-    // For now, just test basic structure
-    // scene_node_reparent(c, b, error, sizeof(error));
-    
-    // Try to reparent A to C (would create loop: root->B->C->A)
-    ASSERT(scene_node_reparent(a, c, error, sizeof(error)) == false, 
-           "should fail to create loop");
-    
+
+    // C is child of A, reparent to B
+    ASSERT(scene_node_reparent(c, b, error, sizeof(error)), "reparent failed");
+
+    ASSERT(c->parent == b, "c's parent should be b");
+    ASSERT(a->child_count == 0, "a should have 0 children");
+    ASSERT(b->child_count == 1, "b should have 1 child");
+
+    // Try to reparent B to C (would create loop: root->A, C->B, B->C)
+    // This should fail because C is a descendant of B
+    ASSERT(scene_node_reparent(b, c, error, sizeof(error)) == false, 
+           "should fail to create loop (B->C->B)");
+
     scene_destroy(scene);
 }
 
@@ -283,16 +287,16 @@ TEST(hit_test) {
     scene_node_update_bounds(container);
     scene_node_update_bounds(view);
 
-    // Hit test: inside view (start from container, not root)
-    SceneNode* hit = scene_node_hit_test(container, 35, 35);
-    ASSERT(hit == view, "should hit view at (35,35)");
+    // Hit test: inside view (from root)
+    SceneNode* hit = scene_node_hit_test(&scene->base, 35, 35);
+    ASSERT(hit == view, "should hit view at (35,35) from root");
 
-    // Hit test: inside container but outside view
-    hit = scene_node_hit_test(container, 5, 5);
-    ASSERT(hit == container, "should hit container at (5,5)");
+    // Hit test: inside container but outside view (from root)
+    hit = scene_node_hit_test(&scene->base, 5, 5);
+    ASSERT(hit == container, "should hit container at (5,5) from root");
 
-    // Hit test: outside everything
-    hit = scene_node_hit_test(container, 200, 200);
+    // Hit test: outside everything (from root)
+    hit = scene_node_hit_test(&scene->base, 200, 200);
     ASSERT(hit == NULL, "should miss at (200,200)");
     
     scene_destroy(scene);

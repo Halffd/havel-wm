@@ -56,15 +56,15 @@ static SceneNodePool* scene_pool_create(size_t capacity) {
 static void scene_pool_destroy(SceneNodePool* pool) {
     if (!pool) return;
     // Free allocated resources (but NOT the pool itself - it's embedded in Scene)
-    
+
     // Free any link pools that were allocated for nodes
     for (size_t i = 0; i < pool->capacity; i++) {
         SceneNode* node = &pool->nodes[i];
-        if (node->link_pool && node->link_pool != node->inline_links) {
+        if (node->link_pool) {
             free(node->link_pool);
         }
     }
-    
+
     free(pool->free_list);
     free(pool->nodes);
     // Don't free pool itself - it's part of Scene struct
@@ -115,12 +115,12 @@ SceneNode* scene_pool_alloc(Scene* scene, SceneNodeType type) {
     node->type = type;
     node->id = ++scene->generation;  // Use generation as ID
     node->generation = scene->generation;
-    
-    // Pre-allocate inline links
-    node->link_pool = node->inline_links;
-    node->link_capacity = SCENE_NODE_INLINE_CHILDREN;
+
+    // Initialize link pool (dynamically allocated on first child add)
+    node->link_pool = NULL;
+    node->link_capacity = 0;
     node->link_count = 0;
-    
+
     return node;
 }
 
@@ -135,8 +135,8 @@ void scene_pool_free(Scene* scene, SceneNode* node) {
         return;
     }
 
-    // Free link pool if it was allocated (not inline)
-    if (node->link_pool && node->link_pool != node->inline_links) {
+    // Free link pool if it was allocated
+    if (node->link_pool) {
         free(node->link_pool);
     }
 
@@ -205,49 +205,51 @@ bool scene_node_add_child(SceneNode* parent, SceneNode* child, char* error_out, 
         snprintf(error_out, error_size, "NULL parent or child");
         return false;
     }
-    
-    // Check for loops using generation counters (O(1))
+
+    // Check for loops (walk up parent chain)
     if (scene_detect_loop(parent, child)) {
         snprintf(error_out, error_size, "Loop detected");
         return false;
     }
-    
+
     // Check if child already has a parent
     if (child->parent != NULL) {
         snprintf(error_out, error_size, "Child already has parent");
         return false;
     }
-    
-    // Allocate link from pool (or use inline storage)
-    SceneNodeLink* link = NULL;
-    
-    if (parent->link_count < parent->link_capacity) {
-        // Use inline storage
-        link = &parent->link_pool[parent->link_count++];
-    } else {
-        // Allocate new link
-        size_t new_capacity = parent->link_capacity * 2;
-        SceneNodeLink* new_pool = (SceneNodeLink*)realloc(
-            parent->link_pool != parent->inline_links ? parent->link_pool : NULL,
-            new_capacity * sizeof(SceneNodeLink)
-        );
-        
-        if (!new_pool) {
-            snprintf(error_out, error_size, "Out of memory");
-            return false;
-        }
-        
-        // Copy inline links if this is first allocation
-        if (parent->link_pool == parent->inline_links) {
-            memcpy(new_pool, parent->inline_links, SCENE_NODE_INLINE_CHILDREN * sizeof(SceneNodeLink));
-        }
-        
-        parent->link_pool = new_pool;
-        parent->link_capacity = new_capacity;
-        link = &parent->link_pool[parent->link_count++];
+
+    // Allocate link - always use dynamic allocation to avoid pointer invalidation
+    // when reallocating (inline storage copy breaks prev/next pointers)
+    size_t new_capacity = parent->link_capacity == 0 ? 4 : parent->link_capacity * 2;
+    SceneNodeLink* new_pool = (SceneNodeLink*)realloc(
+        parent->link_pool,
+        new_capacity * sizeof(SceneNodeLink)
+    );
+
+    if (!new_pool) {
+        snprintf(error_out, error_size, "Out of memory");
+        return false;
     }
+
+    // Update head/tail pointers if pool moved
+    if (new_pool != parent->link_pool && parent->link_pool != NULL) {
+        if (parent->children_head) {
+            size_t offset = (size_t)(parent->children_head - parent->link_pool);
+            parent->children_head = &new_pool[offset];
+        }
+        if (parent->children_tail) {
+            size_t offset = (size_t)(parent->children_tail - parent->link_pool);
+            parent->children_tail = &new_pool[offset];
+        }
+    }
+
+    parent->link_pool = new_pool;
+    parent->link_capacity = new_capacity;
     
-    // Add to linked list (O(1))
+    // Get next free link
+    SceneNodeLink* link = &parent->link_pool[parent->link_count++];
+    
+    // Initialize link
     link->node = child;
     link->next = NULL;
     link->prev = parent->children_tail;
@@ -264,11 +266,11 @@ bool scene_node_add_child(SceneNode* parent, SceneNode* child, char* error_out, 
     child->parent = parent;
     child->next_sibling = NULL;
     child->prev_sibling = NULL;
-    
+
     // Mark dirty
     parent->dirty_flags |= SCENE_DIRTY_CHILDREN | SCENE_DIRTY_BOUNDS;
     child->dirty_flags |= SCENE_DIRTY_TRANSFORM | SCENE_DIRTY_BOUNDS;
-    
+
     return true;
 }
 
@@ -444,18 +446,21 @@ void scene_node_layout(SceneNode* node) {
 
 SceneNode* scene_node_hit_test(SceneNode* node, int x, int y) {
     if (!node) return NULL;
-    
+
     // Update bounds if dirty
     if (node->dirty_flags & SCENE_DIRTY_BOUNDS) {
         scene_node_update_bounds(node);
     }
-    
-    // Check if point is inside this node's bounds
-    bool inside = (x >= node->world_x && x < node->world_x + node->world_width &&
-                   y >= node->world_y && y < node->world_y + node->world_height);
-    
-    if (!inside) return NULL;
-    
+
+    // For root node, skip bounds check (root has 0x0 bounds) and check children
+    if (node->type != SCENE_NODE_ROOT) {
+        // Check if point is inside this node's bounds
+        bool inside = (x >= node->world_x && x < node->world_x + node->world_width &&
+                       y >= node->world_y && y < node->world_y + node->world_height);
+
+        if (!inside) return NULL;
+    }
+
     // Check children (front to back - last child is on top)
     SceneNode* child = scene_node_last_child(node);
     while (child) {
@@ -463,9 +468,9 @@ SceneNode* scene_node_hit_test(SceneNode* node, int x, int y) {
         if (hit) return hit;
         child = child->prev_sibling;
     }
-    
-    // No child hit, return this node
-    return node;
+
+    // No child hit, return this node (only if not root)
+    return node->type != SCENE_NODE_ROOT ? node : NULL;
 }
 
 // ============================================================================
