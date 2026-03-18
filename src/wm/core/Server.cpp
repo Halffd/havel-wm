@@ -494,6 +494,18 @@ void Server::arrangeWorkspace(uint32_t id) {
 
     LOG_DEBUG("Arranging workspace %u with %zu tiled views", id, views.size());
 
+    // Update scene graph layout if available
+    if (m_sceneGraph) {
+        SceneOutput* output = scene_output_get_primary(m_sceneGraph);
+        if (output) {
+            SceneWorkspace* scene_ws = scene_workspace_get(output, id);
+            if (scene_ws) {
+                scene_layout_workspace(scene_ws, geom.x, geom.y, geom.w, geom.h);
+                LOG_DEBUG("[Scene] Layout updated for workspace %u", id);
+            }
+        }
+    }
+
     Layout::arrangeMasterStack(views, geom);
 
     // Apply the layout by setting positions/sizes
