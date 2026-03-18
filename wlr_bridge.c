@@ -998,8 +998,9 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // Process IPC events for external tool communication
     havel_cpp_process_ipc_events(server->cpp_server);
 
-    // Dispatch frame event to plugins (via C++ server)
-    havel_cpp_dispatch_output_frame(server->cpp_server, output->output, output->scene_output);
+    // Dispatch frame event to plugins (via C++ server) with actual output dimensions
+    havel_cpp_dispatch_output_frame(server->cpp_server, output->output, output->scene_output,
+                                     output->output->width, output->output->height, output->output->refresh);
 
     // Get background color from wallpaper plugin
     float bgR, bgG, bgB;

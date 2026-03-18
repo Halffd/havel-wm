@@ -14,6 +14,9 @@
 // Forward declare C server type and functions
 typedef struct havel_wlr_server havel_wlr_server_t;
 
+// Forward declare wlroots types
+struct wlr_output;
+
 extern "C" {
     void havel_wlr_set_gamma(havel_wlr_server_t* server, float gamma);
     void havel_wlr_set_temperature(havel_wlr_server_t* server, int kelvin);
@@ -158,16 +161,16 @@ void havel_cpp_update_animations(struct havel_cpp_server* server) {
     server->server->updateAnimations();
 }
 
-void havel_cpp_dispatch_output_frame(struct havel_cpp_server* server, void* output, void* sceneOutput) {
-    if (!server) return;
-    
+void havel_cpp_dispatch_output_frame(struct havel_cpp_server* server, void* output, void* sceneOutput, int width, int height, int refresh) {
+    if (!server || !output) return;
+
     havel::OutputFrameEvent frameEvent;
     frameEvent.output = output;
     frameEvent.sceneOutput = sceneOutput;
-    frameEvent.width = 1920;  // Would get from actual output
-    frameEvent.height = 1080;
-    frameEvent.refresh = 60000;  // 60Hz in mHz
-    
+    frameEvent.width = width;
+    frameEvent.height = height;
+    frameEvent.refresh = refresh;
+
     server->server->pluginManager().dispatchOutputFrame(frameEvent);
 }
 

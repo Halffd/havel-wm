@@ -64,9 +64,6 @@ void havel_cpp_set_active_workspace(struct havel_cpp_server* server, uint32_t wo
 // Animation updates (called from C frame handler)
 void havel_cpp_update_animations(struct havel_cpp_server* server);
 
-// Plugin event dispatch (called from C)
-void havel_cpp_dispatch_output_frame(struct havel_cpp_server* server, void* output, void* sceneOutput);
-
 // Background color (called from C for clear color)
 void havel_cpp_get_background_color(struct havel_cpp_server* server, float* r, float* g, float* b);
 
@@ -95,6 +92,9 @@ void havel_cpp_process_combo_key(struct havel_cpp_server* server, uint32_t keyco
 
 // IPC server events
 void havel_cpp_process_ipc_events(struct havel_cpp_server* server);
+
+// Output frame dispatch (with actual dimensions from wlroots)
+void havel_cpp_dispatch_output_frame(struct havel_cpp_server* server, void* output, void* sceneOutput, int width, int height, int refresh);
 
 // Desktop management
 void havel_cpp_init_desktop(struct havel_cpp_server* server);
