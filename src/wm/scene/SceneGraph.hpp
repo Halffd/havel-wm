@@ -321,6 +321,38 @@ char* scene_node_get_path(SceneNode* node, char* buffer, size_t buffer_size);
 SceneNode* scene_pool_alloc(Scene* scene, SceneNodeType type);
 void scene_pool_free(Scene* scene, SceneNode* node);
 
+// ============================================================================
+// High-Level Operations (SceneGraphOps.cpp)
+// ============================================================================
+
+// Layout
+void scene_layout_workspace(SceneWorkspace* ws, int x, int y, int w, int h);
+void scene_graph_update(Scene* scene);
+
+// Workspace operations
+SceneWorkspace* scene_workspace_get(SceneOutput* output, uint32_t id);
+SceneWorkspace* scene_workspace_get_active(SceneOutput* output);
+bool scene_workspace_set_active(SceneOutput* output, uint32_t id, char* error_out, size_t error_size);
+bool scene_workspace_add_view(SceneWorkspace* ws, SceneView* view, bool floating);
+bool scene_workspace_remove_view(SceneWorkspace* ws, SceneView* view);
+
+// Output operations
+SceneOutput* scene_output_get(Scene* scene, size_t index);
+SceneOutput* scene_output_get_primary(Scene* scene);
+bool scene_output_configure(SceneOutput* output, int x, int y, float scale);
+
+// Container operations
+SceneContainer* scene_container_create(SceneWorkspace* ws, ContainerType type);
+bool scene_container_destroy(SceneContainer* container);
+bool scene_container_split(SceneContainer* container, ContainerType new_type);
+
+// View operations (wlroots integration)
+SceneView* scene_view_create(SceneWorkspace* ws, struct wlr_xdg_surface* xdg_surface);
+SceneView* scene_view_create_xwayland(SceneWorkspace* ws, struct wlr_xwayland_surface* xwayland_surface);
+void scene_view_destroy(SceneView* view);
+bool scene_view_set_floating(SceneView* view, bool floating);
+bool scene_view_focus(SceneView* view);
+
 #ifdef __cplusplus
 }
 #endif
