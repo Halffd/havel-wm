@@ -2,6 +2,7 @@
 #include <wm/Layout.hpp>
 #include <wm/plugins/Plugins.hpp>
 #include "core/CoreWindowManager.hpp"
+#include "scene/SceneGraph.hpp"
 #include <Logger.h>
 #include <algorithm>
 #include <cstdlib>
@@ -61,12 +62,26 @@ Server::Server() {
     // Initialize window manager and set server pointer
     setCoreWindowManagerServer(this);
 
+    // Create scene graph
+    m_sceneGraph = scene_create();
+    if (m_sceneGraph) {
+        LOG_INFO("[Scene] Scene graph created (pool=%d nodes)", SCENE_NODE_POOL_SIZE);
+    }
+
     LOG_INFO("Plugins initialized (%d plugins)", m_pluginManager.plugins().size());
 }
 
 Server::~Server() {
     LOG_INFO("Server destructor");
     m_pluginManager.shutdown();
+    
+    // Destroy scene graph
+    if (m_sceneGraph) {
+        scene_destroy(m_sceneGraph);
+        m_sceneGraph = nullptr;
+        LOG_INFO("[Scene] Scene graph destroyed");
+    }
+    
     // TextInputManager is owned by C layer, don't delete here
 }
 
@@ -1231,6 +1246,31 @@ void Server::registerKeybindings() {
     m_keybindingManager.registerKeybinding(
         KeybindingManager::MOD_LOGO, 35,
         "toggle_fullscreen", [this]() { toggleFullscreen(); }
+    );
+
+    // Meta+Shift+S: Print scene graph tree (debug)
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 31,
+        "scene_graph_print", [this]() {
+            if (m_sceneGraph) {
+                printf("\n=== Scene Graph Tree ===\n");
+                scene_print_tree(m_sceneGraph);
+                printf("\n=== Scene Graph Stats ===\n");
+                scene_print_stats(m_sceneGraph);
+                printf("========================\n\n");
+            }
+        }
+    );
+
+    // Meta+Shift+G: Print scene graph update (debug)
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 34,
+        "scene_graph_update", [this]() {
+            if (m_sceneGraph) {
+                scene_graph_update(m_sceneGraph);
+                printf("[Debug] Scene graph updated\n");
+            }
+        }
     );
 
     // Meta+Space: Toggle floating

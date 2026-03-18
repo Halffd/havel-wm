@@ -14,6 +14,7 @@
 #include <shell/WindowManager.hpp>
 #include <shell/IPCServer.hpp>
 #include "core/CoreWindowManager.hpp"
+#include "scene/SceneGraph.hpp"
 #include <memory>
 #include <array>
 #include <unordered_map>
@@ -133,6 +134,10 @@ public:
     const PluginManager& pluginManager() const { return m_pluginManager; }
     void registerPlugin(std::unique_ptr<Plugin> plugin);
 
+    // Scene graph access
+    Scene* sceneGraph() { return m_sceneGraph; }
+    const Scene* sceneGraph() const { return m_sceneGraph; }
+
     // CompositorAPI implementation (for plugins)
     void setViewPosition(View* view, int x, int y, bool animate = true);
     void setViewOpacity(View* view, float alpha);
@@ -180,6 +185,7 @@ private:
     FocusManager m_focusManager;
     havel::WindowManager m_windowManager;  // Shell window manager (IPC)
     havel::CoreWindowManager m_coreWindowManager;  // Real window management
+    Scene* m_sceneGraph = nullptr;  // True scene graph
 
     // Keybindings
     KeybindingManager m_keybindingManager;
