@@ -198,11 +198,38 @@ void WindowManager::restoreWindow(uint64_t id) {
 bool WindowManager::isWindowMinimized(uint64_t id) const {
     auto it = std::find_if(m_windows.begin(), m_windows.end(),
         [id](const WindowData& w) { return w.id == id; });
-    
+
     if (it != m_windows.end()) {
         return it->minimized;
     }
     return false;
+}
+
+// IPC stub implementations - would need C bridge integration for full functionality
+void WindowManager::closeWindow(uint64_t id) {
+    // Would call C bridge to close window
+    (void)id;
+}
+
+void WindowManager::moveWindow(uint64_t id, int x, int y) {
+    // Would call C bridge to move window
+    (void)id; (void)x; (void)y;
+}
+
+void WindowManager::resizeWindow(uint64_t id, int w, int h) {
+    // Would call C bridge to resize window
+    (void)id; (void)w; (void)h;
+}
+
+void WindowManager::setFloating(uint64_t id, bool floating) {
+    // Would call C bridge to set floating state
+    setWindowFlag(id, floating ? WindowFlags::Floating : WindowFlags::None, floating);
+    (void)id;
+}
+
+void WindowManager::switchToWorkspace(uint32_t ws) {
+    // Would call C bridge to switch workspace
+    m_currentWorkspace = ws;
 }
 
 void WindowManager::emitEvent(const WindowEvent& event) {

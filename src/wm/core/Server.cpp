@@ -1395,53 +1395,70 @@ bool Server::startIPCServer(const std::string& socketPath) {
         LOG_WARN("IPC server already running");
         return false;
     }
-    
+
     m_ipcServer = std::make_unique<IPCServer>(m_windowManager);
-    
-    // Register built-in command handlers
+
+    // Register JSON-RPC command handlers
     m_ipcServer->registerCommand("get_windows", [this](const std::string& args) -> std::string {
         return m_ipcServer->handleGetWindows();
     });
-    
+
     m_ipcServer->registerCommand("get_focused", [this](const std::string& args) -> std::string {
         return m_ipcServer->handleGetFocused();
     });
-    
+
     m_ipcServer->registerCommand("focus", [this](const std::string& args) -> std::string {
         return m_ipcServer->handleFocus(args);
     });
-    
+
     m_ipcServer->registerCommand("minimize", [this](const std::string& args) -> std::string {
         return m_ipcServer->handleMinimize(args);
     });
-    
+
+    m_ipcServer->registerCommand("maximize", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleMaximize(args);
+    });
+
     m_ipcServer->registerCommand("restore", [this](const std::string& args) -> std::string {
         return m_ipcServer->handleRestore(args);
     });
-    
+
+    m_ipcServer->registerCommand("close", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleClose(args);
+    });
+
+    m_ipcServer->registerCommand("move", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleMove(args);
+    });
+
+    m_ipcServer->registerCommand("resize", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleResize(args);
+    });
+
+    m_ipcServer->registerCommand("set_floating", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleSetFloating(args);
+    });
+
     m_ipcServer->registerCommand("workspace", [this](const std::string& args) -> std::string {
-        try {
-            uint32_t ws = std::stoul(args);
-            if (ws < WORKSPACE_COUNT) {
-                setActiveWorkspace(ws);
-                return "OK\n";
-            } else {
-                return "ERROR Invalid workspace number\n";
-            }
-        } catch (const std::exception& e) {
-            return "ERROR Invalid workspace argument\n";
-        }
+        return m_ipcServer->handleWorkspace(args);
     });
-    
+
+    m_ipcServer->registerCommand("get_workspace", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleGetWorkspace();
+    });
+
     m_ipcServer->registerCommand("spawn", [this](const std::string& args) -> std::string {
-        if (g_server_spawn) {
-            g_server_spawn(args.c_str());
-            return "OK\n";
-        } else {
-            return "ERROR Spawn function not available\n";
-        }
+        return m_ipcServer->handleSpawn(args);
     });
-    
+
+    m_ipcServer->registerCommand("ping", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handlePing();
+    });
+
+    m_ipcServer->registerCommand("quit", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleQuit();
+    });
+
     if (m_ipcServer->start(socketPath)) {
         LOG_INFO("IPC server started on: %s", socketPath.c_str());
         return true;

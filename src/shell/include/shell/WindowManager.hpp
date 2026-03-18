@@ -106,7 +106,15 @@ public:
     void minimizeWindow(uint64_t id);
     void restoreWindow(uint64_t id);
     bool isWindowMinimized(uint64_t id) const;
-    
+
+    // Additional IPC methods (stubs for now - would need C bridge integration)
+    void closeWindow(uint64_t id);
+    void moveWindow(uint64_t id, int x, int y);
+    void resizeWindow(uint64_t id, int w, int h);
+    void setFloating(uint64_t id, bool floating);
+    void switchToWorkspace(uint32_t ws);
+    uint32_t getCurrentWorkspace() const { return m_currentWorkspace; }
+
 private:
     void emitEvent(const WindowEvent& event);
     
@@ -120,6 +128,7 @@ private:
     std::vector<WindowData> m_windows;
     uint64_t m_nextWindowId = 1;
     uint64_t m_focusedWindowId = 0;
+    uint32_t m_currentWorkspace = 0;
     WindowCallback m_windowCallback;
 };
 
