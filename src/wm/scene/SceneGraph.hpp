@@ -83,32 +83,32 @@ typedef struct SceneNodeLink {
 typedef struct SceneNode {
     // === Hot fields (accessed frequently) ===
     SceneNodeType type;
-    SceneNode* parent;
-    
+    struct SceneNode* parent;
+
     // Intrusive linked list for children
     SceneNodeLink* children_head;
     SceneNodeLink* children_tail;
     size_t child_count;
-    
+
     // Sibling pointers for O(1) traversal
     struct SceneNode* next_sibling;
     struct SceneNode* prev_sibling;
-    
+
     // Transform (relative to parent)
     int16_t x, y;
     uint16_t width, height;
-    
+
     // === Warm fields ===
     // Cached world-space bounds (for hit testing)
     int world_x, world_y;
     int world_width, world_height;
-    
+
     // Dirty flags (granular)
     uint8_t dirty_flags;
-    
+
     // Generation for O(1) loop detection
     uint32_t generation;
-    
+
     // === Cold fields (accessed rarely) ===
     uint64_t id;
     SceneNodeLink* link_pool;       // Dynamically allocated links for children
@@ -135,30 +135,38 @@ typedef struct SceneNodePool {
 // Scene Graph Structures
 // ============================================================================
 
+// Forward declarations
+typedef struct Scene Scene;
+typedef struct SceneOutput SceneOutput;
+typedef struct SceneWorkspace SceneWorkspace;
+typedef struct SceneContainer SceneContainer;
+typedef struct SceneView SceneView;
+
 struct Scene {
-    SceneNode base;
-    
+    struct SceneNode base;
+
     // Node pool for allocation
     SceneNodePool pool;
-    
+
     // Outputs (fixed array for small count)
     struct SceneOutput* outputs[SCENE_MAX_OUTPUTS];
     size_t output_count;
-    
+
     // Generation counter (incremented on each modification)
     uint32_t generation;
-    
+
     // Statistics
     size_t total_nodes;
     size_t peak_nodes;
-    
+
     // Validation
     bool validation_enabled;
     char last_error[256];
 };
 
+
 struct SceneOutput {
-    SceneNode base;
+    struct SceneNode base;
     
     struct wlr_output* wlr_output;
     struct wlr_scene_output* wlr_scene_output;
@@ -175,7 +183,7 @@ struct SceneOutput {
 };
 
 struct SceneWorkspace {
-    SceneNode base;
+    struct SceneNode base;
     
     uint32_t id;
     char name[32];
@@ -199,7 +207,7 @@ struct SceneWorkspace {
 };
 
 struct SceneContainer {
-    SceneNode base;
+    struct SceneNode base;
     
     ContainerType container_type;
     
@@ -217,7 +225,7 @@ struct SceneContainer {
 };
 
 struct SceneView {
-    SceneNode base;
+    struct SceneNode base;
     
     // Window metadata
     char app_id[128];

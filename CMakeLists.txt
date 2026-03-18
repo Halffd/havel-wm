@@ -177,6 +177,7 @@ set(WM_CORE_SOURCES
     src/wm/core/CoreWindowManager.hpp
     src/wm/scene/SceneGraph.hpp
     src/wm/scene/SceneGraph.cpp
+    src/wm/scene/SceneGraphOps.cpp
     # XWaylandDnD - WIP, needs wlroots integration
     # src/wm/core/XWaylandDnD.cpp
     # src/wm/core/XWaylandDnD.hpp
@@ -258,6 +259,20 @@ set(WM_CORE_SOURCES
     # src/wm/plugins/DestroyOnClosePlugin.cpp
     # src/wm/plugins/SpringOnSpawnPlugin.cpp
 )
+
+# Scene graph test executable
+add_executable(test-scene-graph
+    src/wm/scene/SceneGraphTest.cpp
+    src/wm/scene/SceneGraph.cpp
+    src/utils/Logger.c
+)
+target_include_directories(test-scene-graph PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+)
+target_link_libraries(test-scene-graph PRIVATE m)
 
 # Shell/panel sources (Phase 1 - window manager integration)
 set(SHELL_SOURCES

@@ -2326,3 +2326,95 @@ int havel_get_view_texture_height(void* c_view) {
     if (!view) return 0;
     return view->xdg_surface->surface->current.height;
 }
+
+// ============================================================================
+// Scene Graph Integration - View Creation
+// ============================================================================
+
+#include <wm/scene/SceneGraph.hpp>
+
+SceneView* scene_view_create(SceneWorkspace* ws, struct wlr_xdg_surface* xdg_surface) {
+    if (!ws || !xdg_surface) return NULL;
+    
+    SceneView* view = (SceneView*)calloc(1, sizeof(SceneView));
+    if (!view) return NULL;
+    
+    view->base.type = SCENE_NODE_VIEW;
+    view->xdg_surface = xdg_surface;
+    view->mapped = false;
+    view->floating = true;  // Default to floating
+    
+    // Get app_id and title
+    if (xdg_surface->toplevel) {
+        const char* app_id = xdg_surface->toplevel->app_id ? xdg_surface->toplevel->app_id : "";
+        const char* title = xdg_surface->toplevel->title ? xdg_surface->toplevel->title : "";
+        strncpy(view->app_id, app_id, sizeof(view->app_id) - 1);
+        strncpy(view->title, title, sizeof(view->title) - 1);
+    }
+    
+    // Default floating geometry
+    view->float_x = 100;
+    view->float_y = 100;
+    view->float_width = 800;
+    view->float_height = 600;
+    
+    return view;
+}
+
+SceneView* scene_view_create_xwayland(SceneWorkspace* ws, struct wlr_xwayland_surface* xwayland_surface) {
+    if (!ws || !xwayland_surface) return NULL;
+    
+    SceneView* view = (SceneView*)calloc(1, sizeof(SceneView));
+    if (!view) return NULL;
+    
+    view->base.type = SCENE_NODE_VIEW;
+    view->xwayland_surface = xwayland_surface;
+    view->mapped = false;
+    view->floating = true;  // XWayland always floating
+    
+    // Get class and title
+    const char* class_name = xwayland_surface->class ? xwayland_surface->class : "xwayland";
+    const char* title = xwayland_surface->title ? xwayland_surface->title : "";
+    strncpy(view->app_id, class_name, sizeof(view->app_id) - 1);
+    strncpy(view->title, title, sizeof(view->title) - 1);
+    
+    // Default floating geometry
+    view->float_x = 150;
+    view->float_y = 150;
+    view->float_width = 640;
+    view->float_height = 480;
+    
+    return view;
+}
+
+void scene_view_destroy(SceneView* view) {
+    if (!view) return;
+    free(view);
+}
+
+bool scene_view_set_floating(SceneView* view, bool floating) {
+    if (!view) return false;
+    
+    if (floating && !view->floating) {
+        // Save current geometry
+        view->float_x = view->base.x;
+        view->float_y = view->base.y;
+        view->float_width = view->base.width;
+        view->float_height = view->base.height;
+    }
+    
+    view->floating = floating;
+    view->base.dirty_flags |= SCENE_DIRTY_LAYOUT;
+    return true;
+}
+
+bool scene_view_focus(SceneView* view) {
+    if (!view || !view->workspace) return false;
+    
+    view->workspace->active_view = view;
+    if (view->container) {
+        view->workspace->active_container = view->container;
+    }
+    
+    return true;
+}
