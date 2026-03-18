@@ -55,9 +55,19 @@ static SceneNodePool* scene_pool_create(size_t capacity) {
 
 static void scene_pool_destroy(SceneNodePool* pool) {
     if (!pool) return;
+    // Free allocated resources (but NOT the pool itself - it's embedded in Scene)
+    
+    // Free any link pools that were allocated for nodes
+    for (size_t i = 0; i < pool->capacity; i++) {
+        SceneNode* node = &pool->nodes[i];
+        if (node->link_pool && node->link_pool != node->inline_links) {
+            free(node->link_pool);
+        }
+    }
+    
     free(pool->free_list);
     free(pool->nodes);
-    free(pool);
+    // Don't free pool itself - it's part of Scene struct
 }
 
 SceneNode* scene_pool_alloc(Scene* scene, SceneNodeType type) {
@@ -116,15 +126,20 @@ SceneNode* scene_pool_alloc(Scene* scene, SceneNodeType type) {
 
 void scene_pool_free(Scene* scene, SceneNode* node) {
     if (!scene || !node) return;
-    
+
     SceneNodePool* pool = &scene->pool;
     size_t idx = (size_t)(node - pool->nodes);
-    
+
     if (idx >= pool->capacity) {
         LOG_ERROR("[Scene] Invalid node pointer");
         return;
     }
-    
+
+    // Free link pool if it was allocated (not inline)
+    if (node->link_pool && node->link_pool != node->inline_links) {
+        free(node->link_pool);
+    }
+
     // Mark as free
     size_t word = idx / 64;
     size_t bit = idx % 64;
@@ -132,7 +147,7 @@ void scene_pool_free(Scene* scene, SceneNode* node) {
     pool->free_count++;
     pool->size--;
     scene->total_nodes--;
-    
+
     // Clear node
     memset(node, 0, sizeof(SceneNode));
 }
@@ -236,14 +251,15 @@ bool scene_node_add_child(SceneNode* parent, SceneNode* child, char* error_out, 
     link->node = child;
     link->next = NULL;
     link->prev = parent->children_tail;
-    
+
     if (parent->children_tail) {
         parent->children_tail->next = link;
     } else {
         parent->children_head = link;
     }
     parent->children_tail = link;
-    
+    parent->child_count++;  // Increment child count
+
     // Update child
     child->parent = parent;
     child->next_sibling = NULL;
@@ -288,7 +304,10 @@ bool scene_node_remove_child(SceneNode* parent, SceneNode* child, char* error_ou
             child->parent = NULL;
             child->next_sibling = NULL;
             child->prev_sibling = NULL;
-            
+
+            // Decrement child count
+            parent->child_count--;
+
             // Mark dirty
             parent->dirty_flags |= SCENE_DIRTY_CHILDREN | SCENE_DIRTY_BOUNDS;
             
@@ -325,23 +344,20 @@ bool scene_node_reparent(SceneNode* node, SceneNode* new_parent, char* error_out
 }
 
 // ============================================================================
-// O(1) Loop Detection with Generation Counters
+// Loop Detection (walk up parent chain)
 // ============================================================================
 
 bool scene_detect_loop(SceneNode* start, SceneNode* potential_ancestor) {
     if (!start || !potential_ancestor) return false;
     
-    // With generation counters, we can detect loops in O(1)
-    // by checking if the ancestor's generation is newer than start's
-    if (potential_ancestor->generation > start->generation) {
-        return true;  // Ancestor was created after start - impossible in valid tree
-    }
+    // Same node is not a loop
+    if (start == potential_ancestor) return false;
     
-    // Still need to walk up for complete check, but generation gives us early exit
+    // Walk up from start to see if we hit potential_ancestor
     SceneNode* current = start;
     while (current != NULL) {
         if (current == potential_ancestor) {
-            return true;
+            return true;  // Loop detected
         }
         current = current->parent;
     }
