@@ -99,6 +99,7 @@ void havel_cpp_process_ipc_events(struct havel_cpp_server* server);
 // Desktop management
 void havel_cpp_init_desktop(struct havel_cpp_server* server);
 void* havel_cpp_get_desktop_manager(struct havel_cpp_server* server);
+void* havel_cpp_get_scene_graph(struct havel_cpp_server* server);
 void havel_cpp_process_desktop_mouse(struct havel_cpp_server* server, int button, bool pressed, int x, int y);
 void havel_cpp_process_desktop_motion(struct havel_cpp_server* server, int x, int y);
 void havel_cpp_process_desktop_key(struct havel_cpp_server* server, uint32_t keycode, uint32_t modifiers);

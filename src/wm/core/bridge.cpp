@@ -426,6 +426,11 @@ void* havel_cpp_get_desktop_manager(struct havel_cpp_server* server) {
     return server->server->desktopManager();
 }
 
+void* havel_cpp_get_scene_graph(struct havel_cpp_server* server) {
+    if (!server || !server->server) return nullptr;
+    return server->server->sceneGraph();
+}
+
 void havel_cpp_process_desktop_mouse(struct havel_cpp_server* server, int button, bool pressed, int x, int y) {
     if (!server || !server->server) return;
     

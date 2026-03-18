@@ -50,6 +50,8 @@
 // Session/VT switching
 #include <wlr/backend/session.h>
 
+#include <wm/scene/SceneGraph.hpp>
+
 #define HAVEL_WORKSPACE_COUNT 10
 
 // ============================================================================
@@ -238,6 +240,7 @@ struct havel_xdg_view {
 
     // Only wlroots handles and C++ opaque pointer
     void *cpp_view;  // Opaque pointer to C++ View object
+    void *scene_graph_view;  // Scene graph View (SceneView*)
 
     struct wl_listener map;
     struct wl_listener unmap;
@@ -258,8 +261,9 @@ struct havel_xwayland_view {
 
     // NO workspace_id - C++ owns this
     // NO geometry - C++ owns this
-    
+
     void *cpp_view;  // Opaque pointer to C++ View object
+    void *scene_graph_view;  // Scene graph View (SceneView*)
 
     struct wl_listener destroy;
 };
@@ -630,6 +634,13 @@ static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
         havel_cpp_on_view_destroyed(view->server->cpp_server, view->cpp_view);
     }
 
+    // Destroy scene graph view
+    if (view->scene_graph_view) {
+        scene_view_destroy((SceneView*)view->scene_graph_view);
+        view->scene_graph_view = NULL;
+        LOG_INFO("[Scene] Scene graph view destroyed");
+    }
+
     // Scene node is destroyed automatically by wlr_scene_xdg_surface_create
     // Do NOT manually destroy it
 
@@ -733,8 +744,27 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
     // Notify C++ layer - it creates the View object and owns all state
     view->cpp_view = havel_cpp_on_xdg_surface_new(server->cpp_server, view, server->active_workspace, appId, title);
 
-    LOG_INFO("[XDG] View setup complete for %p (cpp_view=%p, parent=%p, appId=%s, title=%s)",
-             (void*)view, view->cpp_view, (void*)parent, appId ? appId : "unknown", title ? title : "unknown");
+    // Create scene graph view
+    view->scene_graph_view = NULL;
+    if (server->cpp_server) {
+        Scene* scene_graph = (Scene*)havel_cpp_get_scene_graph((struct havel_cpp_server*)server->cpp_server);
+        if (scene_graph) {
+            // Get active workspace from scene graph
+            SceneOutput* output = scene_output_get_primary(scene_graph);
+            if (output && server->active_workspace < SCENE_MAX_WORKSPACES) {
+                SceneWorkspace* ws = scene_workspace_get(output, server->active_workspace);
+                if (ws) {
+                    // Create scene graph view
+                    view->scene_graph_view = scene_view_create(ws, xdg_surface);
+                    LOG_INFO("[Scene] Created scene graph view %p for XDG surface %p",
+                             view->scene_graph_view, (void*)xdg_surface);
+                }
+            }
+        }
+    }
+
+    LOG_INFO("[XDG] View setup complete for %p (cpp_view=%p, scene_graph_view=%p, parent=%p, appId=%s, title=%s)",
+             (void*)view, view->cpp_view, view->scene_graph_view, (void*)parent, appId ? appId : "unknown", title ? title : "unknown");
 }
 
 static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
@@ -750,16 +780,23 @@ static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
 
 static void xwayland_view_handle_destroy(struct wl_listener *listener, void *data) {
     struct havel_xwayland_view *view = wl_container_of(listener, view, destroy);
-    
+
     LOG_INFO("[XWayland] DESTROY: %p (cpp_view=%p)", (void*)view, view->cpp_view);
-    
+
     wl_list_remove(&view->destroy.link);
-    
+
     // Notify C++ layer BEFORE freeing - C++ destroys View object
     if (view->cpp_view) {
         havel_cpp_on_view_destroyed(view->server->cpp_server, view->cpp_view);
     }
-    
+
+    // Destroy scene graph view
+    if (view->scene_graph_view) {
+        scene_view_destroy((SceneView*)view->scene_graph_view);
+        view->scene_graph_view = NULL;
+        LOG_INFO("[Scene] Scene graph view destroyed");
+    }
+
     free(view);
 }
 
@@ -805,11 +842,28 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
     // Notify C++ layer - it creates the View object and owns all state
     view->cpp_view = havel_cpp_on_xdg_surface_new(server->cpp_server, view, server->active_workspace, appId, title);
 
+    // Create scene graph view
+    view->scene_graph_view = NULL;
+    if (server->cpp_server) {
+        Scene* scene_graph = (Scene*)havel_cpp_get_scene_graph((struct havel_cpp_server*)server->cpp_server);
+        if (scene_graph) {
+            SceneOutput* output = scene_output_get_primary(scene_graph);
+            if (output && server->active_workspace < SCENE_MAX_WORKSPACES) {
+                SceneWorkspace* ws = scene_workspace_get(output, server->active_workspace);
+                if (ws) {
+                    view->scene_graph_view = scene_view_create_xwayland(ws, xsurface);
+                    LOG_INFO("[Scene] Created scene graph view %p for XWayland surface %p",
+                             view->scene_graph_view, (void*)xsurface);
+                }
+            }
+        }
+    }
+
     view->destroy.notify = xwayland_view_handle_destroy;
     wl_signal_add(&xsurface->events.destroy, &view->destroy);
 
-    LOG_INFO("[XWayland] View setup complete for %p (cpp_view=%p, appId=%s, title=%s)",
-             (void*)view, view->cpp_view, appId, title);
+    LOG_INFO("[XWayland] View setup complete for %p (cpp_view=%p, scene_graph_view=%p, appId=%s, title=%s)",
+             (void*)view, view->cpp_view, view->scene_graph_view, appId, title);
 }
 
 // ============================================================================
@@ -2330,8 +2384,6 @@ int havel_get_view_texture_height(void* c_view) {
 // ============================================================================
 // Scene Graph Integration - View Creation
 // ============================================================================
-
-#include <wm/scene/SceneGraph.hpp>
 
 SceneView* scene_view_create(SceneWorkspace* ws, struct wlr_xdg_surface* xdg_surface) {
     if (!ws || !xdg_surface) return NULL;
