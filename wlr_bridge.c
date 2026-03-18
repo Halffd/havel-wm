@@ -61,18 +61,19 @@
 // Global running server pointer (for quit functionality)
 struct havel_wlr_server *g_running_server = NULL;
 
-static cpp_view_set_position_fn g_view_set_position = NULL;
-static cpp_view_set_size_fn g_view_set_size = NULL;
-static cpp_view_focus_fn g_view_focus = NULL;
-static cpp_view_raise_fn g_view_raise = NULL;
-static cpp_view_get_geometry_fn g_view_get_geometry = NULL;
-static cpp_view_close_fn g_view_close = NULL;
-static cpp_view_set_fullscreen_fn g_view_set_fullscreen = NULL;
-static cpp_view_minimize_fn g_view_minimize = NULL;
-static cpp_workspace_arrange_fn g_workspace_arrange = NULL;
-static cpp_workspace_set_active_fn g_workspace_set_active = NULL;
-static cpp_server_quit_fn g_server_quit = NULL;
-static cpp_server_spawn_fn g_server_spawn = NULL;
+// C → C++ Callback Storage (extern for C++ access)
+cpp_view_set_position_fn g_view_set_position = NULL;
+cpp_view_set_size_fn g_view_set_size = NULL;
+cpp_view_focus_fn g_view_focus = NULL;
+cpp_view_raise_fn g_view_raise = NULL;
+cpp_view_get_geometry_fn g_view_get_geometry = NULL;
+cpp_view_close_fn g_view_close = NULL;
+cpp_view_set_fullscreen_fn g_view_set_fullscreen = NULL;
+cpp_view_minimize_fn g_view_minimize = NULL;
+cpp_workspace_arrange_fn g_workspace_arrange = NULL;
+cpp_workspace_set_active_fn g_workspace_set_active = NULL;
+cpp_server_quit_fn g_server_quit = NULL;
+cpp_server_spawn_fn g_server_spawn = NULL;
 
 void havel_cpp_register_view_callbacks(
     cpp_view_set_position_fn set_position,
@@ -2462,11 +2463,60 @@ bool scene_view_set_floating(SceneView* view, bool floating) {
 
 bool scene_view_focus(SceneView* view) {
     if (!view || !view->workspace) return false;
-    
+
     view->workspace->active_view = view;
     if (view->container) {
         view->workspace->active_container = view->container;
     }
-    
+
     return true;
+}
+
+// ============================================================================
+// View Manipulation (C++ → C bridge)
+// ============================================================================
+
+void havel_wlr_set_view_position(void* c_view, int x, int y) {
+    if (!c_view) return;
+    
+    // Call the registered callback
+    if (g_view_set_position) {
+        g_view_set_position(c_view, x, y);
+    }
+}
+
+void havel_wlr_set_view_size(void* c_view, int w, int h) {
+    if (!c_view) return;
+    
+    // Call the registered callback
+    if (g_view_set_size) {
+        g_view_set_size(c_view, w, h);
+    }
+}
+
+void havel_wlr_close_view(void* c_view) {
+    if (!c_view) return;
+    
+    // Call the registered callback
+    if (g_view_close) {
+        g_view_close(c_view);
+    }
+}
+
+void havel_wlr_set_view_fullscreen(void* c_view, bool fullscreen) {
+    if (!c_view) return;
+    
+    // Call the registered callback
+    if (g_view_set_fullscreen) {
+        g_view_set_fullscreen(c_view, fullscreen);
+    }
+}
+
+void havel_wlr_minimize_view(void* c_view) {
+    if (!c_view) return;
+    
+    // Call the registered callback
+    if (g_view_minimize) {
+        g_view_minimize(c_view);
+    }
 }

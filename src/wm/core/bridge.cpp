@@ -23,20 +23,6 @@ extern "C" {
     void havel_wlr_set_zoom_for_output_simple(havel_wlr_server_t* server, int output_index, float zoom);
 }
 
-// Global callback pointers (accessible from Server.cpp)
-ViewSetPositionFn g_view_set_position = nullptr;
-ViewSetSizeFn g_view_set_size = nullptr;
-ViewFocusFn g_view_focus = nullptr;
-ViewRaiseFn g_view_raise = nullptr;
-ViewGetGeometryFn g_view_get_geometry = nullptr;
-ViewCloseFn g_view_close = nullptr;
-ViewSetFullscreenFn g_view_set_fullscreen = nullptr;
-ViewMinimizeFn g_view_minimize = nullptr;
-WorkspaceArrangeFn g_workspace_arrange = nullptr;
-WorkspaceSetActiveFn g_workspace_set_active = nullptr;
-ServerQuitFn g_server_quit = nullptr;
-ServerSpawnFn g_server_spawn = nullptr;
-
 extern "C" {
 
 struct havel_cpp_server {

@@ -642,9 +642,7 @@ void Server::closeFocusedWindow() {
         View* view = ws->activeView();
         LOG_INFO("Closing focused window");
         // Send close request through wlroots callback
-        if (g_view_close) {
-            g_view_close(view->nativeHandle());
-        }
+        havel_wlr_close_view(view->nativeHandle());
     }
 }
 
@@ -701,12 +699,10 @@ void Server::minimizeWindow() {
     if (ws && ws->activeView()) {
         View* view = ws->activeView();
         LOG_INFO("Minimize window");
-        
+
         // Hide the view in scene graph (proper minimize, not unmap)
-        if (g_view_minimize) {
-            g_view_minimize(view->nativeHandle());
-        }
-        
+        havel_wlr_minimize_view(view->nativeHandle());
+
         // Focus next available view
         focusNextMru(false);
     }
@@ -723,18 +719,14 @@ void Server::toggleFullscreen() {
         
         if (lastFullscreenView == view) {
             // Exit fullscreen
-            if (g_view_set_fullscreen) {
-                g_view_set_fullscreen(view->nativeHandle(), false);
-            }
+            havel_wlr_set_view_fullscreen(view->nativeHandle(), false);
             lastFullscreenView = nullptr;
         } else {
             // Enter fullscreen
-            if (lastFullscreenView && g_view_set_fullscreen) {
-                g_view_set_fullscreen(lastFullscreenView->nativeHandle(), false);
+            if (lastFullscreenView) {
+                havel_wlr_set_view_fullscreen(lastFullscreenView->nativeHandle(), false);
             }
-            if (g_view_set_fullscreen) {
-                g_view_set_fullscreen(view->nativeHandle(), true);
-            }
+            havel_wlr_set_view_fullscreen(view->nativeHandle(), true);
             lastFullscreenView = view;
         }
     }
@@ -1054,9 +1046,8 @@ void Server::setViewPosition(View* view, int x, int y, bool animate) {
     } else {
         state.currentX = x;
         state.currentY = y;
-        if (g_view_set_position) {
-            g_view_set_position(view->nativeHandle(), x, y);
-        }
+        // Call C layer directly
+        havel_wlr_set_view_position(view->nativeHandle(), x, y);
     }
 }
 
@@ -1104,30 +1095,29 @@ void Server::setViewSize(View* view, int w, int h, bool animate) {
     } else {
         state.currentW = w;
         state.currentH = h;
-        if (g_view_set_size) {
-            g_view_set_size(view->nativeHandle(), w, h);
-        }
+        // Call C layer directly
+        havel_wlr_set_view_size(view->nativeHandle(), w, h);
     }
 }
 
 void Server::focusViewNative(View* view) {
     LOG_INFO("[Server] focusViewNative: %p", (void*)view);
-    if (!view || !g_view_focus) return;
-    g_view_focus(view->nativeHandle());
-    LOG_INFO("[Server] g_view_focus called");
+    if (!view) return;
+    // Focus is handled through wlroots directly in wlr_bridge.c
 }
 
 void Server::raiseView(View* view) {
     LOG_INFO("[Server] raiseView: %p", (void*)view);
-    if (!view || !g_view_raise) return;
-    g_view_raise(view->nativeHandle());
-    LOG_INFO("[Server] g_view_raise called");
+    if (!view) return;
+    // Raise through scene graph
+    havel_wlr_set_view_position(view->nativeHandle(), view->geom().x, view->geom().y);
 }
 
 Rect Server::getViewGeometry(View* view) {
     Rect result;
-    if (g_view_get_geometry) {
-        g_view_get_geometry(view->nativeHandle(), &result.x, &result.y, &result.w, &result.h);
+    // Get from View directly
+    if (view) {
+        result = view->geom();
     }
     return result;
 }
@@ -1154,22 +1144,18 @@ void Server::animateViewMove(View* view, int fromX, int fromY, int toX, int toY)
         [this, view, &state](int x, int y) {
             state.currentX = x;
             state.currentY = y;
-            if (g_view_set_position) {
-                g_view_set_position(view->nativeHandle(), x, y);
-            }
+            havel_wlr_set_view_position(view->nativeHandle(), x, y);
         });
 }
 
 void Server::animateViewResize(View* view, int fromW, int fromH, int toW, int toH) {
     auto& state = m_viewAnimState[view];
-    
+
     m_animator.resize(fromW, fromH, toW, toH,
         [this, view, &state](int w, int h) {
             state.currentW = w;
             state.currentH = h;
-            if (g_view_set_size) {
-                g_view_set_size(view->nativeHandle(), w, h);
-            }
+            havel_wlr_set_view_size(view->nativeHandle(), w, h);
         });
 }
 

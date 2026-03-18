@@ -153,6 +153,13 @@ void havel_cpp_set_zoom_for_output(struct havel_cpp_server* server, int output_i
                                     double cursor_x, double cursor_y);
 void havel_cpp_set_zoom_for_output_simple(struct havel_cpp_server* server, int output_index, float zoom);
 
+// View manipulation (called from C++ Server.cpp)
+void havel_wlr_set_view_position(void* c_view, int x, int y);
+void havel_wlr_set_view_size(void* c_view, int w, int h);
+void havel_wlr_close_view(void* c_view);
+void havel_wlr_set_view_fullscreen(void* c_view, bool fullscreen);
+void havel_wlr_minimize_view(void* c_view);
+
 #ifdef __cplusplus
 }
 
@@ -170,17 +177,19 @@ using WorkspaceSetActiveFn = cpp_workspace_set_active_fn;
 using ServerQuitFn = cpp_server_quit_fn;
 using ServerSpawnFn = cpp_server_spawn_fn;
 
-// C++ declarations for callback pointers (defined in bridge.cpp)
-extern ViewSetPositionFn g_view_set_position;
-extern ViewSetSizeFn g_view_set_size;
-extern ViewFocusFn g_view_focus;
-extern ViewRaiseFn g_view_raise;
-extern ViewGetGeometryFn g_view_get_geometry;
-extern ViewCloseFn g_view_close;
-extern ViewSetFullscreenFn g_view_set_fullscreen;
-extern ViewMinimizeFn g_view_minimize;
-extern WorkspaceArrangeFn g_workspace_arrange;
-extern WorkspaceSetActiveFn g_workspace_set_active;
-extern ServerQuitFn g_server_quit;
-extern ServerSpawnFn g_server_spawn;
+// C++ declarations for callback pointers (defined in wlr_bridge.c with C linkage)
+extern "C" {
+    extern ViewSetPositionFn g_view_set_position;
+    extern ViewSetSizeFn g_view_set_size;
+    extern ViewFocusFn g_view_focus;
+    extern ViewRaiseFn g_view_raise;
+    extern ViewGetGeometryFn g_view_get_geometry;
+    extern ViewCloseFn g_view_close;
+    extern ViewSetFullscreenFn g_view_set_fullscreen;
+    extern ViewMinimizeFn g_view_minimize;
+    extern WorkspaceArrangeFn g_workspace_arrange;
+    extern WorkspaceSetActiveFn g_workspace_set_active;
+    extern ServerQuitFn g_server_quit;
+    extern ServerSpawnFn g_server_spawn;
+}
 #endif
