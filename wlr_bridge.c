@@ -2520,3 +2520,21 @@ void havel_wlr_minimize_view(void* c_view) {
         g_view_minimize(c_view);
     }
 }
+
+void havel_wlr_focus_view(void* c_view) {
+    if (!c_view) return;
+    
+    // Call the registered callback
+    if (g_view_focus) {
+        g_view_focus(c_view);
+    }
+}
+
+void havel_wlr_raise_view(void* c_view) {
+    if (!c_view) return;
+    
+    // Call the registered callback
+    if (g_view_raise) {
+        g_view_raise(c_view);
+    }
+}

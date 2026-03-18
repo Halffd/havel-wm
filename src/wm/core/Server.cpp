@@ -1102,15 +1102,16 @@ void Server::setViewSize(View* view, int w, int h, bool animate) {
 
 void Server::focusViewNative(View* view) {
     LOG_INFO("[Server] focusViewNative: %p", (void*)view);
-    if (!view) return;
-    // Focus is handled through wlroots directly in wlr_bridge.c
+    if (!view || !view->nativeHandle()) return;
+    // Focus the view through wlroots
+    havel_wlr_focus_view(view->nativeHandle());
 }
 
 void Server::raiseView(View* view) {
     LOG_INFO("[Server] raiseView: %p", (void*)view);
-    if (!view) return;
+    if (!view || !view->nativeHandle()) return;
     // Raise through scene graph
-    havel_wlr_set_view_position(view->nativeHandle(), view->geom().x, view->geom().y);
+    havel_wlr_raise_view(view->nativeHandle());
 }
 
 Rect Server::getViewGeometry(View* view) {

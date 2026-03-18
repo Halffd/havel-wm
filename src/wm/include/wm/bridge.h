@@ -159,6 +159,8 @@ void havel_wlr_set_view_size(void* c_view, int w, int h);
 void havel_wlr_close_view(void* c_view);
 void havel_wlr_set_view_fullscreen(void* c_view, bool fullscreen);
 void havel_wlr_minimize_view(void* c_view);
+void havel_wlr_focus_view(void* c_view);
+void havel_wlr_raise_view(void* c_view);
 
 #ifdef __cplusplus
 }
