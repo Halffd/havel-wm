@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <chrono>
 #include <ctime>
 #include <random>
 #include <cstdlib>
@@ -404,11 +405,12 @@ bool NASAWallpaperManager::startSlideshow(int intervalSeconds) {
     if (m_slideshowRunning) {
         stopSlideshow();
     }
-    
+
     m_slideshowRunning = true;
     m_slideshowInterval = intervalSeconds;
-    m_lastSlideshowChange = 1;  // Would use actual timestamp
-    
+    m_lastSlideshowChange = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+
     LOG_INFO("[NASAWallpaper] Slideshow started (interval: %ds)", intervalSeconds);
     return true;
 }
@@ -442,9 +444,11 @@ void NASAWallpaperManager::previousImage() {
 
 void NASAWallpaperManager::slideshowTimer() {
     if (!m_slideshowRunning) return;
+
+    uint64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
     
-    uint64_t now = 1;  // Would use actual timestamp
-    if (now - m_lastSlideshowChange >= static_cast<uint64_t>(m_slideshowInterval * 1000)) {
+    if (now - m_lastSlideshowChange >= static_cast<uint64_t>(m_slideshowInterval)) {
         nextImage();
         m_lastSlideshowChange = now;
     }
@@ -544,23 +548,22 @@ std::string NASAWallpaperManager::fetchURL(const std::string& url) {
 
 bool NASAWallpaperManager::parseAPODResponse(const std::string& json) {
     // Simple JSON parsing for APOD response
-    // Would use proper JSON library in production
-    
-    // Look for url, hdurl, title, etc.
+    // Extracts url, hdurl, title, date, explanation
+
     size_t urlPos = json.find("\"url\"");
     if (urlPos == std::string::npos) {
         return false;
     }
-    
+
     NASAImage image;
-    
+
     // Extract URL
     size_t start = json.find("\"", urlPos + 6);
     size_t end = json.find("\"", start + 1);
     if (start != std::string::npos && end != std::string::npos) {
         image.url = json.substr(start + 1, end - start - 1);
     }
-    
+
     // Extract HD URL
     size_t hdUrlPos = json.find("\"hdurl\"");
     if (hdUrlPos != std::string::npos) {
@@ -570,7 +573,7 @@ bool NASAWallpaperManager::parseAPODResponse(const std::string& json) {
             image.hdUrl = json.substr(start + 1, end - start - 1);
         }
     }
-    
+
     // Extract title
     size_t titlePos = json.find("\"title\"");
     if (titlePos != std::string::npos) {
@@ -580,7 +583,7 @@ bool NASAWallpaperManager::parseAPODResponse(const std::string& json) {
             image.title = json.substr(start + 1, end - start - 1);
         }
     }
-    
+
     // Extract date
     size_t datePos = json.find("\"date\"");
     if (datePos != std::string::npos) {
@@ -590,7 +593,7 @@ bool NASAWallpaperManager::parseAPODResponse(const std::string& json) {
             image.date = json.substr(start + 1, end - start - 1);
         }
     }
-    
+
     // Extract explanation/description
     size_t descPos = json.find("\"explanation\"");
     if (descPos != std::string::npos) {
@@ -600,33 +603,85 @@ bool NASAWallpaperManager::parseAPODResponse(const std::string& json) {
             image.description = json.substr(start + 1, end - start - 1);
         }
     }
-    
-    image.mediaType = "image";
-    
+
+    // Extract media_type
+    size_t mediaPos = json.find("\"media_type\"");
+    if (mediaPos != std::string::npos) {
+        start = json.find("\"", mediaPos + 13);
+        end = json.find("\"", start + 1);
+        if (start != std::string::npos && end != std::string::npos) {
+            image.mediaType = json.substr(start + 1, end - start - 1);
+        }
+    } else {
+        image.mediaType = "image";  // Default
+    }
+
     if (image.isValid()) {
         m_images.push_back(image);
-        LOG_INFO("[NASAWallpaper] Parsed APOD: %s", image.title.c_str());
+        LOG_INFO("[NASAWallpaper] Parsed APOD: %s (%s)", image.title.c_str(), image.date.c_str());
         return true;
     }
-    
+
     return false;
 }
 
 bool NASAWallpaperManager::parseNASAImagesResponse(const std::string& json) {
-    // Simple parsing for NASA Image Library response
-    // Would use proper JSON library in production
-    
-    // Look for collection array
+    // Parse NASA Image Library response
+    // Looks for collection.items array
+
     size_t collectionPos = json.find("\"collection\"");
     if (collectionPos == std::string::npos) {
         return false;
     }
+
+    // Find items array
+    size_t itemsPos = json.find("\"items\"", collectionPos);
+    if (itemsPos == std::string::npos) {
+        return false;
+    }
+
+    // Parse each item in the array
+    size_t pos = itemsPos;
+    int itemsFound = 0;
     
-    // Extract items array and parse each image
-    // Simplified for now
-    
-    LOG_INFO("[NASAWallpaper] Parsed NASA images response");
-    return !m_images.empty();
+    while ((pos = json.find("\"href\"", pos)) != std::string::npos) {
+        // Found an image href
+        size_t start = json.find("\"", pos + 7);
+        size_t end = json.find("\"", start + 1);
+        
+        if (start != std::string::npos && end != std::string::npos) {
+            std::string href = json.substr(start + 1, end - start - 1);
+            
+            // Create NASAImage entry
+            NASAImage image;
+            image.url = href;
+            image.mediaType = "image";
+            
+            // Try to find title near this href
+            size_t titlePos = json.rfind("\"title\"", pos);
+            if (titlePos != std::string::npos && titlePos > itemsPos) {
+                start = json.find("\"", titlePos + 8);
+                end = json.find("\"", start + 1);
+                if (start != std::string::npos && end != std::string::npos) {
+                    image.title = json.substr(start + 1, end - start - 1);
+                }
+            }
+            
+            if (image.title.empty()) {
+                image.title = "NASA Image " + std::to_string(itemsFound + 1);
+            }
+            
+            if (image.isValid()) {
+                m_images.push_back(image);
+                itemsFound++;
+            }
+        }
+        
+        pos = end + 1;
+    }
+
+    LOG_INFO("[NASAWallpaper] Parsed NASA images response: %d items found", itemsFound);
+    return itemsFound > 0;
 }
 
 bool NASAWallpaperManager::createDirectory(const std::string& path) {
