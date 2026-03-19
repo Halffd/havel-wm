@@ -1,7 +1,13 @@
 #include "AppLauncherOverlay.hpp"
+#include <wm/render/OverlayRenderer.hpp>
 #include <cstdio>
 #include <algorithm>
 #include <cstring>
+#include <fstream>
+#include <sstream>
+#include <dirent.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace havel {
 
@@ -135,67 +141,221 @@ void AppLauncherOverlay::render(void* renderer, int screenWidth, int screenHeigh
     drawResultsList(renderer, x, y + 70, m_state.width, m_state.height - 80);
 }
 
-void AppLauncherOverlay::drawSearchBox(void* renderer, int x, int y, int w, int h) {
-    // Would draw:
-    // 1. Search box background
-    // 2. Search icon
-    // 3. Search text with cursor
-    // 4. Placeholder text if empty
+void AppLauncherOverlay::drawSearchBox(void* rendererPtr, int x, int y, int w, int h) {
+    if (!rendererPtr) return;
     
-    (void)renderer;
-    (void)x;
-    (void)y;
-    (void)w;
-    (void)h;
+    OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
     
-    // Stub for now
+    // Draw search box background (rounded rectangle effect)
+    Color searchBg(0.15f, 0.15f, 0.2f, 0.95f);
+    renderer->drawRect(x, y, w, h, searchBg);
+    
+    // Draw search icon (simple magnifying glass representation)
+    renderer->drawText("🔍", x + 15, y + 18, 24.0f, Color(0.6f, 0.6f, 0.6f, 1.0f));
+    
+    // Draw search text
+    if (!m_state.searchText.empty()) {
+        renderer->drawText(m_state.searchText.c_str(), x + 50, y + 20, 20.0f, Color(1.0f, 1.0f, 1.0f, 1.0f));
+        
+        // Draw cursor
+        size_t cursorPos = m_state.searchText.length();
+        float cursorX = x + 50 + (cursorPos * 12);  // Approximate character width
+        renderer->drawRect(cursorX, y + 18, 2, 22, Color(1.0f, 1.0f, 1.0f, 1.0f));
+    } else {
+        // Draw placeholder text
+        renderer->drawText("Type to search applications...", x + 50, y + 20, 20.0f, Color(0.5f, 0.5f, 0.5f, 1.0f));
+    }
+    
+    // Draw bottom border line
+    renderer->drawRect(x, y + h - 1, w, 1, Color(0.3f, 0.3f, 0.4f, 1.0f));
 }
 
-void AppLauncherOverlay::drawResultsList(void* renderer, int x, int y, int w, int h) {
-    // Would draw:
-    // 1. Scrollable list of app results
-    // 2. App icons
-    // 3. App names and descriptions
-    // 4. Highlight selected item
+void AppLauncherOverlay::drawResultsList(void* rendererPtr, int x, int y, int w, int h) {
+    if (!rendererPtr) return;
     
-    (void)renderer;
-    (void)x;
-    (void)y;
-    (void)w;
-    (void)h;
+    OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
     
-    // Stub for now
+    const int itemHeight = 60;
+    const int maxVisibleItems = h / itemHeight;
+    const int iconSize = 32;
+    const int padding = 15;
+    
+    // Calculate scroll offset to keep selected item visible
+    int scrollOffset = 0;
+    if (m_state.selectedIndex >= maxVisibleItems) {
+        scrollOffset = (m_state.selectedIndex - maxVisibleItems + 1) * itemHeight;
+    }
+    
+    // Draw visible items
+    int visibleCount = std::min(static_cast<int>(m_state.results.size()), maxVisibleItems);
+    
+    for (int i = 0; i < visibleCount; i++) {
+        int itemIndex = i + (scrollOffset / itemHeight);
+        if (itemIndex >= static_cast<int>(m_state.results.size())) break;
+        
+        const AppEntry& entry = m_state.results[itemIndex];
+        bool isSelected = (itemIndex == m_state.selectedIndex);
+        
+        int itemY = y + i * itemHeight;
+        
+        // Draw item background
+        Color itemBg = isSelected ? Color(0.3f, 0.4f, 0.5f, 0.9f) : Color(0.1f, 0.1f, 0.15f, 0.8f);
+        renderer->drawRect(x + 1, itemY, w - 2, itemHeight - 1, itemBg);
+        
+        // Draw app icon (placeholder colored square)
+        int iconX = x + padding;
+        int iconY = itemY + (itemHeight - iconSize) / 2;
+        
+        // Draw colored placeholder based on first letter
+        float hue = (entry.name[0] % 26) / 26.0f;
+        Color iconColor(0.2f + hue * 0.3f, 0.3f + hue * 0.2f, 0.4f, 1.0f);
+        renderer->drawRect(iconX, iconY, iconSize, iconSize, iconColor);
+        
+        // Draw first letter
+        char firstChar[2] = {entry.name[0], '\0'};
+        renderer->drawText(firstChar, iconX + 10, iconY + 20, 20.0f, Color(1.0f, 1.0f, 1.0f, 1.0f));
+        
+        // Draw app name
+        int textX = iconX + iconSize + padding;
+        int textY = itemY + 20;
+        Color textColor = isSelected ? Color(1.0f, 1.0f, 1.0f, 1.0f) : Color(0.9f, 0.9f, 0.9f, 1.0f);
+        renderer->drawText(entry.name.c_str(), textX, textY, 18.0f, textColor);
+        
+        // Draw app description (if available)
+        if (!entry.description.empty()) {
+            Color descColor = isSelected ? Color(0.8f, 0.8f, 0.8f, 1.0f) : Color(0.6f, 0.6f, 0.6f, 1.0f);
+            renderer->drawText(entry.description.c_str(), textX, textY + 20, 14.0f, descColor);
+        }
+        
+        // Draw keyboard shortcut hint for selected item
+        if (isSelected) {
+            renderer->drawText("Press Enter", x + w - 100, itemY + 22, 14.0f, Color(0.5f, 0.5f, 0.5f, 1.0f));
+        }
+    }
 }
 
 void AppLauncherOverlay::drawBackground(int screenWidth, int screenHeight) {
-    // Would draw semi-transparent dark overlay
+    // Draw semi-transparent dark overlay
+    // Background is drawn by render() before calling other draw methods
     (void)screenWidth;
     (void)screenHeight;
 }
 
+static std::string trim(const std::string& str) {
+    size_t first = str.find_first_not_of(" \t\n\r");
+    if (first == std::string::npos) return "";
+    size_t last = str.find_last_not_of(" \t\n\r");
+    return str.substr(first, last - first + 1);
+}
+
+static std::string parseDesktopValue(const std::string& content, const std::string& key) {
+    std::string searchKey = key + "=";
+    size_t pos = content.find(searchKey);
+    if (pos == std::string::npos) return "";
+    
+    size_t valueStart = pos + searchKey.length();
+    size_t valueEnd = content.find('\n', valueStart);
+    if (valueEnd == std::string::npos) valueEnd = content.length();
+    
+    return trim(content.substr(valueStart, valueEnd - valueStart));
+}
+
 void AppLauncherOverlay::scanApplications() {
-    // Would scan /usr/share/applications and ~/.local/share/applications
-    // Parse .desktop files
-    // Populate m_state.favorites
+    m_state.favorites.clear();
     
-    // Stub: Add some dummy entries
-    AppEntry term;
-    term.id = "terminal";
-    term.name = "Terminal";
-    term.exec = "foot";
-    term.icon = "utilities-terminal";
-    term.isFavorite = true;
-    m_state.favorites.push_back(term);
+    // Scan standard application directories
+    const char* searchPaths[] = {
+        "/usr/share/applications",
+        "/usr/local/share/applications",
+        nullptr
+    };
     
-    AppEntry browser;
-    browser.id = "firefox";
-    browser.name = "Firefox";
-    browser.exec = "firefox";
-    browser.icon = "firefox";
-    browser.isFavorite = true;
-    m_state.favorites.push_back(browser);
+    // Also scan user's local applications
+    const char* home = getenv("HOME");
+    char userAppDir[512];
+    if (home) {
+        snprintf(userAppDir, sizeof(userAppDir), "%s/.local/share/applications", home);
+        searchPaths[2] = userAppDir;
+    }
     
-    printf("[Launcher] Scanned %zu applications\n", m_state.favorites.size());
+    int totalFound = 0;
+    
+    for (int i = 0; searchPaths[i] != nullptr; i++) {
+        DIR* dir = opendir(searchPaths[i]);
+        if (!dir) continue;
+        
+        struct dirent* entry;
+        while ((entry = readdir(dir)) != nullptr) {
+            // Only process .desktop files
+            const char* filename = entry->d_name;
+            size_t len = strlen(filename);
+            if (len < 8 || strcmp(filename + len - 8, ".desktop") != 0) continue;
+            
+            // Build full path
+            char fullPath[512];
+            snprintf(fullPath, sizeof(fullPath), "%s/%s", searchPaths[i], filename);
+            
+            // Check if file is readable
+            struct stat st;
+            if (stat(fullPath, &st) != 0 || !S_ISREG(st.st_mode)) continue;
+            
+            // Read file content
+            std::ifstream file(fullPath);
+            if (!file.is_open()) continue;
+            
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+            std::string content = buffer.str();
+            file.close();
+            
+            // Check if it's a valid application (not a link or directory entry)
+            std::string type = parseDesktopValue(content, "Type");
+            if (type != "Application") continue;
+            
+            // Check if hidden
+            std::string hidden = parseDesktopValue(content, "Hidden");
+            if (hidden == "true") continue;
+            
+            // Check for NoDisplay
+            std::string noDisplay = parseDesktopValue(content, "NoDisplay");
+            if (noDisplay == "true") continue;
+            
+            // Parse desktop entry
+            AppEntry app;
+            app.id = filename;  // Use filename as ID
+            app.id = app.id.substr(0, app.id.length() - 8);  // Remove .desktop
+            
+            app.name = parseDesktopValue(content, "Name");
+            if (app.name.empty()) continue;  // Name is required
+            
+            app.exec = parseDesktopValue(content, "Exec");
+            if (app.exec.empty()) continue;  // Exec is required
+            
+            app.icon = parseDesktopValue(content, "Icon");
+            app.description = parseDesktopValue(content, "Comment");
+            app.isFavorite = false;  // Will be set based on usage
+            
+            // Remove field codes from exec (like %f, %u, etc.)
+            size_t percentPos = app.exec.find('%');
+            if (percentPos != std::string::npos) {
+                app.exec = app.exec.substr(0, percentPos);
+            }
+            app.exec = trim(app.exec);
+            
+            m_state.favorites.push_back(app);
+            totalFound++;
+        }
+        
+        closedir(dir);
+    }
+    
+    // Sort by name
+    std::sort(m_state.favorites.begin(), m_state.favorites.end(),
+        [](const AppEntry& a, const AppEntry& b) {
+            return a.name < b.name;
+        });
+    
+    printf("[Launcher] Scanned %d applications from system directories\n", totalFound);
 }
 
 } // namespace havel
