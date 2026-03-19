@@ -2,6 +2,8 @@
 
 #include "DesktopManager.hpp"
 #include "NASAWallpaper.hpp"
+#include <wm/render/OverlayRenderer.hpp>
+#include <wm/render/AppIconLoader.hpp>
 #include <Logger.h>
 #include <algorithm>
 #include <fstream>
@@ -9,6 +11,8 @@
 #include <ctime>
 #include <random>
 #include <cstring>
+#include <sys/stat.h>
+#include <GLES2/gl2.h>
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -508,6 +512,7 @@ void DesktopManager::saveConfig(const std::string& path) {
     // Save icon positions
     for (const auto& icon : m_icons) {
         // Would serialize icon data
+        (void)icon;
     }
     
     file.close();
@@ -631,42 +636,130 @@ void DesktopManager::render(void* renderer, int screenWidth, int screenHeight) {
     }
 }
 
-void DesktopManager::renderIcons(void* renderer) {
-    if (!renderer) return;
+void DesktopManager::renderIcons(void* rendererPtr) {
+    if (!rendererPtr) return;
     
-    // Would use actual OverlayRenderer
-    // For now, just log
+    OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+    
+    const int iconSize = 64;
+    const int padding = 10;
+    
     for (const auto& icon : m_icons) {
-        // Would render icon texture at (icon->x, icon->y)
-        // Would render label below icon
-        (void)icon;
+        int x = icon->x;
+        int y = icon->y;
+        
+        // Draw icon background (highlight if selected)
+        if (icon->selected) {
+            Color highlight(0.3f, 0.4f, 0.5f, 0.5f);
+            renderer->drawRect(x - padding, y - padding, 
+                              iconSize + padding * 2, iconSize + padding * 2, highlight);
+        }
+        
+        // Draw icon texture or placeholder
+        if (icon->iconTextureId != 0) {
+            renderer->drawTexture(icon->iconTextureId, x, y, iconSize, iconSize, 1.0f);
+        } else {
+            // Draw colored placeholder based on file type
+            Color iconColor;
+            if (icon->mimeType.find("image") != std::string::npos) {
+                iconColor = Color(0.2f, 0.4f, 0.6f, 1.0f);  // Blue for images
+            } else if (icon->mimeType.find("video") != std::string::npos) {
+                iconColor = Color(0.6f, 0.2f, 0.4f, 1.0f);  // Purple for videos
+            } else if (icon->mimeType.find("audio") != std::string::npos) {
+                iconColor = Color(0.4f, 0.6f, 0.2f, 1.0f);  // Green for audio
+            } else {
+                iconColor = Color(0.5f, 0.5f, 0.5f, 1.0f);  // Gray for others
+            }
+            renderer->drawRect(x, y, iconSize, iconSize, iconColor);
+        }
+        
+        // Draw label below icon
+        int labelY = y + iconSize + 5;
+        Color labelColor(1.0f, 1.0f, 1.0f, 1.0f);
+        
+        // Truncate name if too long
+        std::string displayName = icon->name;
+        if (displayName.length() > 15) {
+            displayName = displayName.substr(0, 12) + "...";
+        }
+        
+        renderer->drawText(displayName.c_str(), x, labelY, 14.0f, labelColor);
     }
 }
 
-void DesktopManager::renderWallpaper(void* renderer, int screenWidth, int screenHeight) {
-    if (!renderer) return;
+void DesktopManager::renderWallpaper(void* rendererPtr, int screenWidth, int screenHeight) {
+    if (!rendererPtr) return;
     
-    // Would render wallpaper texture
-    // Handle different modes (single, slideshow, video, solid color)
-    (void)screenWidth;
-    (void)screenHeight;
+    OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+    
+    // Handle different wallpaper modes
+    if (m_config.wallpaper.mode == WallpaperMode::SolidColor) {
+        // Draw solid color background
+        Color bgColor(m_config.wallpaper.colorR, m_config.wallpaper.colorG, m_config.wallpaper.colorB, 1.0f);
+        renderer->drawRect(0, 0, screenWidth, screenHeight, bgColor);
+    } else if (m_config.wallpaper.mode == WallpaperMode::Single && !m_config.wallpaper.path.empty()) {
+        // Draw wallpaper image (would use loaded texture)
+        // For now, draw placeholder with path text
+        Color placeholder(0.1f, 0.15f, 0.2f, 1.0f);
+        renderer->drawRect(0, 0, screenWidth, screenHeight, placeholder);
+        renderer->drawText(m_config.wallpaper.path.c_str(), 20, screenHeight - 30, 16.0f, 
+                          Color(0.5f, 0.5f, 0.5f, 1.0f));
+    } else if (m_config.wallpaper.mode == WallpaperMode::Slideshow) {
+        // Draw current slideshow image
+        Color slideshow(0.1f, 0.1f, 0.15f, 1.0f);
+        renderer->drawRect(0, 0, screenWidth, screenHeight, slideshow);
+    }
+    // Video mode would use video player integration
 }
 
-void DesktopManager::renderContextMenu(void* renderer) {
-    if (!renderer || m_contextMenuItems.empty()) return;
+void DesktopManager::renderContextMenu(void* rendererPtr) {
+    if (!rendererPtr || m_contextMenuItems.empty()) return;
     
-    // Would render context menu at (m_contextMenuX, m_contextMenuY)
-    // For now, just log
-    LOG_DEBUG("[DesktopManager] Rendering context menu");
+    OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+    
+    const int itemHeight = 30;
+    const int menuWidth = 200;
+    const int menuHeight = m_contextMenuItems.size() * itemHeight;
+    const int padding = 5;
+    
+    // Draw menu background
+    Color menuBg(0.15f, 0.15f, 0.2f, 0.95f);
+    renderer->drawRect(m_contextMenuX, m_contextMenuY, menuWidth, menuHeight, menuBg);
+    
+    // Draw menu items
+    for (size_t i = 0; i < m_contextMenuItems.size(); i++) {
+        const auto& item = m_contextMenuItems[i];
+        int itemY = m_contextMenuY + i * itemHeight;
+        
+        // Highlight first item (simplified - no selection tracking)
+        if (i == 0) {
+            Color highlight(0.3f, 0.4f, 0.5f, 0.9f);
+            renderer->drawRect(m_contextMenuX + padding, itemY + padding, 
+                              menuWidth - padding * 2, itemHeight - padding * 2, highlight);
+        }
+        
+        // Draw item text
+        Color textColor(1.0f, 1.0f, 1.0f, 1.0f);
+        renderer->drawText(item.label.c_str(), m_contextMenuX + padding * 2, 
+                          itemY + 18, 16.0f, textColor);
+    }
 }
 
-void DesktopManager::renderTaskbar(void* renderer, int screenWidth, int screenHeight) {
-    if (!renderer) return;
+void DesktopManager::renderTaskbar(void* rendererPtr, int screenWidth, int screenHeight) {
+    if (!rendererPtr) return;
     
-    // Would render taskbar based on position and size
-    // Would render taskbar items
-    (void)screenWidth;
-    (void)screenHeight;
+    OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+    
+    const int taskbarHeight = 40;
+    int taskbarY = screenHeight - taskbarHeight;  // Default to bottom
+    
+    // Draw taskbar background
+    Color taskbarBg(0.1f, 0.1f, 0.15f, 0.9f);
+    renderer->drawRect(0, taskbarY, screenWidth, taskbarHeight, taskbarBg);
+    
+    // Draw placeholder text (no open windows tracking yet)
+    renderer->drawText("Taskbar - open windows will appear here", 20, taskbarY + 25, 
+                      14.0f, Color(0.6f, 0.6f, 0.6f, 1.0f));
 }
 
 void DesktopManager::processMouseMove(int x, int y) {
@@ -799,16 +892,29 @@ void DesktopManager::executeContextMenuAction(const std::string& action) {
 }
 
 uint32_t DesktopManager::loadIconTexture(const std::string& iconPath) {
-    // Would load icon from system theme or file
+    // Load icon from system theme or file path
     // Returns OpenGL texture ID
-    // For now, return 0 (placeholder)
-    (void)iconPath;
-    return 0;
+    
+    if (iconPath.empty()) {
+        return 0;
+    }
+    
+    // Check if it's a file path
+    struct stat st;
+    if (stat(iconPath.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+        // Load from file using AppIconLoader
+        return AppIconLoader::getInstance()->loadIcon(iconPath);
+    }
+    
+    // Load from icon theme
+    return AppIconLoader::getInstance()->loadIcon(iconPath);
 }
 
 void DesktopManager::unloadIconTexture(uint32_t textureId) {
-    // Would delete OpenGL texture
-    (void)textureId;
+    // Delete OpenGL texture
+    if (textureId != 0) {
+        glDeleteTextures(1, &textureId);
+    }
 }
 
 // ============================================================================
