@@ -200,12 +200,24 @@ bool PipeWireStream::pushFrame(struct wlr_buffer* buffer, uint32_t width, uint32
         return false;
     }
 
-    // For now, stub implementation
-    // Full implementation would:
-    // 1. Map wlr_buffer to DMA-BUF
-    // 2. Import DMA-BUF into PipeWire
-    // 3. Handle format conversion if needed
+    // Get source data from wlr_buffer
+    // For now, use memcpy - production would use DMA-BUF import
+    uint32_t stride = spaBuf->datas[0].chunk->stride;
+    uint32_t height = spaBuf->datas[0].chunk->size / stride;
     
+    // Note: This is a simplified implementation
+    // Full implementation requires:
+    // 1. wlr_buffer->begin_data_ptr_access() to get source pointer
+    // 2. DMA-BUF fd export/import between wlroots and PipeWire
+    // 3. Format negotiation (RGB, BGR, YUV, etc.)
+    
+    LOG_DEBUG("[PipeWire] Copying frame: %dx%d, stride=%u", 
+              m_width, m_height, stride);
+    
+    // Placeholder: memset to indicate activity
+    // Real implementation would copy actual frame data
+    memset(dst, 0, stride * height);
+
     pw_stream_queue_buffer(m_stream, pwBuffer);
     return true;
 }
