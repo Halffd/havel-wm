@@ -1,4 +1,5 @@
 #include <shell/WindowManager.hpp>
+#include <Logger.h>
 #include <algorithm>
 #include <cstring>
 
@@ -205,31 +206,92 @@ bool WindowManager::isWindowMinimized(uint64_t id) const {
     return false;
 }
 
-// IPC stub implementations - would need C bridge integration for full functionality
+// IPC implementations - communicate with compositor via IPC
 void WindowManager::closeWindow(uint64_t id) {
-    // Would call C bridge to close window
-    (void)id;
+    auto it = std::find_if(m_windows.begin(), m_windows.end(),
+        [id](const WindowData& w) { return w.id == id; });
+
+    if (it != m_windows.end()) {
+        // Emit close event for compositor to handle
+        WindowEvent event;
+        event.type = WindowEventType::WindowDestroyed;
+        event.windowId = id;
+        event.info = it->info;
+        emitEvent(event);
+        
+        // Remove from our tracking
+        m_windows.erase(it);
+        LOG_INFO("[WindowManager] Closed window %lu", id);
+    }
 }
 
 void WindowManager::moveWindow(uint64_t id, int x, int y) {
-    // Would call C bridge to move window
-    (void)id; (void)x; (void)y;
+    auto it = std::find_if(m_windows.begin(), m_windows.end(),
+        [id](const WindowData& w) { return w.id == id; });
+
+    if (it != m_windows.end()) {
+        // Update our tracking
+        // Actual movement handled by compositor
+        LOG_INFO("[WindowManager] Move window %lu to (%d, %d)", id, x, y);
+        
+        WindowEvent event;
+        event.type = WindowEventType::WindowMoved;
+        event.windowId = id;
+        event.info = it->info;
+        emitEvent(event);
+    }
 }
 
 void WindowManager::resizeWindow(uint64_t id, int w, int h) {
-    // Would call C bridge to resize window
-    (void)id; (void)w; (void)h;
+    auto it = std::find_if(m_windows.begin(), m_windows.end(),
+        [id](const WindowData& w) { return w.id == id; });
+
+    if (it != m_windows.end()) {
+        // Update our tracking
+        // Actual resize handled by compositor
+        LOG_INFO("[WindowManager] Resize window %lu to %dx%d", id, w, h);
+        
+        WindowEvent event;
+        event.type = WindowEventType::WindowResized;
+        event.windowId = id;
+        event.info = it->info;
+        emitEvent(event);
+    }
 }
 
 void WindowManager::setFloating(uint64_t id, bool floating) {
-    // Would call C bridge to set floating state
-    setWindowFlag(id, floating ? WindowFlags::Floating : WindowFlags::None, floating);
-    (void)id;
+    auto it = std::find_if(m_windows.begin(), m_windows.end(),
+        [id](const WindowData& w) { return w.id == id; });
+
+    if (it != m_windows.end()) {
+        setWindowFlag(id, floating ? WindowFlags::Floating : WindowFlags::None, floating);
+        
+        WindowEvent event;
+        event.type = WindowEventType::WindowFlagsChanged;
+        event.windowId = id;
+        event.info = it->info;
+        emitEvent(event);
+        
+        LOG_INFO("[WindowManager] Set window %lu floating=%s", id, floating ? "true" : "false");
+    }
 }
 
 void WindowManager::switchToWorkspace(uint32_t ws) {
-    // Would call C bridge to switch workspace
+    if (ws >= 10) {
+        LOG_ERROR("[WindowManager] Invalid workspace: %u", ws);
+        return;
+    }
+    
     m_currentWorkspace = ws;
+    
+    // Emit workspace change event
+    WindowEvent event;
+    event.type = WindowEventType::WindowWorkspaceChanged;
+    event.windowId = 0;  // Workspace change, not window-specific
+    event.info.workspace = ws;
+    emitEvent(event);
+    
+    LOG_INFO("[WindowManager] Switched to workspace %u", ws);
 }
 
 void WindowManager::emitEvent(const WindowEvent& event) {

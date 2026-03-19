@@ -54,6 +54,8 @@ enum class WindowEventType {
     WindowAppIdChanged,
     WindowWorkspaceChanged,
     WindowFlagsChanged,
+    WindowMoved,
+    WindowResized,
 };
 
 /**
