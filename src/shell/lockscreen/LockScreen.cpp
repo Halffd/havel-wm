@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QVBoxLayout>
 #include <QProcess>
+#include <QDebug>
 
 namespace havel {
 
@@ -161,20 +162,67 @@ void LockScreen::onPasswordEntered() {
 }
 
 bool LockScreen::authenticate(const QString& password) {
-    // Use pam authentication via checkpassword or similar
-    // This is a simplified version - in production use proper PAM
+    // Authenticate user password using PAM
+    // Uses pamtester utility for PAM authentication
     
-    // For now, just check against empty (no password)
-    // In real implementation, would use:
-    // - pam_start/pam_authenticate
-    // - Or call to external auth helper
-    
+    if (password.isEmpty()) {
+        // Empty password - check if user has no password set
+        // This is a security risk and should not be allowed in production
+        qWarning("[LockScreen] Empty password attempt");
+        return false;
+    }
+
+    // Get current username
+    const char* user = getenv("USER");
+    if (!user) {
+        user = getenv("LOGNAME");
+    }
+    if (!user) {
+        qCritical("[LockScreen] Cannot determine username");
+        return false;
+    }
+
+    // Use pamtester for PAM authentication
+    // pamtester service name should match /etc/pam.d/ configuration
     QProcess process;
-    process.start("sh", QStringList() << "-c" 
-             << QString("echo '%1' | pamtester -v gdm-password $USER authenticate").arg(password));
-    process.waitForFinished(5000);
+    process.setProcessChannelMode(QProcess::MergedChannels);
     
-    return process.exitCode() == 0;
+    // Write password to stdin of pamtester
+    process.start("pamtester", QStringList() 
+                  << "-v" << "gdm-password" << user << "authenticate");
+    
+    if (!process.waitForStarted(3000)) {
+        qCritical("[LockScreen] Failed to start pamtester: %s", 
+                  process.errorString().toUtf8().constData());
+        // Fallback: try checkpassword if pamtester not available
+        process.start("sh", QStringList() << "-c" 
+                  << QString("printf '%s' | checkpassword 2>/dev/null").arg(password));
+        if (!process.waitForStarted(3000)) {
+            qCritical("[LockScreen] No authentication helper available");
+            return false;
+        }
+    }
+    
+    // Write password to process
+    process.write(password.toUtf8());
+    process.write("\n");
+    process.closeWriteChannel();
+    
+    if (!process.waitForFinished(5000)) {
+        qCritical("[LockScreen] Authentication timeout");
+        process.kill();
+        return false;
+    }
+
+    int exitCode = process.exitCode();
+    if (exitCode == 0) {
+        qInfo("[LockScreen] Authentication successful for user: %s", user);
+        return true;
+    } else {
+        qWarning("[LockScreen] Authentication failed for user: %s (exit code: %d)", 
+                 user, exitCode);
+        return false;
+    }
 }
 
 void LockScreen::onUnlockFailed() {
