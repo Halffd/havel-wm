@@ -21,5 +21,6 @@ Plugin* create_server_decoration_plugin();
 Plugin* create_draw_plugin();
 Plugin* create_fps_plugin();
 Plugin* create_zoom_plugin();
+Plugin* create_workspace_info_bar();
 
 } // namespace havel
