@@ -1055,7 +1055,10 @@ void Server::setViewPosition(View* view, int x, int y, bool animate) {
 void Server::setViewOpacity(View* view, float alpha) {
     // wlroots 0.20 scene doesn't have per-node opacity
     // This would require scene graph extension
-    // For now, stub - plugins can still call this safely
+    // Log the request for debugging
+    if (view && alpha != 1.0f) {
+        LOG_DEBUG("[Server] setViewOpacity requested: %.2f (not supported in wlroots 0.20)", alpha);
+    }
     (void)view;
     (void)alpha;
 }
@@ -1327,8 +1330,9 @@ void Server::registerKeybindings() {
     m_keybindingManager.registerKeybinding(
         KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 34,
         "gamma_night_mode", [this]() {
-            // Would toggle gamma plugin night mode
-            LOG_INFO("Night mode toggle (stub)");
+            // Toggle gamma plugin to night mode (3500K)
+            setTemperature(3500);
+            LOG_INFO("Night mode enabled (3500K)");
         }
     );
 

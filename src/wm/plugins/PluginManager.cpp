@@ -1,6 +1,7 @@
 #include "PluginManager.hpp"
 #include <wm/Server.hpp>
 #include <wm/bridge.h>
+#include <Logger.h>
 #include <cstring>
 #include <cstdio>
 
@@ -231,9 +232,9 @@ void PluginManager::focusView(View* view) {
 
 void PluginManager::closeView(View* view) {
     if (!m_server || !view) return;
-    // Would need closeFocusedWindow() in Server
-    // For now, stub
-    (void)view;
+    
+    // Close the view through wlroots
+    havel_wlr_close_view(view->nativeHandle());
 }
 
 // Window enumeration - delegates to Server
@@ -341,7 +342,10 @@ void PluginManager::setViewPosition(View* view, int x, int y) {
 void PluginManager::setViewOpacity(View* view, float alpha) {
     // wlroots 0.20 scene doesn't have per-node opacity
     // This would require scene graph extension
-    // For now, stub
+    // Log the request for debugging
+    if (view && alpha != 1.0f) {
+        LOG_DEBUG("[PluginManager] setViewOpacity requested: %.2f (not supported in wlroots 0.20)", alpha);
+    }
     (void)view;
     (void)alpha;
 }
