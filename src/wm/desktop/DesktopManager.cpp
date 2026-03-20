@@ -72,12 +72,15 @@ bool DesktopManager::initialize() {
         // DISABLED: No point in slideshow if no wallpapers
         // setNASAWallpaperSlideshow(300);  // 5 minutes
     }
-    
+
+    // Initialize icon loader singleton
+    new AppIconLoader();
+
     // Load default icons (applications)
     addIcon("firefox");
     addIcon("foot");
     addIcon("thunar");
-    
+
     // Auto-arrange initial icons
     autoArrangeIcons();
     
