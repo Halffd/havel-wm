@@ -1,6 +1,7 @@
 #include <shell/IPCServer.hpp>
 #include <shell/WindowManager.hpp>
 #include <wm/bridge.h>
+#include <nlohmann/json.hpp>
 
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -13,6 +14,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstdio>
+
+using json = nlohmann::json;
 
 namespace havel {
 
@@ -206,34 +209,30 @@ void IPCServer::processMessage(int clientFd, const std::string& msg) {
     }
 }
 
-std::string IPCServer::processJsonRequest(const std::string& json) {
-    // Simple JSON-RPC 2.0 parsing
-    int id = extractJsonInt(json, "id", 0);
-    std::string method = extractJsonString(json, "method");
+std::string IPCServer::processJsonRequest(const std::string& jsonStr) {
+    json j;
+    try {
+        j = json::parse(jsonStr);
+    } catch (const json::parse_error& e) {
+        return createError(0, -32700, std::string("Parse error: ") + e.what());
+    }
+
+    int id = j.value("id", 0);
+    std::string method = j.value("method", "");
 
     if (method.empty()) {
         return createError(id, -32600, "Invalid Request: missing method");
     }
 
-    // Extract params as raw string
-    size_t paramsPos = json.find("\"params\"");
-    std::string params;
-    if (paramsPos != std::string::npos) {
-        size_t start = json.find('{', paramsPos);
-        if (start != std::string::npos) {
-            size_t end = json.find('}', start);
-            if (end != std::string::npos) {
-                params = json.substr(start, end - start + 1);
-            }
-        }
-    }
+    // Extract params as JSON object
+    json params = j.value("params", json::object());
 
     // Find command handler
     auto it = std::find_if(m_commands.begin(), m_commands.end(),
         [&method](const CommandHandler& h) { return h.name == method; });
 
     if (it != m_commands.end()) {
-        std::string result = it->callback(params);
+        std::string result = it->callback(params.dump());
         return createResponse(id, result);
     }
 
@@ -241,22 +240,30 @@ std::string IPCServer::processJsonRequest(const std::string& json) {
 }
 
 std::string IPCServer::createResponse(int id, const std::string& result) {
-    std::ostringstream oss;
-    oss << "{\"jsonrpc\":\"2.0\",\"id\":" << id << ",\"result\":" << result << "}\n";
-    return oss.str();
+    json response = {
+        {"jsonrpc", "2.0"},
+        {"id", id},
+        {"result", json::parse(result)}
+    };
+    return response.dump() + "\n";
 }
 
 std::string IPCServer::createError(int id, int code, const std::string& message) {
-    std::ostringstream oss;
-    oss << "{\"jsonrpc\":\"2.0\",\"id\":" << id << ",\"error\":{\"code\":" << code 
-        << ",\"message\":\"" << message << "\"}}\n";
-    return oss.str();
+    json error = {
+        {"jsonrpc", "2.0"},
+        {"id", id},
+        {"error", {{"code", code}, {"message", message}}}
+    };
+    return error.dump() + "\n";
 }
 
 std::string IPCServer::createEvent(const std::string& method, const std::string& params) {
-    std::ostringstream oss;
-    oss << "{\"jsonrpc\":\"2.0\",\"method\":\"" << method << "\",\"params\":" << params << "}\n";
-    return oss.str();
+    json event = {
+        {"jsonrpc", "2.0"},
+        {"method", method},
+        {"params", json::parse(params)}
+    };
+    return event.dump() + "\n";
 }
 
 void IPCServer::broadcastEvent(EventType type, const std::string& jsonData) {
@@ -313,86 +320,41 @@ std::string IPCServer::eventTypeToString(EventType type) {
     }
 }
 
-// JSON helpers
-std::string IPCServer::extractJsonString(const std::string& json, const std::string& key) {
-    std::string searchKey = "\"" + key + "\"";
-    size_t keyPos = json.find(searchKey);
-    if (keyPos == std::string::npos) return "";
-
-    size_t colonPos = json.find(':', keyPos);
-    if (colonPos == std::string::npos) return "";
-
-    size_t startQuote = json.find('"', colonPos);
-    if (startQuote == std::string::npos) return "";
-
-    size_t endQuote = json.find('"', startQuote + 1);
-    if (endQuote == std::string::npos) return "";
-
-    return json.substr(startQuote + 1, endQuote - startQuote - 1);
-}
-
-int IPCServer::extractJsonInt(const std::string& json, const std::string& key, int defaultValue) {
-    std::string searchKey = "\"" + key + "\"";
-    size_t keyPos = json.find(searchKey);
-    if (keyPos == std::string::npos) return defaultValue;
-
-    size_t colonPos = json.find(':', keyPos);
-    if (colonPos == std::string::npos) return defaultValue;
-
-    size_t numStart = colonPos + 1;
-    while (numStart < json.size() && (json[numStart] == ' ' || json[numStart] == '\t')) {
-        numStart++;
-    }
-
-    if (numStart >= json.size()) return defaultValue;
-
-    char* endptr;
-    long val = strtol(json.c_str() + numStart, &endptr, 10);
-    if (endptr == json.c_str() + numStart) return defaultValue;
-
-    return (int)val;
-}
-
 // ============================================================================
 // Command Handlers
 // ============================================================================
 
 std::string IPCServer::handleGetWindows() {
-    std::ostringstream oss;
-    oss << "[";
-
-    bool first = true;
+    json arr = json::array();
+    
     for (const auto& w : m_windowManager.getAllWindows()) {
-        if (!first) oss << ",";
-        first = false;
-
-        oss << "{";
-        oss << "\"id\":" << w.id << ",";
-        oss << "\"appId\":\"" << w.appId << "\",";
-        oss << "\"title\":\"" << w.title << "\",";
-        oss << "\"workspace\":" << w.workspace << ",";
-        oss << "\"floating\":" << (hasFlag(w.flags, WindowFlags::Floating) ? "true" : "false") << ",";
-        oss << "\"minimized\":" << (hasFlag(w.flags, WindowFlags::Minimized) ? "true" : "false") << ",";
-        oss << "\"maximized\":" << (hasFlag(w.flags, WindowFlags::Maximized) ? "true" : "false") << ",";
-        oss << "\"fullscreen\":" << (hasFlag(w.flags, WindowFlags::Fullscreen) ? "true" : "false");
-        oss << "}";
+        json win = {
+            {"id", w.id},
+            {"appId", w.appId},
+            {"title", w.title},
+            {"workspace", w.workspace},
+            {"floating", hasFlag(w.flags, WindowFlags::Floating)},
+            {"minimized", hasFlag(w.flags, WindowFlags::Minimized)},
+            {"maximized", hasFlag(w.flags, WindowFlags::Maximized)},
+            {"fullscreen", hasFlag(w.flags, WindowFlags::Fullscreen)}
+        };
+        arr.push_back(win);
     }
-
-    oss << "]";
-    return oss.str();
+    
+    return arr.dump();
 }
 
 std::string IPCServer::handleGetFocused() {
     uint64_t focused = m_windowManager.focusedWindow();
-    std::ostringstream oss;
-    oss << "{\"id\":" << focused << "}";
-    return oss.str();
+    json j = {{"id", focused}};
+    return j.dump();
 }
 
 std::string IPCServer::handleFocus(const std::string& args) {
     uint64_t id = std::stoull(args);
     m_windowManager.focusWindow(id);
-    return "{}";
+    json j = {{"focused", id}};
+    return j.dump();
 }
 
 std::string IPCServer::handleMinimize(const std::string& args) {
@@ -425,10 +387,11 @@ std::string IPCServer::handleClose(const std::string& args) {
 
 std::string IPCServer::handleMove(const std::string& args) {
     // params: {"id": 123, "x": 100, "y": 200}
-    uint64_t id = (uint64_t)extractJsonInt(args, "id", 0);
-    int x = extractJsonInt(args, "x", 0);
-    int y = extractJsonInt(args, "y", 0);
-    
+    json j = json::parse(args);
+    uint64_t id = j.value("id", static_cast<uint64_t>(0));
+    int x = j.value("x", 0);
+    int y = j.value("y", 0);
+
     m_windowManager.moveWindow(id, x, y);
     broadcastEvent(EventType::WindowMoved, args);
     return "{}";
@@ -436,10 +399,11 @@ std::string IPCServer::handleMove(const std::string& args) {
 
 std::string IPCServer::handleResize(const std::string& args) {
     // params: {"id": 123, "w": 800, "h": 600}
-    uint64_t id = (uint64_t)extractJsonInt(args, "id", 0);
-    int w = extractJsonInt(args, "w", 0);
-    int h = extractJsonInt(args, "h", 0);
-    
+    json j = json::parse(args);
+    uint64_t id = j.value("id", static_cast<uint64_t>(0));
+    int w = j.value("w", 0);
+    int h = j.value("h", 0);
+
     m_windowManager.resizeWindow(id, w, h);
     broadcastEvent(EventType::WindowResized, args);
     return "{}";
@@ -447,9 +411,10 @@ std::string IPCServer::handleResize(const std::string& args) {
 
 std::string IPCServer::handleSetFloating(const std::string& args) {
     // params: {"id": 123, "floating": true}
-    uint64_t id = (uint64_t)extractJsonInt(args, "id", 0);
-    bool floating = args.find("\"floating\":true") != std::string::npos;
-    
+    json j = json::parse(args);
+    uint64_t id = j.value("id", static_cast<uint64_t>(0));
+    bool floating = j.value("floating", false);
+
     m_windowManager.setFloating(id, floating);
     broadcastEvent(EventType::WindowMoved, args);
     return "{}";
@@ -457,11 +422,14 @@ std::string IPCServer::handleSetFloating(const std::string& args) {
 
 std::string IPCServer::handleWorkspace(const std::string& args) {
     // params: {"workspace": 2} or just a number
-    int ws = extractJsonInt(args, "workspace", 0);
-    if (ws == 0) {
+    int ws = 0;
+    try {
+        json j = json::parse(args);
+        ws = j.value("workspace", 0);
+    } catch (...) {
         ws = std::atoi(args.c_str());
     }
-    
+
     m_windowManager.switchToWorkspace(ws);
     broadcastEvent(EventType::WorkspaceChanged, "{\"workspace\":" + std::to_string(ws) + "}");
     return "{}";
@@ -469,16 +437,17 @@ std::string IPCServer::handleWorkspace(const std::string& args) {
 
 std::string IPCServer::handleGetWorkspace() {
     int ws = m_windowManager.getCurrentWorkspace();
-    std::ostringstream oss;
-    oss << "{\"workspace\":" << ws << "}";
-    return oss.str();
+    json j = {{"workspace", ws}};
+    return j.dump();
 }
 
 std::string IPCServer::handleSpawn(const std::string& args) {
     // params: {"cmd": "foot"} or just the command string
-    std::string cmd = extractJsonString(args, "cmd");
-    if (cmd.empty()) {
-        // Legacy: just use args directly
+    std::string cmd;
+    try {
+        json j = json::parse(args);
+        cmd = j.value("cmd", "");
+    } catch (...) {
         cmd = args;
         // Trim quotes if present
         if (!cmd.empty() && cmd.front() == '"') cmd.erase(0, 1);
@@ -486,55 +455,64 @@ std::string IPCServer::handleSpawn(const std::string& args) {
     }
 
     if (cmd.empty()) {
-        return "{\"error\":\"No command specified\"}";
+        json err = {{"error", "No command specified"}};
+        return err.dump();
     }
 
-    // Spawn command (uses system() for now - would need C bridge for proper integration)
+    // Spawn command
     std::string spawnCmd = cmd + " &";
     int ret = system(spawnCmd.c_str());
 
-    std::ostringstream oss;
-    oss << "{\"spawned\":\"" << cmd << "\",\"pid\":" << ret << "}";
-    return oss.str();
+    json result = {{"spawned", cmd}, {"pid", ret}};
+    return result.dump();
 }
 
 std::string IPCServer::handleQuit() {
     // Signal compositor to quit via C bridge function
     havel_wlr_quit();
-    return "{\"quitting\":true}";
+    json j = {{"quitting", true}};
+    return j.dump();
 }
 
 std::string IPCServer::handlePing() {
-    return "{\"pong\":true}";
+    json j = {{"pong", true}};
+    return j.dump();
 }
 
 std::string IPCServer::handleSubscribe(const std::string& args) {
     // params: {"events": ["window_created", "workspace_changed"]}
-    // Find the client fd from the current message context
-    // For now, subscribe to all events for any connected client
+    json j;
+    try {
+        j = json::parse(args);
+    } catch (...) {
+        // If parsing fails, subscribe to all events
+        for (int clientFd : m_clientFds) {
+            m_clientSubscriptions[clientFd].insert(EventType::All);
+        }
+        return "{\"subscribed\":true}";
+    }
+    
+    // Subscribe to all events for any connected client
     for (int clientFd : m_clientFds) {
         m_clientSubscriptions[clientFd].insert(EventType::All);
         
         // Parse specific events if provided
-        size_t pos = args.find("\"events\"");
-        if (pos != std::string::npos) {
-            if (args.find("\"window_created\"") != std::string::npos) {
-                m_clientSubscriptions[clientFd].insert(EventType::WindowCreated);
-            }
-            if (args.find("\"window_destroyed\"") != std::string::npos) {
-                m_clientSubscriptions[clientFd].insert(EventType::WindowDestroyed);
-            }
-            if (args.find("\"window_focused\"") != std::string::npos) {
-                m_clientSubscriptions[clientFd].insert(EventType::WindowFocused);
-            }
-            if (args.find("\"window_moved\"") != std::string::npos) {
-                m_clientSubscriptions[clientFd].insert(EventType::WindowMoved);
-            }
-            if (args.find("\"window_resized\"") != std::string::npos) {
-                m_clientSubscriptions[clientFd].insert(EventType::WindowResized);
-            }
-            if (args.find("\"workspace_changed\"") != std::string::npos) {
-                m_clientSubscriptions[clientFd].insert(EventType::WorkspaceChanged);
+        if (j.contains("events") && j["events"].is_array()) {
+            for (const auto& event : j["events"]) {
+                std::string eventName = event.get<std::string>();
+                if (eventName == "window_created") {
+                    m_clientSubscriptions[clientFd].insert(EventType::WindowCreated);
+                } else if (eventName == "window_destroyed") {
+                    m_clientSubscriptions[clientFd].insert(EventType::WindowDestroyed);
+                } else if (eventName == "window_focused") {
+                    m_clientSubscriptions[clientFd].insert(EventType::WindowFocused);
+                } else if (eventName == "window_moved") {
+                    m_clientSubscriptions[clientFd].insert(EventType::WindowMoved);
+                } else if (eventName == "window_resized") {
+                    m_clientSubscriptions[clientFd].insert(EventType::WindowResized);
+                } else if (eventName == "workspace_changed") {
+                    m_clientSubscriptions[clientFd].insert(EventType::WorkspaceChanged);
+                }
             }
         }
     }

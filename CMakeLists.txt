@@ -22,6 +22,9 @@ pkg_check_modules(PNG REQUIRED libpng)
 pkg_check_modules(CURL REQUIRED libcurl)
 pkg_check_modules(VULKAN REQUIRED vulkan)
 
+# Find nlohmann/json for JSON parsing
+find_package(nlohmann_json CONFIG REQUIRED)
+
 # Renderer selection (default: Vulkan with GLES2 fallback)
 option(USE_VULKAN "Use Vulkan renderer (default ON)" ON)
 option(USE_GLES2 "Use GLES2 renderer as fallback (default ON)" ON)
@@ -369,6 +372,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${CURL_LIBRARIES}
     ${PIPEWIRE_LIBRARIES}
     ${GLIB_LIBRARIES}
+    nlohmann_json::nlohmann_json
 )
 
 # Set library directories
