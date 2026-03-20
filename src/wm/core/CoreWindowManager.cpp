@@ -1,8 +1,10 @@
 #include "CoreWindowManager.hpp"
 #include <wm/Server.hpp>
+#include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cstdio>
-#include <sstream>
+
+using json = nlohmann::json;
 
 namespace havel {
 
@@ -473,34 +475,29 @@ CoreWindowManager::IPCWindowInfo CoreWindowManager::getWindowInfo(uint64_t id) c
 }
 
 std::string CoreWindowManager::getIPCWindowList() const {
-    std::ostringstream oss;
-    oss << "[";
+    json arr = json::array();
     
-    bool first = true;
     for (const auto& [id, window] : m_windows) {
-        if (!first) oss << ",";
-        first = false;
-        
         auto info = getWindowInfo(id);
-        oss << "{";
-        oss << "\"id\":" << info.id << ",";
-        oss << "\"appId\":\"" << info.appId << "\",";
-        oss << "\"title\":\"" << info.title << "\",";
-        oss << "\"x\":" << info.x << ",";
-        oss << "\"y\":" << info.y << ",";
-        oss << "\"w\":" << info.w << ",";
-        oss << "\"h\":" << info.h << ",";
-        oss << "\"workspace\":" << info.workspace << ",";
-        oss << "\"floating\":" << (info.floating ? "true" : "false") << ",";
-        oss << "\"minimized\":" << (info.minimized ? "true" : "false") << ",";
-        oss << "\"maximized\":" << (info.maximized ? "true" : "false") << ",";
-        oss << "\"fullscreen\":" << (info.fullscreen ? "true" : "false") << ",";
-        oss << "\"focused\":" << (info.focused ? "true" : "false");
-        oss << "}";
+        json win = {
+            {"id", info.id},
+            {"appId", info.appId},
+            {"title", info.title},
+            {"x", info.x},
+            {"y", info.y},
+            {"w", info.w},
+            {"h", info.h},
+            {"workspace", info.workspace},
+            {"floating", info.floating},
+            {"minimized", info.minimized},
+            {"maximized", info.maximized},
+            {"fullscreen", info.fullscreen},
+            {"focused", info.focused}
+        };
+        arr.push_back(win);
     }
     
-    oss << "]";
-    return oss.str();
+    return arr.dump();
 }
 
 // ============================================================================
