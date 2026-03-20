@@ -230,6 +230,8 @@ private:
     float m_gamma = 1.0f;
     int m_temperature = 6500;  // Kelvin
     float m_brightness = 1.0f;
+    bool m_grayscaleEnabled = false;
+    bool m_negativeEnabled = false;
 
     // Grab state for mouse operations
     enum class GrabMode : uint8_t {

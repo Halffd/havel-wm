@@ -842,20 +842,21 @@ void Server::updateAnimations() {
 // ============================================================================
 
 void Server::setGrayscaleEnabled(bool enabled) {
-    // Would apply to all outputs in multi-monitor setup
+    m_grayscaleEnabled = enabled;
     printf("[Server] Grayscale %s\n", enabled ? "enabled" : "disabled");
 }
 
 void Server::setNegativeEnabled(bool enabled) {
+    m_negativeEnabled = enabled;
     printf("[Server] Negative %s\n", enabled ? "enabled" : "disabled");
 }
 
 bool Server::isGrayscaleEnabled() const {
-    return false;  // Would track state
+    return m_grayscaleEnabled;
 }
 
 bool Server::isNegativeEnabled() const {
-    return false;  // Would track state
+    return m_negativeEnabled;
 }
 
 void Server::toggleGrayscale() {
