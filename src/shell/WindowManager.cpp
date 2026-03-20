@@ -206,6 +206,22 @@ bool WindowManager::isWindowMinimized(uint64_t id) const {
     return false;
 }
 
+void WindowManager::maximizeWindow(uint64_t id) {
+    auto it = std::find_if(m_windows.begin(), m_windows.end(),
+        [id](const WindowData& w) { return w.id == id; });
+
+    if (it != m_windows.end()) {
+        // Emit maximize event for compositor to handle
+        WindowEvent event;
+        event.type = WindowEventType::WindowFlagsChanged;
+        event.windowId = id;
+        event.info = it->info;
+        emitEvent(event);
+        
+        LOG_INFO("[WindowManager] Maximize request for window %lu", id);
+    }
+}
+
 // IPC implementations - communicate with compositor via IPC
 void WindowManager::closeWindow(uint64_t id) {
     auto it = std::find_if(m_windows.begin(), m_windows.end(),

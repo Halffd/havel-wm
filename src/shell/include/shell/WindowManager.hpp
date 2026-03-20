@@ -104,8 +104,9 @@ public:
     // Event subscription
     void setWindowCallback(WindowCallback cb) { m_windowCallback = cb; }
     
-    // Minimize support
+    // Minimize/Maximize support
     void minimizeWindow(uint64_t id);
+    void maximizeWindow(uint64_t id);
     void restoreWindow(uint64_t id);
     bool isWindowMinimized(uint64_t id) const;
 

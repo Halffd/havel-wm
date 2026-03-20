@@ -111,6 +111,12 @@ void havel_cpp_register_server_callbacks(
     g_server_spawn = spawn;
 }
 
+void havel_wlr_quit(void) {
+    if (g_server_quit) {
+        g_server_quit();
+    }
+}
+
 // Forward declarations
 struct havel_output;
 struct havel_keyboard;

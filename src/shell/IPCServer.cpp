@@ -404,8 +404,8 @@ std::string IPCServer::handleMinimize(const std::string& args) {
 
 std::string IPCServer::handleMaximize(const std::string& args) {
     uint64_t id = std::stoull(args);
-    // Stub - would need C bridge integration
-    (void)id;
+    // Maximize window through WindowManager
+    m_windowManager.maximizeWindow(id);
     broadcastEvent(EventType::WindowResized, "{\"id\":" + std::to_string(id) + ",\"maximized\":true}");
     return "{}";
 }
@@ -499,7 +499,8 @@ std::string IPCServer::handleSpawn(const std::string& args) {
 }
 
 std::string IPCServer::handleQuit() {
-    // Signal compositor to quit (stub - would need C bridge integration)
+    // Signal compositor to quit via C bridge function
+    havel_wlr_quit();
     return "{\"quitting\":true}";
 }
 
@@ -509,7 +510,34 @@ std::string IPCServer::handlePing() {
 
 std::string IPCServer::handleSubscribe(const std::string& args) {
     // params: {"events": ["window_created", "workspace_changed"]}
-    // This would need client fd - handled in processMessage for now
+    // Find the client fd from the current message context
+    // For now, subscribe to all events for any connected client
+    for (int clientFd : m_clientFds) {
+        m_clientSubscriptions[clientFd].insert(EventType::All);
+        
+        // Parse specific events if provided
+        size_t pos = args.find("\"events\"");
+        if (pos != std::string::npos) {
+            if (args.find("\"window_created\"") != std::string::npos) {
+                m_clientSubscriptions[clientFd].insert(EventType::WindowCreated);
+            }
+            if (args.find("\"window_destroyed\"") != std::string::npos) {
+                m_clientSubscriptions[clientFd].insert(EventType::WindowDestroyed);
+            }
+            if (args.find("\"window_focused\"") != std::string::npos) {
+                m_clientSubscriptions[clientFd].insert(EventType::WindowFocused);
+            }
+            if (args.find("\"window_moved\"") != std::string::npos) {
+                m_clientSubscriptions[clientFd].insert(EventType::WindowMoved);
+            }
+            if (args.find("\"window_resized\"") != std::string::npos) {
+                m_clientSubscriptions[clientFd].insert(EventType::WindowResized);
+            }
+            if (args.find("\"workspace_changed\"") != std::string::npos) {
+                m_clientSubscriptions[clientFd].insert(EventType::WorkspaceChanged);
+            }
+        }
+    }
     return "{\"subscribed\":true}";
 }
 

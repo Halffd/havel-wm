@@ -112,6 +112,7 @@ void* havel_cpp_get_window_group_manager(struct havel_cpp_server* server);
 void havel_wlr_set_gamma(havel_wlr_server_t* server, float gamma);
 void havel_wlr_set_temperature(havel_wlr_server_t* server, int kelvin);
 void havel_wlr_set_brightness(havel_wlr_server_t* server, float brightness);
+void havel_wlr_quit(void);
 
 // Per-monitor gamma/brightness control
 void havel_wlr_set_gamma_for_output(havel_wlr_server_t* server, int output_index, float gamma);
