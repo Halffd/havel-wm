@@ -1152,11 +1152,6 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 
     LOG_DEBUG("[OUTPUT] %s is %s", wlr_output->name, output->is_primary ? "primary" : "secondary");
 
-    // Create a test rectangle to confirm rendering works
-    struct wlr_scene_rect *test_rect = wlr_scene_rect_create(
-        &server->scene->tree, 100, 100, (float[4]){1.0f, 0.0f, 0.0f, 1.0f});  // Red box
-    wlr_scene_node_set_position(&test_rect->node, 50, 50);
-    LOG_INFO("[TEST] Created red test box at (50,50) size 100x100 on %s", wlr_output->name);
 
     output->frame.notify = output_frame;
     wl_signal_add(&wlr_output->events.frame, &output->frame);
