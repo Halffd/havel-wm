@@ -387,7 +387,17 @@ static void cpp_impl_workspace_arrange(uint32_t workspace_id) {
 }
 
 static void cpp_impl_workspace_set_active(uint32_t workspace_id) {
-    // Handled by C++ Server
+    // Update C layer workspace state
+    if (g_running_server && workspace_id < HAVEL_WORKSPACE_COUNT) {
+        // Disable all workspaces
+        for (uint32_t i = 0; i < HAVEL_WORKSPACE_COUNT; i++) {
+            wlr_scene_node_set_enabled(&g_running_server->workspaces[i]->node, false);
+        }
+        // Enable only the active workspace
+        wlr_scene_node_set_enabled(&g_running_server->workspaces[workspace_id]->node, true);
+        g_running_server->active_workspace = workspace_id;
+        LOG_INFO("[WORKSPACE] Switched to workspace %u", workspace_id);
+    }
 }
 
 static void cpp_impl_server_quit(void) {
@@ -994,12 +1004,12 @@ static void output_frame(struct wl_listener *listener, void *data) {
     static int frame_count = 0;
     frame_count++;
     if (frame_count % 30 == 0) {
-        LOG_INFO("[DEBUG] Frame #%d on %s (enabled=%d, scene_output=%p)", 
-                 frame_count, output->output->name, 
+        LOG_INFO("[DEBUG] Frame #%d on %s (enabled=%d, scene_output=%p)",
+                 frame_count, output->output->name,
                  output->output->enabled, output->scene_output);
     }
 
-    // LOG_INFO("[FRAME] %s: >>> START", output->output->name);  // Disabled to prevent log spam
+    LOG_INFO("[FRAME] %s: >>> START", output->output->name);
 
     // Update animations before rendering
     havel_cpp_update_animations(server->cpp_server);
