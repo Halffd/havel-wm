@@ -181,25 +181,15 @@ bool PluginManager::dispatchKey(const KeyEvent& event) {
 }
 
 void PluginManager::renderOverlays(void* renderer) {
-    // Scene graph based overlay rendering
-    // Plugins add/update nodes in the overlay layer
-    // The overlay layer is rendered by wlroots during scene commit
+    // Overlay rendering via OverlayRenderer (OpenGL)
+    // Plugins draw using OverlayRenderer methods (drawRect, drawText, etc.)
     
-    // Get overlay layer from Server
-    if (!m_server) return;
-    auto* server = static_cast<havel::Server*>(m_server);
-    void* overlayLayer = server->overlayLayer();
+    // Pass the renderer to plugins - they cast it to OverlayRenderer*
+    if (!renderer) return;
     
-    if (!overlayLayer) return;
-    
-    // Render overlays using scene graph
-    // Each plugin adds its overlay nodes to the overlay layer
-    // Alt-Tab, Overview, App Launcher all use this layer
     for (auto& plugin : m_plugins) {
-        plugin->renderOverlay(overlayLayer);
+        plugin->renderOverlay(renderer);
     }
-    
-    (void)renderer;  // Not used for scene graph rendering
 }
 
 void PluginManager::onMouseMotion(int x, int y) {
