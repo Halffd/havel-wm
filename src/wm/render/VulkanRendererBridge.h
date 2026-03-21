@@ -64,6 +64,10 @@ VulkanTexture* vulkan_renderer_create_texture_from_buffer(VulkanRenderer* render
 void vulkan_renderer_destroy_texture(VulkanRenderer* renderer, VulkanTexture* texture);
 void vulkan_renderer_bind_texture(VulkanRenderer* renderer, VulkanTexture* texture);
 
+// Update texture with new buffer data (for animated windows)
+void vulkan_renderer_update_texture(VulkanRenderer* renderer, VulkanTexture* texture,
+                                     void* pixelData, uint32_t width, uint32_t height);
+
 // Info
 const char* vulkan_renderer_get_gpu_info(VulkanRenderer* renderer);
 bool vulkan_renderer_is_available(void);

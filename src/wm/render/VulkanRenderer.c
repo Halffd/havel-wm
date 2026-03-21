@@ -5,6 +5,7 @@
 #include <utils/Common.h>
 #include <vulkan/vulkan.h>
 #include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
 #include <EGL/egl.h>
 #include <Logger.h>
 #include <stdlib.h>
@@ -707,8 +708,10 @@ static void init_gles2(struct VulkanRendererInternal* renderer) {
     }
     
     // Initialize EGL
-    if (!eglInitialize(renderer->eglDisplay, NULL, NULL)) {
-        LOG_WARN("[Vulkan] Failed to initialize EGL");
+    EGLint major, minor;
+    if (!eglInitialize(renderer->eglDisplay, &major, &minor)) {
+        LOG_WARN("[Vulkan] Failed to initialize EGL (error: %d)", eglGetError());
+        renderer->eglDisplay = EGL_NO_DISPLAY;
         return;
     }
     
@@ -716,7 +719,7 @@ static void init_gles2(struct VulkanRendererInternal* renderer) {
     EGLConfig config;
     EGLint numConfigs;
     EGLint attribs[] = {
-        EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+        EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
         EGL_RED_SIZE, 8,
         EGL_GREEN_SIZE, 8,
         EGL_BLUE_SIZE, 8,
@@ -725,8 +728,10 @@ static void init_gles2(struct VulkanRendererInternal* renderer) {
         EGL_NONE
     };
     
-    if (!eglChooseConfig(renderer->eglDisplay, attribs, &config, 1, &numConfigs)) {
-        LOG_WARN("[Vulkan] Failed to choose EGL config");
+    if (!eglChooseConfig(renderer->eglDisplay, attribs, &config, 1, &numConfigs) || numConfigs == 0) {
+        LOG_WARN("[Vulkan] Failed to choose EGL config (error: %d)", eglGetError());
+        eglTerminate(renderer->eglDisplay);
+        renderer->eglDisplay = EGL_NO_DISPLAY;
         return;
     }
     
@@ -737,7 +742,9 @@ static void init_gles2(struct VulkanRendererInternal* renderer) {
     };
     renderer->eglContext = eglCreateContext(renderer->eglDisplay, config, EGL_NO_CONTEXT, contextAttribs);
     if (renderer->eglContext == EGL_NO_CONTEXT) {
-        LOG_WARN("[Vulkan] Failed to create GLES2 context");
+        LOG_WARN("[Vulkan] Failed to create GLES2 context (error: %d)", eglGetError());
+        eglTerminate(renderer->eglDisplay);
+        renderer->eglDisplay = EGL_NO_DISPLAY;
         return;
     }
     
@@ -749,16 +756,27 @@ static void init_gles2(struct VulkanRendererInternal* renderer) {
     };
     renderer->eglSurface = eglCreatePbufferSurface(renderer->eglDisplay, config, surfaceAttribs);
     if (renderer->eglSurface == EGL_NO_SURFACE) {
-        LOG_WARN("[Vulkan] Failed to create EGL surface");
+        LOG_WARN("[Vulkan] Failed to create EGL surface (error: %d)", eglGetError());
         eglDestroyContext(renderer->eglDisplay, renderer->eglContext);
+        eglTerminate(renderer->eglDisplay);
+        renderer->eglDisplay = EGL_NO_DISPLAY;
         return;
     }
     
     // Make context current
     if (!eglMakeCurrent(renderer->eglDisplay, renderer->eglSurface, renderer->eglSurface, renderer->eglContext)) {
-        LOG_WARN("[Vulkan] Failed to make GLES2 context current");
+        LOG_WARN("[Vulkan] Failed to make GLES2 context current (error: %d)", eglGetError());
+        eglDestroySurface(renderer->eglDisplay, renderer->eglSurface);
+        eglDestroyContext(renderer->eglDisplay, renderer->eglContext);
+        eglTerminate(renderer->eglDisplay);
+        renderer->eglDisplay = EGL_NO_DISPLAY;
         return;
     }
+    
+    // Check for BGRA extension
+    const char* extensions = (const char*)glGetString(GL_EXTENSIONS);
+    bool hasBGRA = extensions && strstr(extensions, "GL_EXT_texture_format_BGRA8888");
+    LOG_INFO("[Vulkan] GLES2 initialized%s", hasBGRA ? " (BGRA extension available)" : " (software swizzle enabled)");
     
     // Create simple shader program
     const char* vertSrc = 
@@ -783,14 +801,55 @@ static void init_gles2(struct VulkanRendererInternal* renderer) {
     glShaderSource(vertShader, 1, &vertSrc, NULL);
     glCompileShader(vertShader);
     
+    GLint compiled;
+    glGetShaderiv(vertShader, GL_COMPILE_STATUS, &compiled);
+    if (!compiled) {
+        LOG_WARN("[Vulkan] Failed to compile vertex shader");
+        eglMakeCurrent(renderer->eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        eglDestroySurface(renderer->eglDisplay, renderer->eglSurface);
+        eglDestroyContext(renderer->eglDisplay, renderer->eglContext);
+        eglTerminate(renderer->eglDisplay);
+        renderer->eglDisplay = EGL_NO_DISPLAY;
+        return;
+    }
+    
     GLuint fragShader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragShader, 1, &fragSrc, NULL);
     glCompileShader(fragShader);
+    
+    glGetShaderiv(fragShader, GL_COMPILE_STATUS, &compiled);
+    if (!compiled) {
+        LOG_WARN("[Vulkan] Failed to compile fragment shader");
+        glDeleteShader(vertShader);
+        eglMakeCurrent(renderer->eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        eglDestroySurface(renderer->eglDisplay, renderer->eglSurface);
+        eglDestroyContext(renderer->eglDisplay, renderer->eglContext);
+        eglTerminate(renderer->eglDisplay);
+        renderer->eglDisplay = EGL_NO_DISPLAY;
+        return;
+    }
     
     renderer->shaderProgram = glCreateProgram();
     glAttachShader(renderer->shaderProgram, vertShader);
     glAttachShader(renderer->shaderProgram, fragShader);
     glLinkProgram(renderer->shaderProgram);
+    
+    GLint linked;
+    glGetProgramiv(renderer->shaderProgram, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        LOG_WARN("[Vulkan] Failed to link shader program");
+        glDeleteShader(vertShader);
+        glDeleteShader(fragShader);
+        eglMakeCurrent(renderer->eglDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+        eglDestroySurface(renderer->eglDisplay, renderer->eglSurface);
+        eglDestroyContext(renderer->eglDisplay, renderer->eglContext);
+        eglTerminate(renderer->eglDisplay);
+        renderer->eglDisplay = EGL_NO_DISPLAY;
+        return;
+    }
+    
+    glDeleteShader(vertShader);
+    glDeleteShader(fragShader);
     
     // Get attribute/uniform locations
     renderer->positionLoc = glGetAttribLocation(renderer->shaderProgram, "aPosition");
@@ -1175,10 +1234,28 @@ VulkanTexture* vulkan_renderer_create_texture_from_buffer_with_data(
         glBindTexture(GL_TEXTURE_2D, texture->gles2Texture);
 
         // Upload actual buffer content
-        // wlroots typically uses DRM_FORMAT_ARGB8888 or similar
-        // GLES2 doesn't support GL_BGRA, so we use GL_RGBA
-        // The pixel data may need swizzling in production
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixelData);
+        // wlroots uses DRM_FORMAT_ARGB8888 (A in high byte, B in low byte)
+        // GLES2 expects RGBA, so we need to swizzle or use GL_BGRA_EXT if available
+        #ifdef GL_EXT_texture_format_BGRA8888
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_BGRA_EXT, width, height, 0, GL_BGRA_EXT, GL_UNSIGNED_BYTE, pixelData);
+        #else
+            // Manual swizzle: ARGB -> RGBA
+            uint32_t* src = (uint32_t*)pixelData;
+            uint32_t* swizzled = malloc(width * height * 4);
+            if (swizzled) {
+                for (uint32_t i = 0; i < width * height; i++) {
+                    uint32_t argb = src[i];
+                    // ARGB (A<<24|R<<16|G<<8|B) -> RGBA (R<<24|G<<16|B<<8|A)
+                    swizzled[i] = ((argb << 8) & 0xFF00FF00) | ((argb >> 8) & 0x00FF00FF) | ((argb << 16) & 0x00FF0000) | ((argb >> 16) & 0x000000FF);
+                }
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, swizzled);
+                free(swizzled);
+            } else {
+                // Fallback without swizzle (colors will be wrong)
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixelData);
+            }
+        #endif
+        
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glBindTexture(GL_TEXTURE_2D, 0);
@@ -1187,6 +1264,38 @@ VulkanTexture* vulkan_renderer_create_texture_from_buffer_with_data(
     }
 
     return (VulkanTexture*)texture;
+}
+
+// Update existing texture with new buffer data (for animated windows)
+void vulkan_renderer_update_texture(VulkanRenderer* renderer_ptr, VulkanTexture* texture_ptr,
+                                     void* pixelData, uint32_t width, uint32_t height) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    struct VulkanTextureInternal* texture = (struct VulkanTextureInternal*)texture_ptr;
+    
+    if (!renderer || !texture || !renderer->gles2Initialized || !pixelData) return;
+    
+    glBindTexture(GL_TEXTURE_2D, texture->gles2Texture);
+    
+    #ifdef GL_EXT_texture_format_BGRA8888
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_BGRA_EXT, GL_UNSIGNED_BYTE, pixelData);
+    #else
+        // Manual swizzle: ARGB -> RGBA
+        uint32_t* src = (uint32_t*)pixelData;
+        uint32_t* swizzled = malloc(width * height * 4);
+        if (swizzled) {
+            for (uint32_t i = 0; i < width * height; i++) {
+                uint32_t argb = src[i];
+                swizzled[i] = ((argb << 8) & 0xFF00FF00) | ((argb >> 8) & 0x00FF00FF) | 
+                              ((argb << 16) & 0x00FF0000) | ((argb >> 16) & 0x000000FF);
+            }
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, swizzled);
+            free(swizzled);
+        } else {
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixelData);
+        }
+    #endif
+    
+    glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 VulkanTexture* vulkan_renderer_create_texture_from_buffer(VulkanRenderer* renderer_ptr,
