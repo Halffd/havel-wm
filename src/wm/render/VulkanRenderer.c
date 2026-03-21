@@ -590,18 +590,20 @@ static VkResult create_render_pass(struct VulkanRendererInternal* renderer) {
     return VK_SUCCESS;
 }
 
-// Create graphics pipeline (placeholder)
+// Create graphics pipeline layout
+// Note: Actual rendering is done via GLES2, not Vulkan
+// Vulkan only handles swapchain presentation
 static VkResult create_graphics_pipeline(struct VulkanRendererInternal* renderer) {
     VkPipelineLayoutCreateInfo createInfo = {0};
     createInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    
-    VkResult result = vkCreatePipelineLayout(renderer->device, &createInfo, NULL, 
+
+    VkResult result = vkCreatePipelineLayout(renderer->device, &createInfo, NULL,
                                             &renderer->pipelineLayout);
     if (result != VK_SUCCESS) {
         LOG_ERROR("[Vulkan] Failed to create pipeline layout: %d", result);
         return result;
     }
-    LOG_INFO("[Vulkan] Pipeline layout created");
+    LOG_INFO("[Vulkan] Pipeline layout created (GLES2 does actual rendering)");
     return VK_SUCCESS;
 }
 

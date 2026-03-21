@@ -66,11 +66,8 @@ bool DesktopManager::initialize() {
         m_nasaWallpaperManager = std::make_unique<NASAWallpaperManager>();
         m_nasaWallpaperManager->initialize();
 
-        // DISABLED: Fetch NASA wallpapers (crashes with libcurl)
-        // fetchNASAWallpapers(10);
-
-        // DISABLED: No point in slideshow if no wallpapers
-        // setNASAWallpaperSlideshow(300);  // 5 minutes
+        // NASA wallpaper download disabled - libcurl crashes in compositor context
+        // To use: call fetchNASAWallpapers() from a separate process
     }
 
     // Initialize icon loader singleton

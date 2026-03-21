@@ -32,7 +32,6 @@ Server::Server() {
 
     // Register built-in plugins
     registerPlugin(std::unique_ptr<Plugin>(create_example_plugin()));
-    registerPlugin(std::unique_ptr<Plugin>(create_blur_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_scale_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_wallpaper_plugin()));
     registerPlugin(std::unique_ptr<Plugin>(create_notifications_plugin()));

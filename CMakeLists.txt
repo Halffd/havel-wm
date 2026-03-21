@@ -186,7 +186,6 @@ set(WM_CORE_SOURCES
     # src/wm/core/XWaylandDnD.hpp
     src/wm/core/LoadingScreen.c
     src/wm/core/LoadingScreen.h
-    src/wm/render/RenderPipeline.cpp
     src/wm/render/render_c_wrappers.c
     src/wm/render/ShaderEffect.cpp
     src/wm/render/OverlayRenderer.cpp
@@ -197,8 +196,6 @@ set(WM_CORE_SOURCES
     src/wm/render/FreeTypeFont.cpp
     src/wm/render/FreeTypeFont.hpp
     src/wm/render/AppIconLoader.cpp
-    src/wm/render/BlurShader.cpp
-    src/wm/render/BlurShader.hpp
     src/wm/input/InputManager.cpp
     src/wm/input/KeybindingManager.cpp
     src/wm/input/KeybindingManager.hpp
@@ -222,7 +219,6 @@ set(WM_CORE_SOURCES
     src/wm/desktop/FileManager.hpp
     src/wm/plugins/PluginManager.cpp
     src/wm/plugins/ExamplePlugin.cpp
-    src/wm/plugins/BlurPlugin.cpp
     src/wm/plugins/ScalePlugin.cpp
     src/wm/plugins/WallpaperPlugin.cpp
     src/wm/plugins/NotificationsPlugin.cpp
@@ -254,10 +250,6 @@ set(WM_CORE_SOURCES
     src/wm/render/WlrBinding.h
     src/wm/render/DamageTracker.c
     src/wm/render/DamageTracker.h
-    src/wm/render/MultiGPU.c
-    src/wm/render/MultiGPU.h
-    src/wm/render/CompositorRenderer.c
-    src/wm/render/CompositorRenderer.h
     # Animation plugins (WIP - need interface adjustments)
     # src/wm/plugins/WobblyWindowsPlugin.cpp
     # src/wm/plugins/DestroyOnClosePlugin.cpp
