@@ -251,15 +251,11 @@ void havel_cpp_set_zoom_for_output_simple(struct havel_cpp_server* server, int o
 
 void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int height) {
     if (!server || !server->server) return;
-    
-    // Get plugin manager and render overlays
+
+    // Get plugin manager and render overlays with the overlay renderer
     auto& pluginManager = server->server->pluginManager();
-    
-    // Overlays are now rendered via scene graph nodes in the overlay layer
-    // This function is called before wlr_scene_output_commit
-    // Plugins render by adding/updating nodes in the overlay layer
-    pluginManager.renderOverlays(nullptr);  // nullptr - plugins use scene graph directly
-    
+    pluginManager.renderOverlays(server->server->getOverlayRenderer());
+
     (void)width;
     (void)height;
 }

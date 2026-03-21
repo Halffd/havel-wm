@@ -8,6 +8,7 @@
 #include <wm/overlay/AltTabOverlay.hpp>
 #include <wm/overlay/OverviewOverlay.hpp>
 #include <wm/overlay/AppLauncherOverlay.hpp>
+#include <wm/render/OverlayRenderer.hpp>
 #include <wm/plugins/PluginManager.hpp>
 #include <input/KeybindingManager.hpp>
 #include <input/TextInputManager.hpp>
@@ -84,8 +85,16 @@ public:
     void* nativeHandle() const { return m_nativeHandle; }
 
     // Overlay layer for plugin rendering
-    void setOverlayLayer(void* layer) { m_overlayLayer = layer; }
+    void setOverlayLayer(void* layer) { 
+        m_overlayLayer = layer; 
+        // Create overlay renderer for plugins
+        if (layer && !m_overlayRenderer) {
+            m_overlayRenderer = new OverlayRenderer();
+            m_overlayRenderer->initialize();
+        }
+    }
     void* overlayLayer() const { return m_overlayLayer; }
+    OverlayRenderer* getOverlayRenderer() const { return m_overlayRenderer; }
 
     // Text Input Manager (IME)
     void setTextInputManager(void* manager) { m_textInputManager = static_cast<TextInputManager*>(manager); }
@@ -204,6 +213,7 @@ private:
 
     // Overlay scene layer (for Alt-Tab, Overview, etc.)
     void* m_overlayLayer = nullptr;  // wlr_scene_tree*
+    OverlayRenderer* m_overlayRenderer = nullptr;  // For plugin overlay rendering
 
     void* m_nativeHandle = nullptr;
     std::unordered_map<uint32_t, Rect> m_outputGeoms;
