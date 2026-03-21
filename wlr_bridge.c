@@ -257,6 +257,7 @@ struct havel_xdg_view {
     struct wl_listener set_title;       // Called when title is set
     struct wl_listener request_move;    // Window move request
     struct wl_listener request_resize;  // Window resize request
+    struct wl_listener request_minimize; // Minimize request
     struct wl_listener request_maximize; // Maximize request
     struct wl_listener request_fullscreen; // Fullscreen request
 };
@@ -604,11 +605,46 @@ static void xdg_handle_request_maximize(struct wl_listener *listener, void *data
     if (!view || !view->xdg_surface->toplevel) return;
     
     LOG_INFO("[XDG] Maximize request for view %p", (void*)view);
-    
-    // Toggle maximized state
+
+    // Toggle maximized state and resize window
     struct wlr_xdg_toplevel *toplevel = view->xdg_surface->toplevel;
     bool maximized = toplevel->current.maximized;
-    wlr_xdg_toplevel_set_maximized(toplevel, !maximized);
+    
+    if (!maximized) {
+        // Maximize: set to output size
+        wlr_xdg_toplevel_set_maximized(toplevel, true);
+        // Get output size
+        struct havel_output *output = NULL;
+        if (!wl_list_empty(&view->server->outputs)) {
+            struct wl_list *next = view->server->outputs.next;
+            output = wl_container_of(next, output, link);
+        }
+        if (output && output->output) {
+            wlr_xdg_toplevel_set_size(toplevel, output->output->width, output->output->height);
+        }
+    } else {
+        // Restore: clear maximized state, size will be restored by client
+        wlr_xdg_toplevel_set_maximized(toplevel, false);
+    }
+}
+
+// NEW: Minimize request handler
+static void xdg_handle_request_minimize(struct wl_listener *listener, void *data) {
+    struct havel_xdg_view *view = wl_container_of(listener, view, request_minimize);
+
+    if (!view || !view->xdg_surface->toplevel) return;
+
+    LOG_INFO("[XDG] Minimize request for view %p", (void*)view);
+
+    // Hide the scene node to minimize
+    if (view->scene_tree) {
+        wlr_scene_node_set_enabled(&view->scene_tree->node, false);
+    }
+    
+    // Notify C++ layer
+    if (view->cpp_view) {
+        havel_cpp_on_view_unmapped(view->server->cpp_server, view->cpp_view);
+    }
 }
 
 // NEW: Fullscreen request handler
@@ -636,6 +672,7 @@ static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
     wl_list_remove(&view->set_title.link);
     wl_list_remove(&view->request_move.link);
     wl_list_remove(&view->request_resize.link);
+    wl_list_remove(&view->request_minimize.link);
     wl_list_remove(&view->request_maximize.link);
     wl_list_remove(&view->request_fullscreen.link);
 
@@ -730,6 +767,10 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
     LOG_INFO("[XDG] Adding resize request listener");
     view->request_resize.notify = xdg_handle_request_resize;
     wl_signal_add(&toplevel->events.request_resize, &view->request_resize);
+    
+    LOG_INFO("[XDG] Adding minimize request listener");
+    view->request_minimize.notify = xdg_handle_request_minimize;
+    wl_signal_add(&toplevel->events.request_minimize, &view->request_minimize);
     
     LOG_INFO("[XDG] Adding maximize request listener");
     view->request_maximize.notify = xdg_handle_request_maximize;
