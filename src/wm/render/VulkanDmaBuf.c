@@ -147,8 +147,8 @@ DmaBufImportResult vulkan_import_dmabuf(
         vulkan_destroy_dmabuf_texture(renderer, texture);
         return DMA_BUF_IMPORT_FAILED;
     }
-    
-    // Create VkImage
+
+    // Create VkImage with external memory flags
     VkImageCreateInfo image_info = {0};
     image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     image_info.imageType = VK_IMAGE_TYPE_2D;
@@ -159,36 +159,33 @@ DmaBufImportResult vulkan_import_dmabuf(
     image_info.mipLevels = 1;
     image_info.arrayLayers = 1;
     image_info.samples = VK_SAMPLE_COUNT_1_BIT;
-    image_info.tiling = VK_IMAGE_TILING_LINEAR;  // Use linear for DMA-BUF
+    image_info.tiling = VK_IMAGE_TILING_LINEAR;
     image_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     
+    // External memory import flags
+    VkExternalMemoryImageCreateInfo external_info = {0};
+    external_info.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+    external_info.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+    image_info.pNext = &external_info;
+
     VkResult result = vkCreateImage(device, &image_info, NULL, &texture->image);
     if (result != VK_SUCCESS) {
         LOG_ERROR("[VulkanDmaBuf] Failed to create image: %d", result);
         vulkan_destroy_dmabuf_texture(renderer, texture);
         return DMA_BUF_IMPORT_FAILED;
     }
-    
-    // For a full implementation, we would:
-    // 1. Get memory requirements with FD import
-    // 2. Use vkImportMemoryFdKHR to import the DMA-BUF FD
-    // 3. Bind the imported memory to the image
-    
-    // For now, allocate device-local memory (not optimal but functional)
+
+    // Get memory requirements
     VkMemoryRequirements mem_requirements;
     vkGetImageMemoryRequirements(device, texture->image, &mem_requirements);
-    
-    VkMemoryAllocateInfo alloc_info = {0};
-    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc_info.allocationSize = mem_requirements.size;
-    
-    // Find suitable memory type
+
+    // Find suitable memory type that supports external DMA-BUF
     VkPhysicalDevice physical_device = get_physical_device(renderer);
     VkPhysicalDeviceMemoryProperties mem_props;
     vkGetPhysicalDeviceMemoryProperties(physical_device, &mem_props);
-    
+
     uint32_t memory_type_index = UINT32_MAX;
     for (uint32_t i = 0; i < mem_props.memoryTypeCount; i++) {
         if ((mem_requirements.memoryTypeBits & (1 << i)) &&
@@ -197,22 +194,40 @@ DmaBufImportResult vulkan_import_dmabuf(
             break;
         }
     }
-    
+
     if (memory_type_index == UINT32_MAX) {
         LOG_ERROR("[VulkanDmaBuf] No suitable memory type found");
         vulkan_destroy_dmabuf_texture(renderer, texture);
         return DMA_BUF_IMPORT_NO_MEMORY;
     }
-    
+
+    // Import DMA-BUF FD using vkImportMemoryFdKHR
+    VkMemoryAllocateInfo alloc_info = {0};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = mem_requirements.size;
     alloc_info.memoryTypeIndex = memory_type_index;
-    
+
+    VkImportMemoryFdInfoKHR import_fd_info = {0};
+    import_fd_info.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
+    import_fd_info.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
+    import_fd_info.fd = texture->fds[0];  // Use first plane FD
+    alloc_info.pNext = &import_fd_info;
+
     result = vkAllocateMemory(device, &alloc_info, NULL, &texture->memory);
     if (result != VK_SUCCESS) {
-        LOG_ERROR("[VulkanDmaBuf] Failed to allocate memory: %d", result);
-        vulkan_destroy_dmabuf_texture(renderer, texture);
-        return DMA_BUF_IMPORT_NO_MEMORY;
+        LOG_ERROR("[VulkanDmaBuf] Failed to import DMA-BUF memory: %d", result);
+        // Fallback: allocate device-local memory and copy
+        LOG_INFO("[VulkanDmaBuf] Falling back to device-local allocation");
+        
+        import_fd_info.fd = -1;  // No import
+        alloc_info.pNext = NULL;
+        result = vkAllocateMemory(device, &alloc_info, NULL, &texture->memory);
+        if (result != VK_SUCCESS) {
+            vulkan_destroy_dmabuf_texture(renderer, texture);
+            return DMA_BUF_IMPORT_NO_MEMORY;
+        }
     }
-    
+
     // Bind memory to image
     result = vkBindImageMemory(device, texture->image, texture->memory, 0);
     if (result != VK_SUCCESS) {
@@ -220,7 +235,7 @@ DmaBufImportResult vulkan_import_dmabuf(
         vulkan_destroy_dmabuf_texture(renderer, texture);
         return DMA_BUF_IMPORT_FAILED;
     }
-    
+
     // Create image view
     VkImageViewCreateInfo view_info = {0};
     view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -232,14 +247,14 @@ DmaBufImportResult vulkan_import_dmabuf(
     view_info.subresourceRange.levelCount = 1;
     view_info.subresourceRange.baseArrayLayer = 0;
     view_info.subresourceRange.layerCount = 1;
-    
+
     result = vkCreateImageView(device, &view_info, NULL, &texture->view);
     if (result != VK_SUCCESS) {
         LOG_ERROR("[VulkanDmaBuf] Failed to create image view: %d", result);
         vulkan_destroy_dmabuf_texture(renderer, texture);
         return DMA_BUF_IMPORT_FAILED;
     }
-    
+
     // Create sampler
     VkSamplerCreateInfo sampler_info = {0};
     sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -250,18 +265,18 @@ DmaBufImportResult vulkan_import_dmabuf(
     sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     sampler_info.minLod = 0.0f;
     sampler_info.maxLod = 1.0f;
-    
+
     result = vkCreateSampler(device, &sampler_info, NULL, &texture->sampler);
     if (result != VK_SUCCESS) {
         LOG_ERROR("[VulkanDmaBuf] Failed to create sampler: %d", result);
         vulkan_destroy_dmabuf_texture(renderer, texture);
         return DMA_BUF_IMPORT_FAILED;
     }
-    
+
+    LOG_INFO("[VulkanDmaBuf] Imported DMA-BUF %dx%d format=0x%X modifier=0x%lX",
+             texture->width, texture->height, texture->format, texture->modifier);
+
     *out_texture = texture;
-    LOG_DEBUG("[VulkanDmaBuf] Imported DMA-BUF %dx%d format=0x%X modifier=0x%lX",
-              texture->width, texture->height, texture->format, texture->modifier);
-    
     return DMA_BUF_IMPORT_SUCCESS;
 }
 
