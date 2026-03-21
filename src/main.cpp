@@ -94,6 +94,8 @@ int main(int argc, char* argv[]) {
             break;
         case RENDERER_VULKAN:
             printf("[MAIN] Renderer: Vulkan + GLES2 hybrid\n");
+            // Enable Vulkan renderer mode
+            havel_wlr_set_renderer_mode(server, 1);
             break;
         case RENDERER_WLROOTS:
             printf("[MAIN] Renderer: Pure wlroots scene graph\n");

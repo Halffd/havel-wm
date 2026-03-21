@@ -113,6 +113,7 @@ void havel_wlr_set_gamma(havel_wlr_server_t* server, float gamma);
 void havel_wlr_set_temperature(havel_wlr_server_t* server, int kelvin);
 void havel_wlr_set_brightness(havel_wlr_server_t* server, float brightness);
 void havel_wlr_quit(void);
+void havel_wlr_set_renderer_mode(havel_wlr_server_t* server, int mode);  // 0=wlroots, 1=Vulkan+GLES2
 
 // Per-monitor gamma/brightness control
 void havel_wlr_set_gamma_for_output(havel_wlr_server_t* server, int output_index, float gamma);
