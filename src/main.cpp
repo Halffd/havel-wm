@@ -17,16 +17,18 @@ static void print_usage(const char* prog) {
     printf("\nOptions:\n");
     printf("  -s, --startup <command>  Command to execute on startup\n");
     printf("  --no-loading-screen      Disable loading screen\n");
-    printf("  -r, --renderer <backend> Select renderer backend:\n");
+    printf("  -r, --renderer <backend> Select wlroots renderer backend:\n");
     printf("                             auto     - Auto-detect (default)\n");
-    printf("                             gles     - GLES2 software rendering\n");
-    printf("                             vulkan   - Vulkan + GLES2 hybrid\n");
-    printf("                             wlroots  - Pure wlroots scene graph\n");
+    printf("                             gles     - Force GLES2\n");
+    printf("                             vulkan   - Force Vulkan\n");
+    printf("                             wlroots  - Default (same as auto)\n");
     printf("  -h, --help               Show this help message\n");
+    printf("\nNote: wlroots handles all window rendering. Custom buffer import\n");
+    printf("(SHM/DMA-BUF) is available for plugins needing texture access.\n");
     printf("\nExamples:\n");
     printf("  %s -s 'foot'             Start foot terminal on launch\n", prog);
-    printf("  %s -r vulkan -s 'swaybg' Use Vulkan renderer with wallpaper\n", prog);
-    printf("  %s -r gles               Force GLES2 (no Vulkan)\n", prog);
+    printf("  %s -r vulkan -s 'swaybg' Use Vulkan backend with wallpaper\n", prog);
+    printf("  %s -r gles               Force GLES2 backend\n", prog);
     printf("  %s --no-loading-screen   Start without loading screen\n", prog);
 }
 
@@ -84,22 +86,21 @@ int main(int argc, char* argv[]) {
     }
 
     // Configure renderer based on command-line option
+    // Note: wlroots handles all actual rendering via wlr_renderer_autocreate()
+    // The -r flag just passes the backend preference to wlroots
     switch (renderer) {
         case RENDERER_AUTO:
-            printf("[MAIN] Renderer: Auto-detect (Vulkan + GLES2 fallback)\n");
+            printf("[MAIN] Renderer: wlroots (auto-detect backend)\n");
             break;
         case RENDERER_GLES2:
-            printf("[MAIN] Renderer: GLES2 (software rendering)\n");
-            // GLES2 is initialized on-demand in VulkanRenderer
+            printf("[MAIN] Renderer: wlroots (GLES2 backend)\n");
             break;
         case RENDERER_VULKAN:
-            printf("[MAIN] Renderer: Vulkan + GLES2 hybrid\n");
-            // Enable Vulkan renderer mode
-            havel_wlr_set_renderer_mode(server, 1);
+            printf("[MAIN] Renderer: wlroots (Vulkan backend)\n");
+            printf("[MAIN] Note: Custom buffer import (SHM/DMA-BUF) available for texture access\n");
             break;
         case RENDERER_WLROOTS:
-            printf("[MAIN] Renderer: Pure wlroots scene graph\n");
-            // wlroots scene graph is default, no special config needed
+            printf("[MAIN] Renderer: wlroots (default backend)\n");
             break;
     }
 

@@ -191,9 +191,6 @@ struct havel_wlr_server {
 
     // C++ server handle - owns WM policy/state
     struct havel_cpp_server *cpp_server;
-
-    // Renderer mode: 0=wlroots (default), 1=Vulkan+GLES2 hybrid
-    int renderer_mode;
 };
 
 struct havel_output {
@@ -1061,13 +1058,11 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // This ensures overlays are composited into the frame
     havel_cpp_draw_overlays(server->cpp_server, output->output->width, output->output->height);
 
-    // Use custom Vulkan renderer if enabled (-r vulkan)
-    // When enabled: wlroots renders scene, we handle buffer import via SHM/DMA-BUF
-    if (server->renderer_mode == 1) {
-        LOG_DEBUG("[FRAME] %s: Vulkan renderer mode active", output->output->name);
-        // Vulkan renderer handles texture import, wlroots handles scene commit
-        // Buffer import happens in wlr_buffer_import_as_vulkan() via WlrBinding.c
-    }
+    // Note: wlroots handles all actual screen rendering via wlr_scene_output_commit()
+    // Our custom buffer import (SHM/DMA-BUF) is available for plugins that need
+    // direct texture access (Alt-Tab thumbnails, screen capture, etc.)
+    // To use custom rendering, implement wlr_renderer interface and replace
+    // wlr_renderer_autocreate() in havel_wlr_create()
 
     // Commit with zoom transform applied via output state
     if (output->zoom != 1.0f && output->zoom > 0.0f) {
@@ -1816,7 +1811,6 @@ havel_wlr_server_t* havel_wlr_create(void) {
     wl_list_init(&server->outputs);
     server->active_workspace = 0;
     server->grab.mode = INTERACTIVE_NONE;  // Initialize grab state
-    server->renderer_mode = 0;  // Default: wlroots renderer
 
     LOG_DEBUG("Initializing havel_wlr_server");
 
@@ -2556,10 +2550,4 @@ void havel_wlr_raise_view(void* c_view) {
     if (g_view_raise) {
         g_view_raise(c_view);
     }
-}
-
-void havel_wlr_set_renderer_mode(havel_wlr_server_t *server, int mode) {
-    if (!server) return;
-    server->renderer_mode = mode;
-    LOG_INFO("[Renderer] Mode set to: %s", mode == 0 ? "wlroots" : "Vulkan+GLES2");
 }
