@@ -188,6 +188,18 @@ void TerminalWidget::resetZoom() {
     setFont(font);
 }
 
+void TerminalWidget::flash() {
+    // Visual bell - flash the background briefly
+    m_flashing = true;
+    setStyleSheet("QPlainTextEdit { border: none; background-color: #3a3a3a; color: #c8c8c8; }");
+    
+    // Reset after 100ms
+    QTimer::singleShot(100, this, [this]() {
+        m_flashing = false;
+        updatePalette();
+    });
+}
+
 void TerminalWidget::keyPressEvent(QKeyEvent* event) {
     // First check for Ctrl shortcuts
     if (event->modifiers() & Qt::ControlModifier) {
@@ -547,7 +559,7 @@ void TerminalWindow::setupActions() {
     m_selectAllAction = new QAction("Select &All", this);
     m_selectAllAction->setShortcut(QKeySequence::SelectAll);
     connect(m_selectAllAction, &QAction::triggered, this, &TerminalWindow::onSelectAll);
-    
+
     m_zoomInAction = new QAction("Zoom &In", this);
     m_zoomInAction->setShortcut(QKeySequence::ZoomIn);
     connect(m_zoomInAction, &QAction::triggered, this, &TerminalWindow::onZoomIn);
@@ -933,7 +945,7 @@ void TerminalWindow::loadSettings() {
 
 void TerminalWindow::saveSettings() {
     QSettings settings("Havel WM", "Terminal");
-    
+
     settings.setValue("font", m_terminalFont);
     settings.setValue("foreground", m_foreground);
     settings.setValue("background", m_background);

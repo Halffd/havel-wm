@@ -26,6 +26,7 @@
 #include <QProcessEnvironment>
 #include <QSlider>
 #include <QWidgetAction>
+#include <QTimer>
 
 namespace havel {
 
@@ -59,17 +60,24 @@ public:
     void copySelection();
     void pasteClipboard();
     void selectAll();
-    
+
     // Zoom
     void zoomIn();
     void zoomOut();
     void resetZoom();
-    
+
+    // Visual bell
+    void flash();
+
+    // Working directory
+    QString getWorkingDirectory() const { return m_workingDirectory; }
+
 signals:
     void titleChanged(const QString& title);
     void processExited(int exitCode);
     void bell();
     void tabSwitchRequested(int tabIndex);  // Ctrl+1-9
+    void workingDirectoryChanged(const QString& path);
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
@@ -103,10 +111,16 @@ private:
     int m_scrollbackSize;
     bool m_cursorBlink;
     int m_zoomLevel;
-    
+
     // Selection
     bool m_selecting;
     QPoint m_selectionStart;
+
+    // Working directory
+    QString m_workingDirectory;
+
+    // Visual bell animation
+    bool m_flashing;
 };
 
 /**
@@ -207,7 +221,7 @@ private:
     QAction* m_resetAction;
     QAction* m_fullscreenAction;
     QAction* m_menuBarAction;
-    
+
     // Terminal tabs
     QVector<TerminalTab> m_tabs;
     int m_nextTabId;
