@@ -133,15 +133,21 @@ static const char* g_validationLayers[] = {
 
 // Device extensions
 static const char* g_deviceExtensions[] = {
-    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+    VK_KHR_EXTERNAL_MEMORY_EXTENSION_NAME,
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+    VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
+#endif
 };
-static const uint32_t g_deviceExtensionCount = 1;
+static const uint32_t g_deviceExtensionCount = sizeof(g_deviceExtensions) / sizeof(g_deviceExtensions[0]);
 
-// Instance extensions (for surface/presentation)
+// Instance extensions (for surface/presentation and external memory)
 static const char* g_instanceExtensions[] = {
     VK_KHR_SURFACE_EXTENSION_NAME,
+    VK_KHR_EXTERNAL_MEMORY_CAPABILITIES_EXTENSION_NAME,
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
     VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME,
+    VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
 #endif
 #ifdef VK_USE_PLATFORM_XLIB_KHR
     VK_KHR_XLIB_SURFACE_EXTENSION_NAME,
