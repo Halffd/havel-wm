@@ -1000,16 +1000,18 @@ static void output_frame(struct wl_listener *listener, void *data) {
     struct havel_output *output = wl_container_of(listener, output, frame);
     struct havel_wlr_server *server = output->server;
 
-    // DEBUG: Confirm frame callback is firing
+    // DEBUG: Confirm frame callback is firing (only every 600 frames = ~10 seconds)
     static int frame_count = 0;
     frame_count++;
-    if (frame_count % 30 == 0) {
-        LOG_INFO("[DEBUG] Frame #%d on %s (enabled=%d, scene_output=%p)",
+    if (frame_count % 600 == 0) {
+        LOG_INFO("[FRAME] Frame #%d on %s (enabled=%d, scene_output=%p)",
                  frame_count, output->output->name,
                  output->output->enabled, output->scene_output);
     }
 
-    LOG_INFO("[FRAME] %s: >>> START", output->output->name);
+    // Per-frame logging disabled to prevent log spam (60fps = 3600 lines/min)
+    // Enable temporarily for debugging specific issues
+    // LOG_INFO("[FRAME] %s: >>> START", output->output->name);
 
     // Update animations before rendering
     havel_cpp_update_animations(server->cpp_server);
@@ -1368,95 +1370,48 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
             }
         }
 
-        // ====================================================================
-        // VT Switching (Ctrl+Alt+F1..F12) - MUST be handled before C++ layer
-        // ====================================================================
-        // Check for Ctrl+Alt modifiers using XKB state (layout-independent)
+        // Check for Ctrl+Alt modifiers for VT switching
         xkb_mod_index_t ctrl_idx = xkb_keymap_mod_get_index(keyboard->keymap, XKB_MOD_NAME_CTRL);
         xkb_mod_index_t alt_idx = xkb_keymap_mod_get_index(keyboard->keymap, XKB_MOD_NAME_ALT);
-
         bool ctrl_pressed = (ctrl_idx != XKB_MOD_INVALID) &&
                            (xkb_state_mod_index_is_active(keyboard->xkb_state, ctrl_idx, XKB_STATE_MODS_DEPRESSED) > 0);
         bool alt_pressed = (alt_idx != XKB_MOD_INVALID) &&
                           (xkb_state_mod_index_is_active(keyboard->xkb_state, alt_idx, XKB_STATE_MODS_DEPRESSED) > 0);
 
-        // Fallback: check raw modifier mask (Mod1=Alt=bit 3, Control=bit 2)
-        #define MOD_CTRL (1 << 2)
-        #define MOD_ALT (1 << 3)
-        if (!ctrl_pressed && (modifiers & MOD_CTRL)) ctrl_pressed = true;
-        if (!alt_pressed && (modifiers & MOD_ALT)) alt_pressed = true;
-        #undef MOD_CTRL
-        #undef MOD_ALT
-
-        LOG_INFO("[VT] keysym=0x%x ctrl=%d alt=%d modifiers=0x%x", keysym, ctrl_pressed, alt_pressed, modifiers);
-
+        // VT Switching (Ctrl+Alt+F1..F12) - MUST be handled before C++ layer
         if (ctrl_pressed && alt_pressed && keysym >= XKB_KEY_F1 && keysym <= XKB_KEY_F12) {
             unsigned int vt = keysym - XKB_KEY_F1 + 1;
-            LOG_INFO("[VT] >>> Switching to VT%u (keysym=0x%x) <<<", vt, keysym);
+            LOG_INFO("[VT] Switching to VT%u", vt);
             if (server->session) {
-                int result = wlr_session_change_vt(server->session, vt);
-                LOG_INFO("[VT] wlr_session_change_vt returned: %d", result);
-            } else {
-                LOG_ERROR("[VT] No session available for VT switch!");
+                wlr_session_change_vt(server->session, vt);
             }
             return;  // Consume the event, don't forward
         }
 
-        // ====================================================================
-        // Alt+Tab Overlay (basic scene-graph based)
-        // ====================================================================
-        LOG_INFO("[AltTab] Check: alt=%d keysym=0x%x(XKB_Tab=0x%x) ctrl=%d", 
-                 alt_pressed, keysym, XKB_KEY_Tab, ctrl_pressed);
-        
+        // Alt+Tab Overlay
         if (alt_pressed && keysym == XKB_KEY_Tab && !ctrl_pressed) {
-            LOG_INFO("[AltTab] Condition matched!");
-            // Get primary output dimensions
-            struct havel_output *output;
-            int width = 1920, height = 1080;  // Default fallback
-            wl_list_for_each(output, &server->outputs, link) {
-                if (output->output && output->output->enabled) {
-                    width = output->output->width;
-                    height = output->output->height;
-                    break;
-                }
-            }
-
-            LOG_INFO("[AltTab] Overlay visible=%d", alt_tab_overlay.visible);
             if (alt_tab_overlay.visible) {
-                // Cycle to next window
-                LOG_INFO("[AltTab] Cycling...");
                 alt_tab_cycle();
             } else {
-                // Show overlay
-                LOG_INFO("[AltTab] Showing overlay %dx%d", width, height);
-                alt_tab_show(width, height);
+                alt_tab_show(1920, 1080);
             }
             return;  // Consume the event
         }
-        
+
         // Enter selects window
         if (alt_tab_overlay.visible && (keysym == XKB_KEY_Return || keysym == XKB_KEY_KP_Enter)) {
             alt_tab_select();
             return;  // Consume the event
         }
-        
+
         // Escape hides Alt-Tab
         if (alt_tab_overlay.visible && keysym == XKB_KEY_Escape) {
             alt_tab_hide();
             return;  // Consume the event
         }
 
-        LOG_DEBUG("[KEY] keycode=%u modifiers=%u keysym=0x%x char='%c'",
-                  keycode, modifiers, keysym, key_char ? key_char : ' ');
-
-        // DEBUG: Log before forwarding to C++
-        LOG_INFO("[DEBUG] Forwarding key to C++: keycode=%u, mods=0x%x", keycode, modifiers);
-
-        // Forward to C++ layer for policy decisions
-        // Returns true if event was consumed (e.g., keybinding matched)
+        // Forward to C++ layer for keybindings/plugins
         bool consumed = havel_cpp_on_key(server->cpp_server, keycode, true, modifiers, keysym, key_char, utf8_buffer);
-
-        LOG_INFO("[DEBUG] Key consumed=%d", consumed);
 
         // Only forward to seat if not consumed by compositor
         if (!consumed) {

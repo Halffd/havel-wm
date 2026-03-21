@@ -291,12 +291,8 @@ void Server::onViewDestroyed(View* view) {
 bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char, const char* utf8) {
     if (!pressed) return false;
 
-    // DEBUG: Log key event
-    LOG_INFO("[KEYBINDING] keycode=%u modifiers=0x%x keysym=0x%x", keycode, modifiers, keysym);
-
     // First, check registered keybindings (highest priority)
     if (m_keybindingManager.handleKey(keycode, pressed, modifiers)) {
-        LOG_INFO("[KEYBINDING] MATCHED and consumed");
         return true;
     }
 
@@ -1186,8 +1182,6 @@ void Server::animateViewScale(View* view, float from, float to) {
 void Server::registerKeybindings() {
     using namespace std::placeholders;
 
-    LOG_INFO("[Keybindings] Registering keybindings...");
-
     // Ctrl+Meta+F4: Quit compositor
     m_keybindingManager.registerKeybinding(
         KeybindingManager::MOD_CTRL | KeybindingManager::MOD_LOGO, 111,
@@ -1380,10 +1374,6 @@ void Server::registerKeybindings() {
         KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 19,
         "move_to_workspace_10", [this]() { moveViewToWorkspace(9); }
     );
-
-    // List all registered bindings for debugging
-    m_keybindingManager.listBindings();
-    LOG_INFO("[Keybindings] Registration complete");
 }
 
 // ============================================================================
