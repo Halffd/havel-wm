@@ -106,7 +106,7 @@ void loading_screen_init(struct wlr_scene_tree* parent) {
     
     // Default config
     g_loading_screen.config.enabled = true;
-    g_loading_screen.config.timeout_ms = 0;  // No auto-hide
+    g_loading_screen.config.timeout_ms = 5000;  // Auto-hide after 5 seconds
     g_loading_screen.config.show_progress = true;
     g_loading_screen.config.show_logo = true;
     g_loading_screen.config.show_tips = true;

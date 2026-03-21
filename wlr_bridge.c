@@ -457,16 +457,19 @@ static void xwayland_view_set_position(struct havel_xwayland_view *view, int x, 
 
 static void xdg_view_handle_map(struct wl_listener *listener, void *data) {
     struct havel_xdg_view *view = wl_container_of(listener, view, map);
-    
+
     // Safety check: view might be in inconsistent state
     if (!view || !view->xdg_surface || !view->scene_tree || !view->cpp_view) {
         LOG_WARN("[XDG] MAP: Invalid view or null pointers");
         return;
     }
-    
-    LOG_INFO("[XDG] MAP: %p (xdg_surface=%p, scene_tree=%p, cpp_view=%p)", 
+
+    LOG_INFO("[XDG] MAP: %p (xdg_surface=%p, scene_tree=%p, cpp_view=%p)",
              (void*)view, (void*)view->xdg_surface, (void*)view->scene_tree, view->cpp_view);
-    
+
+    // Hide loading screen on first window map
+    loading_screen_hide();
+
     // Notify C++ layer - C++ owns mapped state
     havel_cpp_on_view_mapped(view->server->cpp_server, view->cpp_view);
 
