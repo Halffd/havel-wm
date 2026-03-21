@@ -40,6 +40,9 @@
 #include <QKeySequence>
 #include <QDateTime>
 #include <QDirIterator>
+#include <QScrollArea>
+#include <QGraphicsView>
+#include <QGraphicsScene>
 
 namespace havel {
 
@@ -170,6 +173,9 @@ private slots:
     
     // View mode
     void setViewMode(int mode);  // 0=icons, 1=list, 2=details
+    void toggleImagePreview();
+    void updateImagePreview(const QString& filePath);
+    QString formatFileSize(qint64 size);
 
 private:
     void setupUI();
@@ -181,6 +187,7 @@ private:
     void updateStatusBar();
     void updateNavigationButtons();
     void createFileView(int tabIndex);
+    void createImagePreviewPanel();
     
     // File operations helpers
     void copyFileInternal(const QString& src, const QString& dst);
@@ -267,8 +274,16 @@ private:
     SortMode m_currentSortMode;
     SortOrder m_currentSortOrder;
     GroupMode m_currentGroupMode;
-    
     int m_currentViewMode;  // 0=icons, 1=list, 2=details
+
+    // Image preview panel
+    QWidget* m_imagePreviewPanel;
+    QLabel* m_imagePreviewLabel;
+    QLabel* m_imageInfoLabel;
+    bool m_showImagePreview;
+
+    // Thumbnail generator
+    class ThumbnailGenerator* m_thumbnailGenerator;
 };
 
 } // namespace havel

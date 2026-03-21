@@ -1,6 +1,7 @@
 // File Manager Implementation - Advanced Features
 
 #include "FileManager.hpp"
+#include "ThumbnailGenerator.hpp"
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QHeaderView>
@@ -14,6 +15,7 @@
 #include <QDirIterator>
 #include <QStyle>
 #include <QRegularExpression>
+#include <QScrollArea>
 
 namespace havel {
 
@@ -155,10 +157,19 @@ FileManagerWindow::FileManagerWindow(const QString& startPath, QWidget* parent)
     , m_currentSortOrder(SortOrder::Ascending)
     , m_currentGroupMode(GroupMode::None)
     , m_currentViewMode(0)
+    , m_imagePreviewPanel(nullptr)
+    , m_imagePreviewLabel(nullptr)
+    , m_imageInfoLabel(nullptr)
+    , m_showImagePreview(false)
+    , m_thumbnailGenerator(nullptr)
 {
     setWindowTitle("File Manager - Havel WM");
     setMinimumSize(1280, 800);
-    
+
+    // Initialize thumbnail generator
+    m_thumbnailGenerator = &ThumbnailGenerator::instance();
+    m_thumbnailGenerator->initialize();
+
     setupUI();
     setupActions();
     setupMenuBar();
@@ -220,7 +231,105 @@ void FileManagerWindow::setupUI() {
     connect(m_tabWidget, &QTabWidget::tabCloseRequested, this, &FileManagerWindow::closeTab);
     connect(m_tabWidget, &QTabWidget::currentChanged, this, &FileManagerWindow::currentTabChanged);
 
+    // Create image preview panel (docked on right side)
+    createImagePreviewPanel();
+
     setCentralWidget(m_tabWidget);
+}
+
+void FileManagerWindow::createImagePreviewPanel() {
+    m_imagePreviewPanel = new QWidget(this);
+    m_imagePreviewPanel->setWindowTitle("Image Preview");
+    m_imagePreviewPanel->setMinimumWidth(300);
+    
+    auto* layout = new QVBoxLayout(m_imagePreviewPanel);
+    
+    // Image preview label
+    m_imagePreviewLabel = new QLabel();
+    m_imagePreviewLabel->setAlignment(Qt::AlignCenter);
+    m_imagePreviewLabel->setMinimumSize(256, 256);
+    m_imagePreviewLabel->setStyleSheet("QLabel { background-color: #1a1a1a; border: 1px solid #444; }");
+    
+    auto* scrollArea = new QScrollArea();
+    scrollArea->setWidget(m_imagePreviewLabel);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setAlignment(Qt::AlignCenter);
+    
+    layout->addWidget(scrollArea);
+    
+    // Image info label
+    m_imageInfoLabel = new QLabel("No image selected");
+    m_imageInfoLabel->setAlignment(Qt::AlignCenter);
+    m_imageInfoLabel->setStyleSheet("QLabel { color: #888; padding: 5px; }");
+    layout->addWidget(m_imageInfoLabel);
+    
+    m_imagePreviewPanel->setLayout(layout);
+    m_imagePreviewPanel->hide();  // Hidden by default
+}
+
+void FileManagerWindow::toggleImagePreview() {
+    m_showImagePreview = !m_showImagePreview;
+    if (m_showImagePreview) {
+        m_imagePreviewPanel->show();
+        // Update preview with current selection
+        QListView* fileList = qobject_cast<QListView*>(m_tabWidget->currentWidget());
+        if (fileList && fileList->currentIndex().isValid()) {
+            updateImagePreview(m_fileModel->filePath(fileList->currentIndex()));
+        }
+    } else {
+        m_imagePreviewPanel->hide();
+    }
+}
+
+void FileManagerWindow::updateImagePreview(const QString& filePath) {
+    if (!m_showImagePreview || filePath.isEmpty()) {
+        m_imagePreviewLabel->clear();
+        m_imageInfoLabel->setText("No image selected");
+        return;
+    }
+    
+    QFileInfo fi(filePath);
+    if (!fi.exists() || !fi.isFile()) {
+        m_imagePreviewLabel->clear();
+        m_imageInfoLabel->setText("File not found");
+        return;
+    }
+    
+    // Check if it's an image file using QMimeDatabase
+    QMimeDatabase mimeDb;
+    QMimeType mimeType = mimeDb.mimeTypeForFile(filePath);
+    if (!mimeType.name().startsWith("image/")) {
+        m_imagePreviewLabel->clear();
+        m_imageInfoLabel->setText("Not an image file");
+        return;
+    }
+    
+    // Generate thumbnail
+    QImage thumbnail = m_thumbnailGenerator->generateThumbnail(filePath, ThumbnailSize::Large);
+    if (!thumbnail.isNull()) {
+        m_imagePreviewLabel->setPixmap(QPixmap::fromImage(thumbnail));
+        m_imageInfoLabel->setText(QString("%1\n%2 x %3\n%4")
+            .arg(fi.fileName())
+            .arg(thumbnail.width())
+            .arg(thumbnail.height())
+            .arg(formatFileSize(fi.size())));
+    } else {
+        m_imagePreviewLabel->clear();
+        m_imageInfoLabel->setText("Failed to load image");
+    }
+}
+
+QString FileManagerWindow::formatFileSize(qint64 size) {
+    QStringList units = {"B", "KB", "MB", "GB", "TB"};
+    int unitIndex = 0;
+    double sizeDouble = size;
+    
+    while (sizeDouble >= 1024.0 && unitIndex < units.size() - 1) {
+        sizeDouble /= 1024.0;
+        unitIndex++;
+    }
+    
+    return QString::number(sizeDouble, 'f', unitIndex > 0 ? 1 : 0) + " " + units[unitIndex];
 }
 
 void FileManagerWindow::setupActions() {
@@ -427,6 +536,15 @@ void FileManagerWindow::setupMenuBar() {
     m_groupMenu->addAction(m_groupByTypeAction);
     m_groupMenu->addAction(m_groupByDateAction);
     m_groupMenu->addAction(m_groupBySizeAction);
+
+    m_viewMenu->addSeparator();
+    
+    // Image preview action
+    QAction* imagePreviewAction = new QAction("Image Preview", this);
+    imagePreviewAction->setCheckable(true);
+    imagePreviewAction->setShortcut(Qt::Key_F3);
+    connect(imagePreviewAction, &QAction::toggled, this, &FileManagerWindow::toggleImagePreview);
+    m_viewMenu->addAction(imagePreviewAction);
     
     m_viewMenu->addSeparator();
     m_viewMenu->addAction(m_refreshAction);
@@ -830,6 +948,12 @@ void FileManagerWindow::onFileDoubleClicked(const QModelIndex& index) {
 
 void FileManagerWindow::onFileClicked(const QModelIndex& index) {
     updateStatusBar();
+    
+    // Update image preview if enabled
+    if (m_showImagePreview && index.isValid()) {
+        QString path = m_fileModel->filePath(index);
+        updateImagePreview(path);
+    }
 }
 
 void FileManagerWindow::updateLocationBar(const QModelIndex& index) {
