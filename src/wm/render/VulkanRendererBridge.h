@@ -93,6 +93,14 @@ uint32_t vulkan_renderer_get_target_frame_rate(VulkanRenderer* renderer);
 void vulkan_renderer_set_max_frame_latency(VulkanRenderer* renderer, uint32_t latency);
 uint32_t vulkan_renderer_get_max_frame_latency(VulkanRenderer* renderer);
 
+// HDR support
+// Note: surface is a VkSurfaceKHR handle (cast to void*)
+bool vulkan_renderer_is_hdr_capable(VulkanRenderer* renderer, void* surface);
+void vulkan_renderer_set_hdr_enabled(VulkanRenderer* renderer, void* surface, bool enabled);
+bool vulkan_renderer_is_hdr_enabled(VulkanRenderer* renderer);
+void vulkan_renderer_set_hdr_exposure(VulkanRenderer* renderer, float exposure);
+void vulkan_renderer_set_hdr_tonemap(VulkanRenderer* renderer, float peakNits, float gamma);
+
 // Frame timing statistics
 typedef struct {
     float currentFPS;

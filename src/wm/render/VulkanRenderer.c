@@ -70,6 +70,11 @@ struct VulkanRendererInternal {
     VkDescriptorPool descriptorPool;
     VkSampler textureSampler;
 
+    // HDR support
+    bool hdrEnabled;
+    float hdrPeakLuminance;  // nits
+    float hdrMinLuminance;   // nits
+
     // GLES2 rendering context (for actual drawing)
     EGLDisplay eglDisplay;
     EGLContext eglContext;
@@ -81,7 +86,78 @@ struct VulkanRendererInternal {
     GLint texCoordLoc;
     GLint textureLoc;
     bool gles2Initialized;
+
+    // HDR tone mapping
+    float exposure;  // HDR exposure value
+    float gamma;     // Gamma for tone mapping
 };
+
+// HDR capabilities query
+bool vulkan_renderer_is_hdr_capable(VulkanRenderer* renderer_ptr, void* surface) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    if (!renderer || !renderer->physicalDevice || !surface) return false;
+
+    VkSurfaceKHR vkSurface = (VkSurfaceKHR)(uintptr_t)surface;
+
+    uint32_t formatCount;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(renderer->physicalDevice,
+                                          vkSurface, &formatCount, NULL);
+
+    VkSurfaceFormatKHR* formats = (VkSurfaceFormatKHR*)malloc(formatCount * sizeof(VkSurfaceFormatKHR));
+    vkGetPhysicalDeviceSurfaceFormatsKHR(renderer->physicalDevice,
+                                          vkSurface, &formatCount, formats);
+
+    bool hdrCapable = false;
+    for (uint32_t i = 0; i < formatCount && !hdrCapable; i++) {
+        if (formats[i].colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT ||
+            formats[i].colorSpace == VK_COLOR_SPACE_HDR10_HLG_EXT) {
+            hdrCapable = true;
+        }
+    }
+
+    free(formats);
+    return hdrCapable;
+}
+
+void vulkan_renderer_set_hdr_enabled(VulkanRenderer* renderer_ptr, void* surface, bool enabled) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    if (!renderer) return;
+
+    if (enabled && !vulkan_renderer_is_hdr_capable(renderer_ptr, surface)) {
+        LOG_WARN("[Vulkan] HDR requested but display is not HDR-capable");
+        renderer->hdrEnabled = false;
+        return;
+    }
+
+    renderer->hdrEnabled = enabled;
+    renderer->config.enableHDR = enabled;
+
+    // Recreate swapchain with new settings
+    vulkan_renderer_resize(renderer_ptr, renderer->swapchainExtent.width,
+                           renderer->swapchainExtent.height);
+
+    LOG_INFO("[Vulkan] HDR %s", enabled ? "enabled" : "disabled");
+}
+
+bool vulkan_renderer_is_hdr_enabled(VulkanRenderer* renderer_ptr) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    return renderer ? renderer->hdrEnabled : false;
+}
+
+void vulkan_renderer_set_hdr_exposure(VulkanRenderer* renderer_ptr, float exposure) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    if (!renderer) return;
+    renderer->exposure = exposure;
+    LOG_DEBUG("[Vulkan] HDR exposure set to %.2f", exposure);
+}
+
+void vulkan_renderer_set_hdr_tonemap(VulkanRenderer* renderer_ptr, float peakNits, float gamma) {
+    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    if (!renderer) return;
+    renderer->hdrPeakLuminance = peakNits;
+    renderer->gamma = gamma;
+    LOG_DEBUG("[Vulkan] HDR tone mapping: peak=%.0f nits, gamma=%.2f", peakNits, gamma);
+}
 
 struct VulkanTextureInternal {
     VkImage image;
@@ -475,43 +551,94 @@ static VkResult create_logical_device(struct VulkanRendererInternal* renderer) {
     return VK_SUCCESS;
 }
 
-// Create swapchain
+// Create swapchain with HDR support
+// Note: For headless/offscreen rendering, HDR is not applicable
+// This function creates a standard SDR swapchain
 static VkResult create_swapchain(struct VulkanRendererInternal* renderer,
+                                 VkSurfaceKHR surface,
                                  uint32_t width, uint32_t height) {
     VkExtent2D extent = {width, height};
     uint32_t imageCount = renderer->config.desiredImageCount;
     if (imageCount < 2) imageCount = 2;
     if (imageCount > 8) imageCount = 8;
-    
+
+    // For headless rendering (no surface), use standard SDR format
+    VkFormat selectedFormat = VK_FORMAT_B8G8R8A8_SRGB;
+    VkColorSpaceKHR selectedColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+
+    if (surface != VK_NULL_HANDLE && renderer->config.enableHDR) {
+        // Query surface formats for HDR capability
+        uint32_t formatCount;
+        vkGetPhysicalDeviceSurfaceFormatsKHR(renderer->physicalDevice,
+                                              surface, &formatCount, NULL);
+
+        VkSurfaceFormatKHR* formats = (VkSurfaceFormatKHR*)malloc(formatCount * sizeof(VkSurfaceFormatKHR));
+        vkGetPhysicalDeviceSurfaceFormatsKHR(renderer->physicalDevice,
+                                              surface, &formatCount, formats);
+
+        // Try to find HDR10 PQ (BT.2020) format
+        for (uint32_t i = 0; i < formatCount; i++) {
+            if (formats[i].colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT ||
+                formats[i].colorSpace == VK_COLOR_SPACE_HDR10_HLG_EXT) {
+                selectedFormat = formats[i].format;
+                selectedColorSpace = formats[i].colorSpace;
+                renderer->hdrEnabled = true;
+                LOG_INFO("[Vulkan] HDR10 format found: format=%d, colorSpace=%d",
+                         selectedFormat, selectedColorSpace);
+                break;
+            }
+        }
+
+        // Fallback to 10-bit SDR if HDR not available
+        if (!renderer->hdrEnabled) {
+            for (uint32_t i = 0; i < formatCount; i++) {
+                if (formats[i].format == VK_FORMAT_A2B10G10R10_UNORM_PACK32) {
+                    selectedFormat = formats[i].format;
+                    selectedColorSpace = formats[i].colorSpace;
+                    LOG_INFO("[Vulkan] 10-bit SDR format found");
+                    break;
+                }
+            }
+        }
+
+        if (!renderer->hdrEnabled) {
+            LOG_DEBUG("[Vulkan] Using SDR format (HDR not supported or not requested)");
+        }
+
+        free(formats);
+    }
+
     VkSwapchainCreateInfoKHR createInfo = {0};
     createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     createInfo.minImageCount = imageCount;
-    createInfo.imageFormat = VK_FORMAT_B8G8R8A8_SRGB;
-    createInfo.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    createInfo.imageFormat = selectedFormat;
+    createInfo.imageColorSpace = selectedColorSpace;
     createInfo.imageExtent = extent;
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     createInfo.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    createInfo.presentMode = renderer->config.enableVSync ? 
+    createInfo.presentMode = renderer->config.enableVSync ?
         VK_PRESENT_MODE_FIFO_KHR : VK_PRESENT_MODE_MAILBOX_KHR;
     createInfo.clipped = VK_TRUE;
-    
+
     VkResult result = vkCreateSwapchainKHR(renderer->device, &createInfo, NULL, &renderer->swapchain);
     if (result != VK_SUCCESS) {
         LOG_ERROR("[Vulkan] Failed to create swapchain: %d", result);
         return result;
     }
-    
+
     renderer->swapchainFormat = createInfo.imageFormat;
     renderer->swapchainExtent = extent;
-    
+
     vkGetSwapchainImagesKHR(renderer->device, renderer->swapchain, &imageCount, NULL);
     renderer->swapchainImages = (VkImage*)malloc(imageCount * sizeof(VkImage));
     vkGetSwapchainImagesKHR(renderer->device, renderer->swapchain, &imageCount, renderer->swapchainImages);
     renderer->swapchainImageCount = imageCount;
-    
-    LOG_INFO("[Vulkan] Swapchain created: %dx%d, %d images", extent.width, extent.height, imageCount);
+
+    LOG_INFO("[Vulkan] Swapchain created: %dx%d, %d images, %s",
+             extent.width, extent.height, imageCount,
+             renderer->hdrEnabled ? "HDR10" : "SDR");
     return VK_SUCCESS;
 }
 
@@ -912,7 +1039,14 @@ VulkanRenderer* vulkan_renderer_create(const VulkanRendererConfig* config) {
     renderer->clearColor[1] = 0.0f;
     renderer->clearColor[2] = 0.0f;
     renderer->clearColor[3] = 1.0f;
-    
+
+    // Initialize HDR fields
+    renderer->hdrEnabled = false;
+    renderer->hdrPeakLuminance = 1000.0f;  // Default 1000 nits
+    renderer->hdrMinLuminance = 0.005f;    // Default 0.005 nits
+    renderer->exposure = 1.0f;
+    renderer->gamma = 2.2f;
+
     LOG_INFO("[Vulkan] Creating renderer...");
     
     VkResult result;
@@ -929,7 +1063,7 @@ VulkanRenderer* vulkan_renderer_create(const VulkanRendererConfig* config) {
     result = create_logical_device(renderer);
     if (result != VK_SUCCESS) { vulkan_renderer_destroy((VulkanRenderer*)renderer); return NULL; }
     
-    result = create_swapchain(renderer, 1920, 1080);
+    result = create_swapchain(renderer, VK_NULL_HANDLE, 1920, 1080);
     if (result != VK_SUCCESS) { vulkan_renderer_destroy((VulkanRenderer*)renderer); return NULL; }
     
     result = create_image_views(renderer);
@@ -1170,8 +1304,8 @@ void vulkan_renderer_resize(VulkanRenderer* renderer_ptr, uint32_t width, uint32
     free(renderer->swapchainImageViews);
     free(renderer->framebuffers);
     free(renderer->swapchainImages);
-    
-    create_swapchain(renderer, width, height);
+
+    create_swapchain(renderer, VK_NULL_HANDLE, width, height);
     create_image_views(renderer);
     create_framebuffers(renderer);
     
