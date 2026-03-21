@@ -132,7 +132,8 @@ bool DesktopPortal::registerPortalInterface() {
     GDBusInterfaceVTable vtable = {
         onPortalMethodCall,
         nullptr,  // get_property
-        nullptr   // set_property
+        nullptr,  // set_property
+        {nullptr} // padding
     };
 
     GDBusNodeInfo* introspectionData = 

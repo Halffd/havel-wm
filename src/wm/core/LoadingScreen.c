@@ -203,14 +203,6 @@ void loading_screen_set_config(struct LoadingScreenConfig* config) {
     memcpy(&g_loading_screen.config, config, sizeof(struct LoadingScreenConfig));
 }
 
-// Timer callback to auto-hide
-static int loading_screen_timer_callback(void* data) {
-    (void)data;
-    loading_screen_hide();
-    g_loading_screen.timer_source = NULL;
-    return 0;
-}
-
 void loading_screen_start_timer(void) {
     if (g_loading_screen.config.timeout_ms <= 0) {
         return;

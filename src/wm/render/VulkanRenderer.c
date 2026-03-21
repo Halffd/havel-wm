@@ -80,7 +80,6 @@ struct VulkanTextureInternal {
 // Forward declarations
 static void update_frame_timing(struct VulkanRendererInternal* renderer);
 static VkResult create_graphics_pipeline(struct VulkanRendererInternal* renderer);
-static void destroy_graphics_pipeline(struct VulkanRendererInternal* renderer);
 
 // For now, we'll use the existing render pass approach
 // Full shader pipeline requires external shader compilation
@@ -978,10 +977,10 @@ void vulkan_renderer_draw_quad(VulkanRenderer* renderer_ptr,
 
 VulkanTexture* vulkan_renderer_create_texture_from_buffer(VulkanRenderer* renderer_ptr,
                                                           void* wlr_buffer) {
-    struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
+    (void)renderer_ptr;
     (void)wlr_buffer;
-    
-    struct VulkanTextureInternal* texture = 
+
+    struct VulkanTextureInternal* texture =
         (struct VulkanTextureInternal*)calloc(1, sizeof(struct VulkanTextureInternal));
     if (texture) {
         texture->width = 1920;
@@ -995,12 +994,13 @@ void vulkan_renderer_destroy_texture(VulkanRenderer* renderer_ptr, VulkanTexture
     struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
     struct VulkanTextureInternal* texture = (struct VulkanTextureInternal*)texture_ptr;
     if (!renderer || !texture) return;
-    
+
     if (renderer->device != VK_NULL_HANDLE) {
         if (texture->view) vkDestroyImageView(renderer->device, texture->view, NULL);
         if (texture->sampler) vkDestroySampler(renderer->device, texture->sampler, NULL);
         if (texture->memory) vkFreeMemory(renderer->device, texture->memory, NULL);
     }
+    // texture members accessed above, safe to free now
     free(texture);
 }
 

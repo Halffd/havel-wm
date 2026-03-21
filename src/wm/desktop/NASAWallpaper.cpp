@@ -45,14 +45,6 @@ static size_t writeCallback(void* contents, size_t size, size_t nmemb, void* use
     return size * nmemb;
 }
 
-static size_t headerCallback(char* buffer, size_t size, size_t nitems, void* userp) {
-    // Could parse headers for content-length
-    (void)buffer;
-    (void)nitems;
-    (void)userp;
-    return size * nitems;
-}
-
 // ============================================================================
 // NASAWallpaperManager Implementation
 // ============================================================================

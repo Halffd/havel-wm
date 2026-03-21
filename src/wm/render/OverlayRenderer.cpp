@@ -381,12 +381,11 @@ void OverlayRenderer::drawCircle(float cx, float cy, float radius, const Color& 
         float dx = x2 - x1;
         float dy = y2 - y1;
         float dist = std::sqrt(dx * dx + dy * dy);
-        float angle = std::atan2(dy, dx);
-        
+
         float lineWidth = 2.0f;
         float rectW = dist;
         float rectH = lineWidth;
-        
+
         FloatRect rect(x1, y1 - lineWidth/2, rectW, rectH);
         
         // Rotate and draw

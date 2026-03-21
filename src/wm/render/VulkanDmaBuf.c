@@ -65,10 +65,6 @@ static VkFormat drm_format_to_vulkan(uint32_t drm_format) {
 }
 
 // Get Vulkan instance/device from renderer (opaque API)
-static VkInstance get_instance(VulkanRenderer* renderer) {
-    return (VkInstance)vulkan_renderer_get_instance(renderer);
-}
-
 static VkDevice get_device(VulkanRenderer* renderer) {
     return (VkDevice)vulkan_renderer_get_device(renderer);
 }

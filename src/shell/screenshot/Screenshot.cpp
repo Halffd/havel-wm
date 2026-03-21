@@ -553,22 +553,22 @@ void ScreenshotWindow::setupActions() {
 
 void ScreenshotWindow::setupMenuBar() {
     m_menuBar = menuBar();
-    
+
     m_fileMenu = m_menuBar->addMenu("&File");
-    m_fileMenu->addAction("&Save", this, &ScreenshotWindow::onSave, QKeySequence::Save);
-    m_fileMenu->addAction("Save &As...", this, &ScreenshotWindow::onSaveAs, QKeySequence::SaveAs);
+    m_fileMenu->addAction("&Save", QKeySequence::Save, this, &ScreenshotWindow::onSave);
+    m_fileMenu->addAction("Save &As...", QKeySequence::SaveAs, this, &ScreenshotWindow::onSaveAs);
     m_fileMenu->addSeparator();
-    m_fileMenu->addAction("E&xit", this, &QMainWindow::close, QKeySequence::Quit);
-    
+    m_fileMenu->addAction("E&xit", QKeySequence::Quit, this, &QMainWindow::close);
+
     m_editMenu = m_menuBar->addMenu("&Edit");
-    m_editMenu->addAction("&Copy", this, &ScreenshotWindow::onCopy, QKeySequence::Copy);
+    m_editMenu->addAction("&Copy", QKeySequence::Copy, this, &ScreenshotWindow::onCopy);
     m_editMenu->addAction("&Edit...", this, &ScreenshotWindow::onOpenEditor);
-    
+
     m_viewMenu = m_menuBar->addMenu("&View");
     m_viewMenu->addAction("Show in &System Tray", [this]() {
         m_trayIcon->show();
     });
-    
+
     m_helpMenu = m_menuBar->addMenu("&Help");
     m_helpMenu->addAction("&About", this, &ScreenshotWindow::onAbout);
     m_helpMenu->addAction("&Keyboard Shortcuts", this, &ScreenshotWindow::onShortcuts);

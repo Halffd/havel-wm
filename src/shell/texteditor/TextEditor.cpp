@@ -241,35 +241,35 @@ protected:
 private:
     void setupMenu() {
         QMenu* fileMenu = menuBar()->addMenu("&File");
-        fileMenu->addAction("New", this, &TextEditor::newFile, QKeySequence::New);
-        fileMenu->addAction("Open...", this, &TextEditor::openFile, QKeySequence::Open);
+        fileMenu->addAction("New", QKeySequence::New, this, &TextEditor::newFile);
+        fileMenu->addAction("Open...", QKeySequence::Open, this, &TextEditor::openFile);
         fileMenu->addSeparator();
-        fileMenu->addAction("Save", this, &TextEditor::save, QKeySequence::Save);
-        fileMenu->addAction("Save As...", this, &TextEditor::saveAs, QKeySequence::SaveAs);
+        fileMenu->addAction("Save", QKeySequence::Save, this, &TextEditor::save);
+        fileMenu->addAction("Save As...", QKeySequence::SaveAs, this, &TextEditor::saveAs);
         fileMenu->addSeparator();
-        fileMenu->addAction("Print...", this, &TextEditor::print, QKeySequence::Print);
+        fileMenu->addAction("Print...", QKeySequence::Print, this, &TextEditor::print);
         fileMenu->addSeparator();
-        fileMenu->addAction("Exit", this, &QMainWindow::close, QKeySequence::Quit);
-        
+        fileMenu->addAction("Exit", QKeySequence::Quit, this, &QMainWindow::close);
+
         QMenu* editMenu = menuBar()->addMenu("&Edit");
-        editMenu->addAction("Undo", this, &TextEditor::undo, QKeySequence::Undo);
-        editMenu->addAction("Redo", this, &TextEditor::redo, QKeySequence::Redo);
+        editMenu->addAction("Undo", QKeySequence::Undo, this, &TextEditor::undo);
+        editMenu->addAction("Redo", QKeySequence::Redo, this, &TextEditor::redo);
         editMenu->addSeparator();
-        editMenu->addAction("Cut", this, &TextEditor::cut, QKeySequence::Cut);
-        editMenu->addAction("Copy", this, &TextEditor::copy, QKeySequence::Copy);
-        editMenu->addAction("Paste", this, &TextEditor::paste, QKeySequence::Paste);
+        editMenu->addAction("Cut", QKeySequence::Cut, this, &TextEditor::cut);
+        editMenu->addAction("Copy", QKeySequence::Copy, this, &TextEditor::copy);
+        editMenu->addAction("Paste", QKeySequence::Paste, this, &TextEditor::paste);
         editMenu->addSeparator();
-        editMenu->addAction("Select All", this, &TextEditor::selectAll, QKeySequence::SelectAll);
+        editMenu->addAction("Select All", QKeySequence::SelectAll, this, &TextEditor::selectAll);
         editMenu->addSeparator();
-        editMenu->addAction("Find...", this, &TextEditor::find, QKeySequence::Find);
-        editMenu->addAction("Go to Line...", this, &TextEditor::goToLine, Qt::CTRL | Qt::Key_L);
-        
+        editMenu->addAction("Find...", QKeySequence::Find, this, &TextEditor::find);
+        editMenu->addAction("Go to Line...", QKeySequence(Qt::CTRL | Qt::Key_L), this, &TextEditor::goToLine);
+
         QMenu* viewMenu = menuBar()->addMenu("&View");
         viewMenu->addAction("Change Font...", this, &TextEditor::changeFont);
-        viewMenu->addAction("Zoom In", this, &TextEditor::zoomIn, QKeySequence::ZoomIn);
-        viewMenu->addAction("Zoom Out", this, &TextEditor::zoomOut, QKeySequence::ZoomOut);
+        viewMenu->addAction("Zoom In", QKeySequence::ZoomIn, this, &TextEditor::zoomIn);
+        viewMenu->addAction("Zoom Out", QKeySequence::ZoomOut, this, &TextEditor::zoomOut);
         viewMenu->addAction("Word Wrap", this, &TextEditor::toggleWordWrap);
-        
+
         QMenu* helpMenu = menuBar()->addMenu("&Help");
         helpMenu->addAction("About", this, &TextEditor::about);
     }

@@ -211,10 +211,10 @@ static bool render_scene_node(
         // Get texture dimensions
         uint32_t tex_width = wlr_texture_get_width(texture);
         uint32_t tex_height = wlr_texture_get_height(texture);
-        
+
         // Use destination size from scene buffer
-        int draw_width = scene_buffer->dst_width > 0 ? scene_buffer->dst_width : tex_width;
-        int draw_height = scene_buffer->dst_height > 0 ? scene_buffer->dst_height : tex_height;
+        int draw_width = scene_buffer->dst_width > 0 ? scene_buffer->dst_width : (int)tex_width;
+        int draw_height = scene_buffer->dst_height > 0 ? scene_buffer->dst_height : (int)tex_height;
         
         // Bind and draw texture
         vulkan_renderer_bind_texture(scene_renderer->vulkan_renderer, texture->vulkan_texture);

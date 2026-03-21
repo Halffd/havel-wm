@@ -266,7 +266,8 @@ bool compositor_renderer_render_output(CompositorRenderer* renderer,
             // Render each damaged region
             for (uint32_t i = 0; i < damage_count; i++) {
                 const DamageRegion* region = &damage_regions[i];
-                
+                (void)region;  // Used for future scissor optimization
+
                 // Set scissor to damage region
                 // (would use vkCmdSetScissor in Vulkan)
                 

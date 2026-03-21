@@ -546,7 +546,7 @@ void InputDeviceManager::updateDeviceList() {
             deviceCount++;
             
             // Build device path
-            char devicePath[264];
+            char devicePath[512];
             snprintf(devicePath, sizeof(devicePath), "/dev/input/%s", entry->d_name);
             
             // Check if device is already tracked

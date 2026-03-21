@@ -612,8 +612,6 @@ void ComboManager::processJoystickAxisEvent(int joyId, int axis, float value) {
 }
 
 void ComboManager::checkCombos() {
-    auto& state = m_inputState;
-    
     for (auto& combo : m_combos) {
         if (!combo.enabled) continue;
         

@@ -1,5 +1,5 @@
 // Enable unstable wlroots features (layer-shell, etc.)
-#define WLR_USE_UNSTABLE
+// Note: WLR_USE_UNSTABLE is defined in CMakeLists.txt
 
 #include <wm/wlr_bridge.h>
 #include <Logger.h>
