@@ -81,16 +81,38 @@ WlrBindResult wlr_buffer_import_as_vulkan(
     }
     
     // Fallback: Try SHM (shared memory) buffer
-    // In production, would map SHM and upload to Vulkan texture
     LOG_DEBUG("[WlrBinding] Buffer is not DMA-BUF, trying SHM fallback");
+
+    // Get SHM attributes (includes width, height, stride)
+    struct wlr_shm_attributes shm_attribs;
+    if (!wlr_buffer_get_shm(buffer, &shm_attribs)) {
+        LOG_WARN("[WlrBinding] Buffer is not SHM");
+        free(texture);
+        return WLR_BIND_UNSUPPORTED_FORMAT;
+    }
     
-    // For now, create placeholder texture
-    texture->vulkan_texture = vulkan_renderer_create_texture_from_buffer(
-        vulkan_renderer, buffer);
+    // Access SHM buffer data
+    void* data = NULL;
+    uint32_t format = 0;
+    size_t stride = 0;
+    
+    if (!wlr_buffer_begin_data_ptr_access(buffer, 0, &data, &format, &stride)) {
+        LOG_WARN("[WlrBinding] Failed to access SHM buffer data");
+        free(texture);
+        return WLR_BIND_UNSUPPORTED_FORMAT;
+    }
+    
+    // Create GLES2 texture with actual buffer content
+    texture->vulkan_texture = vulkan_renderer_create_texture_from_buffer_with_data(
+        vulkan_renderer, data, shm_attribs.width, shm_attribs.height);
+    
+    wlr_buffer_end_data_ptr_access(buffer);
     
     if (texture->vulkan_texture) {
-        texture->width = 1920;  // Would query from buffer
-        texture->height = 1080;
+        texture->width = shm_attribs.width;
+        texture->height = shm_attribs.height;
+        texture->buffer = buffer;
+        texture->owns_buffer = false;
         *out_texture = texture;
         return WLR_BIND_SUCCESS;
     }

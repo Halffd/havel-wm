@@ -1152,41 +1152,49 @@ void vulkan_renderer_draw_quad(VulkanRenderer* renderer_ptr,
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
 }
 
-VulkanTexture* vulkan_renderer_create_texture_from_buffer(VulkanRenderer* renderer_ptr,
-                                                          void* wlr_buffer) {
+VulkanTexture* vulkan_renderer_create_texture_from_buffer_with_data(
+    VulkanRenderer* renderer_ptr,
+    void* pixelData,
+    uint32_t width,
+    uint32_t height) {
+    
     struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
-    (void)wlr_buffer;
+    if (!renderer || !pixelData || width == 0 || height == 0) return NULL;
 
     struct VulkanTextureInternal* texture =
         (struct VulkanTextureInternal*)calloc(1, sizeof(struct VulkanTextureInternal));
     if (!texture) return NULL;
-    
-    texture->width = 1920;
-    texture->height = 1080;
+
+    texture->width = width;
+    texture->height = height;
     texture->format = VK_FORMAT_B8G8R8A8_SRGB;
-    
-    // Create GLES2 texture for actual rendering
-    if (renderer && renderer->gles2Initialized) {
+
+    // Create GLES2 texture with actual pixel data
+    if (renderer->gles2Initialized) {
         glGenTextures(1, &texture->gles2Texture);
         glBindTexture(GL_TEXTURE_2D, texture->gles2Texture);
-        
-        // Create a placeholder texture (solid color for now)
-        // In production, this would import the actual wlroots buffer
-        uint32_t placeholderColor[1920 * 1080];
-        for (int i = 0; i < 1920 * 1080; i++) {
-            // Blue-ish placeholder
-            placeholderColor[i] = 0xFF404080;
-        }
-        
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1920, 1080, 0, GL_RGBA, GL_UNSIGNED_BYTE, placeholderColor);
+
+        // Upload actual buffer content
+        // wlroots typically uses DRM_FORMAT_ARGB8888 or similar
+        // GLES2 doesn't support GL_BGRA, so we use GL_RGBA
+        // The pixel data may need swizzling in production
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixelData);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glBindTexture(GL_TEXTURE_2D, 0);
-        
-        LOG_DEBUG("[Vulkan] Created GLES2 placeholder texture %dx%d", texture->width, texture->height);
+
+        LOG_DEBUG("[Vulkan] Created GLES2 texture %dx%d with actual buffer content", width, height);
     }
-    
+
     return (VulkanTexture*)texture;
+}
+
+VulkanTexture* vulkan_renderer_create_texture_from_buffer(VulkanRenderer* renderer_ptr,
+                                                          void* wlr_buffer) {
+    // Deprecated - use vulkan_renderer_create_texture_from_buffer_with_data()
+    (void)renderer_ptr;
+    (void)wlr_buffer;
+    return NULL;
 }
 
 void vulkan_renderer_destroy_texture(VulkanRenderer* renderer_ptr, VulkanTexture* texture_ptr) {

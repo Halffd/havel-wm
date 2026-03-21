@@ -51,6 +51,14 @@ void vulkan_renderer_draw_quad(VulkanRenderer* renderer,
 // Texture operations (opaque handles)
 typedef struct VulkanTexture VulkanTexture;
 
+// Create texture from buffer with actual pixel data (for SHM fallback)
+VulkanTexture* vulkan_renderer_create_texture_from_buffer_with_data(
+    VulkanRenderer* renderer,
+    void* pixelData,
+    uint32_t width,
+    uint32_t height);
+
+// Create texture from buffer (deprecated, returns NULL)
 VulkanTexture* vulkan_renderer_create_texture_from_buffer(VulkanRenderer* renderer,
                                                           void* wlr_buffer);
 void vulkan_renderer_destroy_texture(VulkanRenderer* renderer, VulkanTexture* texture);
