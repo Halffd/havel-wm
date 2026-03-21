@@ -45,15 +45,18 @@ void KeybindingManager::unregisterKeybinding(const char* name) {
 
 bool KeybindingManager::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
     if (!pressed) return false;
-    
+
+    LOG_DEBUG("[Keybinding] Checking: keycode=%u modifiers=0x%x (bindings=%zu)", keycode, modifiers, m_bindings.size());
+
     for (auto& binding : m_bindings) {
+        LOG_DEBUG("[Keybinding]   vs %s (mod=0x%x key=%u)", binding.name.c_str(), binding.modifiers, binding.keycode);
         if (binding.modifiers == modifiers && binding.keycode == keycode) {
-            LOG_DEBUG("[Keybinding] Triggered: %s", binding.name.c_str());
+            LOG_INFO("[Keybinding] TRIGGERED: %s", binding.name.c_str());
             binding.callback();
             return true;
         }
     }
-    
+
     return false;  // Not consumed
 }
 
