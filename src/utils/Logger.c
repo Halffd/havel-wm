@@ -8,7 +8,8 @@
 static Logger g_logger = {
     .file = NULL,
     .level = LOG_INFO,
-    .initialized = 0
+    .initialized = 0,
+    .categories = LOG_CAT_NONE  // No debug categories enabled by default
 };
 
 static const char* level_strings[] = {
@@ -107,8 +108,29 @@ void logger_log(LogLevel level, const char* format, ...) {
     }
     
     // Write to stderr with color
-    fprintf(stderr, "%s%s.%03ld [%s] %s%s\n", 
+    fprintf(stderr, "%s%s.%03ld [%s] %s%s\n",
             level_colors[level],
             timestamp, tv.tv_usec / 1000, level_strings[level], message, color_reset);
     fflush(stderr);
+}
+
+// Debug category functions
+void logger_set_categories(LogCategory categories) {
+    g_logger.categories = categories;
+    if (categories != LOG_CAT_NONE) {
+        logger_log(LOG_INFO, "Debug categories enabled: 0x%X", categories);
+    }
+}
+
+void logger_enable_category(LogCategory category) {
+    g_logger.categories |= category;
+    logger_log(LOG_INFO, "Debug category enabled: 0x%X", category);
+}
+
+void logger_disable_category(LogCategory category) {
+    g_logger.categories &= ~category;
+}
+
+bool logger_category_enabled(LogCategory category) {
+    return (g_logger.categories & category) != 0;
 }
