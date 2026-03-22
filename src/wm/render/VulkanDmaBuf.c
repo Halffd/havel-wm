@@ -289,14 +289,11 @@ DmaBufImportResult vulkan_import_wlr_buffer(
         return DMA_BUF_IMPORT_FAILED;
     }
     
-    // In a full implementation with wlroots, would:
-    // 1. Check if buffer has DMA-BUF attributes
-    // 2. Extract wlr_dmabuf_attributes
-    // 3. Call vulkan_import_dmabuf()
+    // wlroots buffer import requires DMA-BUF attribute extraction
+    // This integration is pending wlroots API updates
     
-    // For now, return unsupported
     (void)buffer;
-    LOG_DEBUG("[VulkanDmaBuf] Buffer import requires wlroots integration");
+    LOG_DEBUG("[VulkanDmaBuf] Buffer import requires wlroots DMA-BUF integration");
     return DMA_BUF_IMPORT_UNSUPPORTED_FORMAT;
 }
 

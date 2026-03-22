@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <wlr/types/wlr_output.h>
 
 // Internal texture structure
 struct VulkanSceneTexture {
@@ -213,10 +214,11 @@ bool vulkan_scene_compositor_render(
     // Placeholder: Set clear color based on config
     vulkan_renderer_set_clear_color(compositor->renderer,
                                     0.1f, 0.1f, 0.15f, 1.0f);
-    
-    // Draw placeholder quad (would use actual output dimensions)
-    vulkan_renderer_draw_quad(compositor->renderer, 0, 0, 1920, 1080);
-    
+
+    // Draw quad with actual output dimensions
+    vulkan_renderer_draw_quad(compositor->renderer, 0, 0,
+                              output->width, output->height);
+
     // End Vulkan frame
     if (!vulkan_renderer_end_frame(compositor->renderer)) {
         return false;
