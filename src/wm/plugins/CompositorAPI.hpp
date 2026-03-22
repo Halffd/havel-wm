@@ -76,7 +76,8 @@ public:
     
     // Rendering
     virtual void scheduleRedraw() = 0;
-    
+    virtual void* getOverlayRenderer() = 0;  // Returns OverlayRenderer* for plugin rendering
+
     // Output info
     virtual int getOutputWidth() = 0;
     virtual int getOutputHeight() = 0;

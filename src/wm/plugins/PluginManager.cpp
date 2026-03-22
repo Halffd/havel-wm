@@ -418,15 +418,15 @@ void PluginManager::setZoomForOutput(int output_index, float zoom) {
 
 void PluginManager::scheduleRedraw() {
     // Signal all outputs to redraw
-    // This would typically be done through the C bridge
+    // This is handled by the frame loop in the C layer
+}
+
+void* PluginManager::getOverlayRenderer() {
     if (m_server) {
         auto* server = static_cast<Server*>(m_server);
-        void* nativeHandle = server->nativeHandle();
-        if (nativeHandle) {
-            // The C layer handles output redraw signaling
-            // For now, this is handled by the frame loop
-        }
+        return server->getOverlayRenderer();
     }
+    return nullptr;
 }
 
 int PluginManager::getOutputWidth() {

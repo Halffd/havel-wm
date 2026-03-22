@@ -97,7 +97,7 @@ public:
         }
     }
     void* overlayLayer() const { return m_overlayLayer; }
-    OverlayRenderer* getOverlayRenderer() const { return m_overlayRenderer; }
+    OverlayRenderer* getOverlayRenderer() { return m_overlayRenderer; }
 
     // Text Input Manager (IME)
     void setTextInputManager(void* manager) { m_textInputManager = static_cast<TextInputManager*>(manager); }

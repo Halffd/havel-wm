@@ -3,6 +3,7 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <wm/render/OverlayRenderer.hpp>
 #include <cstdio>
 #include <vector>
 #include <cmath>
@@ -301,10 +302,40 @@ private:
         if (m_selectedIndex < 0 || m_selectedIndex >= static_cast<int>(m_slots.size())) {
             return;
         }
+
+        // Render highlight border around selected window
+        const ScaleSlot& slot = m_slots[m_selectedIndex];
         
-        // In production, would render highlight border around selected window
-        // For now, just log
-        printf("[ScalePlugin] Highlighting window %d\n", m_selectedIndex + 1);
+        // Get overlay renderer for drawing
+        OverlayRenderer* renderer = static_cast<OverlayRenderer*>(m_api->getOverlayRenderer());
+        if (!renderer) return;
+        
+        // Get view geometry for highlight
+        int viewX = m_api->getViewX(slot.view);
+        int viewY = m_api->getViewY(slot.view);
+        int viewW = m_api->getViewWidth(slot.view);
+        int viewH = m_api->getViewHeight(slot.view);
+        
+        // Draw highlight rectangle around selected window
+        float highlightWidth = viewW + 6.0f;
+        float highlightHeight = viewH + 6.0f;
+        float highlightX = viewX - 3.0f;
+        float highlightY = viewY - 3.0f;
+        
+        // Highlight border color (bright cyan)
+        Color highlightColor(0.0f, 1.0f, 1.0f, 1.0f);
+        
+        // Draw border using drawRect for each side
+        float borderWidth = 4.0f;
+        
+        // Top border
+        renderer->drawRect(highlightX, highlightY, highlightWidth, borderWidth, highlightColor);
+        // Bottom border
+        renderer->drawRect(highlightX, highlightY + highlightHeight - borderWidth, highlightWidth, borderWidth, highlightColor);
+        // Left border
+        renderer->drawRect(highlightX, highlightY, borderWidth, highlightHeight, highlightColor);
+        // Right border
+        renderer->drawRect(highlightX + highlightWidth - borderWidth, highlightY, borderWidth, highlightHeight, highlightColor);
     }
 
     void calculateGrid() {

@@ -88,6 +88,7 @@ public:
     void setZoomForOutput(int output_index, float zoom) override;
 
     void scheduleRedraw() override;
+    void* getOverlayRenderer() override;
 
     int getOutputWidth() override;
     int getOutputHeight() override;
