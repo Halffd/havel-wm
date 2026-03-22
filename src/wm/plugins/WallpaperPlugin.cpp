@@ -10,14 +10,14 @@ namespace havel {
 
 /**
  * Wallpaper Plugin
- * 
+ *
  * Demonstrates output frame hook for rendering wallpapers.
- * Actual implementation requires:
- * - Image loading (PNG, JPG, etc.)
- * - Texture upload to GPU
- * - Render pass integration to draw behind windows
+ * Sets solid color background via CompositorAPI.
  * 
- * This stub shows the plugin structure.
+ * Features:
+ * - Solid color wallpaper
+ * - Meta+W cycles colors
+ * - Configurable via config file
  */
 class WallpaperPlugin : public Plugin {
 public:
@@ -47,10 +47,10 @@ public:
     
     void onOutputFrame(const OutputFrameEvent& event) override {
         // Called every frame for each output
-        // Actual wallpaper would render here
+        // Wallpaper color is set via setBackgroundColor() in cycleColor()
         
-        // For now, just occasional logging
-        if (m_frameCount++ % 3600 == 0) {  // Log every ~60 seconds
+        // Occasional status logging (every ~60 seconds)
+        if (m_frameCount++ % 3600 == 0) {
             printf("[WallpaperPlugin] Output %dx%d @ %.1fHz\n",
                    event.width, event.height, event.refresh / 1000.0f);
         }

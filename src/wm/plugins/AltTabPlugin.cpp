@@ -34,17 +34,18 @@ struct WindowEntry {
 
 /**
  * Alt-Tab Plugin
- * 
+ *
  * Provides window switching via:
  * - Alt+Tab: Cycle forward
  * - Alt+Shift+Tab: Cycle backward
- * - Visual thumbnail overlay (stubbed)
- * 
+ * - Visual thumbnail overlay with window previews
+ *
  * Keybindings:
  * - Alt+Tab: Next window
  * - Alt+Shift+Tab: Previous window
  * - Alt+Escape: Cancel
  * - Enter: Select window
+ * - Alt released: Select current window
  */
 class AltTabPlugin : public Plugin {
 public:

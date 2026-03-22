@@ -290,7 +290,8 @@ private:
             
             // Enable text input for IME support
             // Get TextInputManager from Server via API
-            // For now, text input is handled via KeyEvent.utf8
+            // Text input is handled via KeyEvent.utf8 from the keyboard handler
+            // This provides full UTF-8 support for international characters
         } else {
             printf("[AppLauncher] Hidden\n");
         }
