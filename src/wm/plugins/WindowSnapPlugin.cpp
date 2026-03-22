@@ -89,6 +89,13 @@ private:
     View* m_draggingView;
     int m_lastCursorX, m_lastCursorY;
     
+    // Geometry tracking for restore
+    struct SavedGeometry {
+        int x, y, width, height;
+        bool saved = false;
+    };
+    SavedGeometry m_lastGeometry;
+
     // Snap positions
     enum SnapPosition {
         SNAP_NONE = 0,
@@ -134,39 +141,65 @@ private:
         return SNAP_NONE;
     }
     
+    void saveGeometry(View* view) {
+        if (!view) return;
+        m_lastGeometry.x = m_api->getViewX(view);
+        m_lastGeometry.y = m_api->getViewY(view);
+        m_lastGeometry.width = m_api->getViewWidth(view);
+        m_lastGeometry.height = m_api->getViewHeight(view);
+        m_lastGeometry.saved = true;
+    }
+
     void snapLeft(View* view) {
         int width = m_api->getOutputWidth();
         int height = m_api->getOutputHeight();
         int halfWidth = width / 2;
-        
+
+        // Save current geometry before snapping
+        saveGeometry(view);
+
         // REAL snap: set position AND size
         m_api->setViewGeometry(view, 0, 0, halfWidth, height);
         printf("[WindowSnap] Snapped to left half (%dx%d)\n", halfWidth, height);
     }
-    
+
     void snapRight(View* view) {
         int width = m_api->getOutputWidth();
         int height = m_api->getOutputHeight();
         int halfWidth = width / 2;
-        
+
+        // Save current geometry before snapping
+        saveGeometry(view);
+
         // REAL snap: set position AND size
         m_api->setViewGeometry(view, halfWidth, 0, halfWidth, height);
         printf("[WindowSnap] Snapped to right half (%dx%d at %d,0)\n", halfWidth, height, halfWidth);
     }
-    
+
     void snapMaximize(View* view) {
         int width = m_api->getOutputWidth();
         int height = m_api->getOutputHeight();
-        
+
+        // Save current geometry before maximizing
+        saveGeometry(view);
+
         // REAL maximize: full screen
         m_api->setViewGeometry(view, 0, 0, width, height);
         printf("[WindowSnap] Maximized (%dx%d)\n", width, height);
     }
-    
+
     void snapRestore(View* view) {
-        // Would restore to previous size/position
-        // For now, just log
-        printf("[WindowSnap] Restore (not implemented - needs geometry history)\n");
+        // Restore saved geometry if available
+        if (m_lastGeometry.saved && view) {
+            m_api->setViewGeometry(view, m_lastGeometry.x, m_lastGeometry.y,
+                                   m_lastGeometry.width, m_lastGeometry.height);
+            printf("[WindowSnap] Restored to %dx%d at %d,%d\n",
+                   m_lastGeometry.width, m_lastGeometry.height,
+                   m_lastGeometry.x, m_lastGeometry.y);
+            m_lastGeometry.saved = false;
+        } else {
+            printf("[WindowSnap] No geometry to restore\n");
+        }
     }
     
     void snapCorner(View* view, SnapPosition corner) {

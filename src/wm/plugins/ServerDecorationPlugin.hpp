@@ -17,6 +17,7 @@ struct WindowDecoration {
     std::string title;                 // Window title
     bool focused = false;              // Is window focused
     bool maximized = false;            // Is window maximized
+    bool minimized = false;            // Is window minimized
     bool fullscreen = false;           // Is window fullscreen
     int x = 0, y = 0;                  // Window position
     int width = 0, height = 0;         // Window size

@@ -3,6 +3,7 @@
 
 #include "ServerDecorationPlugin.hpp"
 #include <wm/plugins/CompositorAPI.hpp>
+#include <wm/bridge.h>
 #include <cstdio>
 #include <cmath>
 
@@ -83,7 +84,7 @@ void ServerDecorationPlugin::onMouseButton(uint32_t button, bool pressed, int mx
 
 void ServerDecorationPlugin::onViewMap(const ViewEvent& event) {
     if (!event.view) return;
-    
+
     WindowDecoration deco;
     deco.view = event.view;
     deco.title = event.title ? event.title : "Untitled";
@@ -94,8 +95,9 @@ void ServerDecorationPlugin::onViewMap(const ViewEvent& event) {
     deco.workspace = event.workspace;
     deco.focused = true;
     deco.maximized = false;
+    deco.minimized = false;
     deco.fullscreen = false;
-    
+
     m_decorations[event.view] = deco;
     printf("[ServerDecoration] Window mapped: %s (%p)\n", deco.title.c_str(), event.view);
     
@@ -128,27 +130,27 @@ void ServerDecorationPlugin::onViewDestroy(const ViewEvent& event) {
 
 void ServerDecorationPlugin::renderOverlay(void* rendererPtr) {
     if (!rendererPtr || m_decorations.empty()) return;
-    
+
     OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
     int screenWidth = renderer->getScreenWidth();
     int screenHeight = renderer->getScreenHeight();
-    
+
     (void)screenWidth;
     (void)screenHeight;
-    
-    // Render decorations for all windows
+
+    // Render decorations for all non-minimized, non-fullscreen windows
     for (auto& [viewPtr, deco] : m_decorations) {
-        if (deco.fullscreen) continue;  // No decorations for fullscreen windows
-        
+        if (deco.fullscreen || deco.minimized) continue;  // No decorations for fullscreen/minimized windows
+
         // Update focus state
         deco.focused = (viewPtr == m_api->getFocusedView());
-        
+
         // Render border
         renderBorder(renderer, deco);
-        
+
         // Render title bar
         renderTitleBar(renderer, deco);
-        
+
         // Render buttons
         renderButtons(renderer, deco);
     }
@@ -345,8 +347,17 @@ void ServerDecorationPlugin::handleMaximizeClick(void* view) {
 void ServerDecorationPlugin::handleMinimizeClick(void* view) {
     if (!view || !m_api) return;
     printf("[ServerDecoration] Minimize button clicked for window %p\n", view);
-    // Minimize would require compositor support
-    // For now, just log - future: hide view from scene graph
+    
+    // Minimize the view using the C bridge
+    havel_wlr_minimize_view(view);
+    
+    // Update decoration state
+    auto it = m_decorations.find(view);
+    if (it != m_decorations.end()) {
+        it->second.minimized = true;
+    }
+    
+    m_api->scheduleRedraw();
 }
 
 // Plugin factory
