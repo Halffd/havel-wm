@@ -11,6 +11,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/vt.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>
 
 #include <linux/input-event-codes.h>
 
@@ -1419,13 +1422,37 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
         bool alt_pressed = (alt_idx != XKB_MOD_INVALID) &&
                           (xkb_state_mod_index_is_active(keyboard->xkb_state, alt_idx, XKB_STATE_MODS_DEPRESSED) > 0);
 
-        // VT Switching (Ctrl+Alt+F1..F12) - MUST be handled before C++ layer
+        // VT Switching (Ctrl+Alt+F1..F12) - Direct chvt() call
         if (ctrl_pressed && alt_pressed && keysym >= XKB_KEY_F1 && keysym <= XKB_KEY_F12) {
             unsigned int vt = keysym - XKB_KEY_F1 + 1;
             LOG_INFO("[VT] Switching to VT%u", vt);
-            if (server->session) {
+            
+            // Method 1: Try direct chvt() command - works even without wlroots session
+            char vt_cmd[32];
+            snprintf(vt_cmd, sizeof(vt_cmd), "chvt %u", vt);
+            int ret = system(vt_cmd);
+            
+            if (ret != 0) {
+                // Method 2: Try ioctl VT_ACTIVATE directly
+                int console_fd = open("/dev/console", O_WRONLY);
+                if (console_fd >= 0) {
+                    ret = ioctl(console_fd, VT_ACTIVATE, vt);
+                    close(console_fd);
+                    if (ret == 0) {
+                        LOG_INFO("[VT] Switched via ioctl");
+                    }
+                }
+            }
+            
+            if (ret != 0 && server->session) {
+                // Method 3: Fallback to wlroots session VT switch
                 wlr_session_change_vt(server->session, vt);
             }
+            
+            if (ret != 0) {
+                LOG_WARN("[VT] All VT switch methods failed for VT%u", vt);
+            }
+            
             return;  // Consume the event, don't forward
         }
 
