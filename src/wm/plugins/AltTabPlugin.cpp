@@ -3,6 +3,7 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <wm/plugins/PluginConfig.hpp>
 #include <wm/render/OverlayRenderer.hpp>
 #include <wm/render/AppIconLoader.hpp>
 #include <wm/View.hpp>
@@ -70,8 +71,29 @@ public:
     }
     
     void loadConfig(const std::string& configPath) override {
-        (void)configPath;
-        printf("[AltTab] Config loaded\n");
+        // Load plugin-specific settings from PluginConfig
+        auto& config = PluginConfig::getInstance();
+        
+        // Customizable settings
+        m_thumbnailWidth = config.getIntValue("alt_tab", "thumbnailWidth", 500);
+        m_thumbnailHeight = config.getIntValue("alt_tab", "thumbnailHeight", 375);
+        m_maxVisibleWindows = config.getIntValue("alt_tab", "maxVisibleWindows", 5);
+        
+        // Colors (format: "R,G,B,A")
+        std::string bgColor = config.getValue("alt_tab", "backgroundColor", "0.0,0.0,0.0,0.7");
+        sscanf(bgColor.c_str(), "%f,%f,%f,%f", 
+               &m_bgColor[0], &m_bgColor[1], &m_bgColor[2], &m_bgColor[3]);
+        
+        std::string borderColor = config.getValue("alt_tab", "borderColor", "1.0,1.0,1.0,1.0");
+        sscanf(borderColor.c_str(), "%f,%f,%f,%f", 
+               &m_borderColor[0], &m_borderColor[1], &m_borderColor[2], &m_borderColor[3]);
+        
+        std::string textColor = config.getValue("alt_tab", "textColor", "1.0,1.0,1.0,1.0");
+        sscanf(textColor.c_str(), "%f,%f,%f,%f", 
+               &m_textColor[0], &m_textColor[1], &m_textColor[2], &m_textColor[3]);
+        
+        printf("[AltTab] Config loaded (thumbnail=%dx%d, max=%d)\n",
+               m_thumbnailWidth, m_thumbnailHeight, m_maxVisibleWindows);
     }
     
     bool onKey(const KeyEvent& event) override {
@@ -142,6 +164,14 @@ private:
     int m_selectedIndex;
     bool m_reverse;
     std::vector<WindowEntry> m_windows;
+    
+    // Customizable settings
+    int m_thumbnailWidth;
+    int m_thumbnailHeight;
+    int m_maxVisibleWindows;
+    float m_bgColor[4];      // RGBA
+    float m_borderColor[4];  // RGBA
+    float m_textColor[4];    // RGBA
     
     void show() {
         m_visible = true;
@@ -301,8 +331,8 @@ private:
         int screenWidth = renderer->getScreenWidth();
         int screenHeight = renderer->getScreenHeight();
 
-        // Draw semi-transparent background
-        renderer->drawRect(0, 0, screenWidth, screenHeight, Color(0.0f, 0.0f, 0.0f, 0.7f));
+        // Draw semi-transparent background (configurable)
+        renderer->drawRect(0, 0, screenWidth, screenHeight, Color(m_bgColor[0], m_bgColor[1], m_bgColor[2], m_bgColor[3]));
 
         if (m_windows.empty()) return;
 
@@ -351,8 +381,9 @@ private:
                                       1.0f);
             }
 
-            // Draw border
-            Color borderColor = isSelected ? Color(1.0f, 1.0f, 1.0f, 1.0f) : Color(0.5f, 0.5f, 0.5f, 0.5f);
+            // Draw border (configurable colors)
+            Color borderColor = isSelected ? Color(m_borderColor[0], m_borderColor[1], m_borderColor[2], m_borderColor[3]) 
+                                           : Color(m_borderColor[0]*0.5f, m_borderColor[1]*0.5f, m_borderColor[2]*0.5f, m_borderColor[3]*0.5f);
             renderer->drawBorder(FloatRect((float)x, (float)y, (float)thumbnailWidth, (float)thumbnailHeight), borderColor, isSelected ? 3.0f : 2.0f);
 
             // Draw app icon at bottom-right corner (small, 32x32)
@@ -365,13 +396,13 @@ private:
                                       1.0f);
             }
 
-            // Draw app name (larger font for bigger thumbnails)
+            // Draw app name (configurable text color)
             const std::string& name = entry.appId;
-            renderer->drawText(name.c_str(), (float)(x + 15), (float)(y + thumbnailHeight - 35), 20.0f, Color(1.0f, 1.0f, 1.0f, 1.0f));
-            
+            renderer->drawText(name.c_str(), (float)(x + 15), (float)(y + thumbnailHeight - 35), 20.0f, Color(m_textColor[0], m_textColor[1], m_textColor[2], m_textColor[3]));
+
             // Draw window title (smaller, below app name)
             if (!entry.title.empty() && entry.title != name) {
-                renderer->drawText(entry.title.c_str(), (float)(x + 15), (float)(y + thumbnailHeight - 15), 14.0f, Color(0.8f, 0.8f, 0.8f, 1.0f));
+                renderer->drawText(entry.title.c_str(), (float)(x + 15), (float)(y + thumbnailHeight - 15), 14.0f, Color(m_textColor[0]*0.8f, m_textColor[1]*0.8f, m_textColor[2]*0.8f, m_textColor[3]));
             }
         }
 

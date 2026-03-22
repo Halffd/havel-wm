@@ -1,75 +1,131 @@
 {
-  // Plugin Configuration for Havel WM
-  // Place this file at ~/.config/havel-wm/plugins.json
-
-  "blur": {
-    "enabled": false,
-    "blur_radius": 10,
-    "blur_passes": 3
-  },
-
   "scale": {
     "enabled": true,
-    "keybinding": "Meta+Shift+S"
+    "keybinding": "Meta+W",
+    "scaleFactor": 0.75,
+    "gridSpacing": 40,
+    "thumbnailWidth": 500,
+    "thumbnailHeight": 375,
+    "maxVisibleWindows": 5,
+    "highlightColor": "0.0,1.0,1.0,1.0"
   },
-
-  "wallpaper": {
-    "enabled": true,
-    "color": "#1a1a2e"
-  },
-
-  "notifications": {
-    "enabled": true,
-    "timeout": 5000,
-    "position": "top-right"
-  },
-
-  "custom_layouts": {
-    "enabled": false
-  },
-
-  "window_snap": {
-    "enabled": true,
-    "snap_distance": 20
-  },
-
-  "hot_corners": {
-    "enabled": true,
-    "delay": 250,
-    "top_left": "overview",
-    "top_right": "windows",
-    "bottom_left": "desktop",
-    "bottom_right": "none"
-  },
-
-  "gamma": {
-    "enabled": true,
-    "keybinding": "Meta+Shift+G"
-  },
-
-  "app_launcher": {
-    "enabled": true,
-    "keybinding": "Meta+Space"
-  },
-
+  
   "alt_tab": {
     "enabled": true,
     "keybinding": "Alt+Tab",
-    "thumbnail_size": 160
+    "thumbnailWidth": 500,
+    "thumbnailHeight": 375,
+    "maxVisibleWindows": 5,
+    "backgroundColor": "0.0,0.0,0.0,0.7",
+    "borderColor": "1.0,1.0,1.0,1.0",
+    "textColor": "1.0,1.0,1.0,1.0"
   },
-
-  "overview": {
+  
+  "app_launcher": {
     "enabled": true,
-    "keybinding": "Meta+W"
+    "keybinding": "Meta+D",
+    "maxResults": 10,
+    "searchPaths": "/usr/share/applications,~/.local/share/applications",
+    "backgroundColor": "0.1,0.1,0.15,0.95",
+    "textColor": "1.0,1.0,1.0,1.0",
+    "accentColor": "0.2,0.6,1.0,1.0"
   },
-
+  
+  "wallpaper": {
+    "enabled": true,
+    "mode": "solid",
+    "color": "0.1,0.1,0.15",
+    "imagePaths": "~/Pictures/Wallpapers"
+  },
+  
+  "window_snap": {
+    "enabled": true,
+    "snapThreshold": 20,
+    "keybindings": {
+      "left": "Meta+Left",
+      "right": "Meta+Right",
+      "maximize": "Meta+Up",
+      "restore": "Meta+Down"
+    }
+  },
+  
+  "hot_corners": {
+    "enabled": true,
+    "topLeft": "overview",
+    "topRight": "app_launcher",
+    "bottomLeft": "scale",
+    "bottomRight": "none",
+    "triggerDelay": 250
+  },
+  
+  "gamma": {
+    "enabled": true,
+    "defaultGamma": 1.0,
+    "defaultTemperature": 6500,
+    "nightModeTemperature": 3500,
+    "nightModeSchedule": "22:00-06:00"
+  },
+  
   "server_decoration": {
     "enabled": true,
-    "border_width": 1,
-    "title_bar_height": 32
+    "titleBarHeight": 32,
+    "borderWidth": 1,
+    "focusedColor": "0.2,0.3,0.4,1.0",
+    "unfocusedColor": "0.15,0.15,0.2,1.0",
+    "textColor": "1.0,1.0,1.0,1.0"
   },
-
-  "example": {
-    "enabled": false
+  
+  "draw": {
+    "enabled": true,
+    "keybinding": "Meta+Shift+F",
+    "brushSize": 5,
+    "brushColor": "1.0,1.0,1.0,1.0"
+  },
+  
+  "fps": {
+    "enabled": false,
+    "position": "top_right",
+    "refreshRate": 1000
+  },
+  
+  "zoom": {
+    "enabled": true,
+    "keybinding": "Meta+Control+Z",
+    "defaultZoom": 1.0,
+    "zoomStep": 0.1,
+    "maxZoom": 4.0,
+    "minZoom": 0.25
+  },
+  
+  "workspace_info_bar": {
+    "enabled": true,
+    "keybinding": "Meta+Shift+B",
+    "barHeight": 30,
+    "backgroundColor": "0.0,0.0,0.0,0.85",
+    "foregroundColor": "1.0,1.0,1.0,1.0",
+    "accentColor": "0.2,0.6,1.0,1.0"
+  },
+  
+  "notifications": {
+    "enabled": true,
+    "position": "top_right",
+    "maxVisible": 5,
+    "timeout": 5000,
+    "backgroundColor": "0.1,0.1,0.15,0.95",
+    "textColor": "1.0,1.0,1.0,1.0"
+  },
+  
+  "custom_layouts": {
+    "enabled": true,
+    "defaultLayout": "master_stack",
+    "masterRatio": 0.6,
+    "gaps": 10
+  },
+  
+  "overview": {
+    "enabled": true,
+    "keybinding": "Meta+Space",
+    "workspaceCount": 10,
+    "thumbnailScale": 0.3
   }
 }

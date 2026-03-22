@@ -3,6 +3,7 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <wm/plugins/PluginConfig.hpp>
 #include <wm/render/OverlayRenderer.hpp>
 #include <cstdio>
 #include <vector>
@@ -60,9 +61,24 @@ public:
     }
 
     void loadConfig(const std::string& configPath) override {
-        // Would load scale factor, gap size, etc.
-        (void)configPath;
-        printf("[ScalePlugin] Config loaded\n");
+        // Load plugin-specific settings from PluginConfig
+        auto& config = PluginConfig::getInstance();
+        
+        // Customizable settings
+        m_scaleFactor = config.getFloatValue("scale", "scaleFactor", 0.75f);
+        m_gridSpacing = config.getIntValue("scale", "gridSpacing", 40);
+        m_thumbnailWidth = config.getIntValue("scale", "thumbnailWidth", 500);
+        m_thumbnailHeight = config.getIntValue("scale", "thumbnailHeight", 375);
+        m_maxVisibleWindows = config.getIntValue("scale", "maxVisibleWindows", 5);
+        
+        // Highlight color (format: "R,G,B,A" where each is 0.0-1.0)
+        std::string highlightColor = config.getValue("scale", "highlightColor", "0.0,1.0,1.0,1.0");
+        sscanf(highlightColor.c_str(), "%f,%f,%f,%f", 
+               &m_highlightColor[0], &m_highlightColor[1], 
+               &m_highlightColor[2], &m_highlightColor[3]);
+        
+        printf("[ScalePlugin] Config loaded (scale=%.2f, spacing=%d, thumbnail=%dx%d)\n",
+               m_scaleFactor, m_gridSpacing, m_thumbnailWidth, m_thumbnailHeight);
     }
 
     void onViewMap(const ViewEvent& event) override {
@@ -151,6 +167,13 @@ private:
     std::vector<ScaleSlot> m_slots;
     int m_gridCols;
     int m_gridRows;
+    
+    // Customizable settings
+    int m_gridSpacing;
+    int m_thumbnailWidth;
+    int m_thumbnailHeight;
+    int m_maxVisibleWindows;
+    float m_highlightColor[4];  // RGBA
 
     void beginScale() {
         if (m_active) return;
@@ -322,8 +345,8 @@ private:
         float highlightX = viewX - 3.0f;
         float highlightY = viewY - 3.0f;
         
-        // Highlight border color (bright cyan)
-        Color highlightColor(0.0f, 1.0f, 1.0f, 1.0f);
+        // Highlight border color (configurable)
+        Color highlightColor(m_highlightColor[0], m_highlightColor[1], m_highlightColor[2], m_highlightColor[3]);
         
         // Draw border using drawRect for each side
         float borderWidth = 4.0f;
