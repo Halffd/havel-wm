@@ -433,11 +433,7 @@ int PluginManager::getOutputWidth() {
     // Get width from primary output
     if (m_server) {
         auto* server = static_cast<Server*>(m_server);
-        void* nativeHandle = server->nativeHandle();
-        if (nativeHandle) {
-            // Would get from wlr_output in C layer
-            // For now, return a reasonable default
-        }
+        return server->getOutputWidth();
     }
     return 1920;
 }
@@ -446,11 +442,7 @@ int PluginManager::getOutputHeight() {
     // Get height from primary output
     if (m_server) {
         auto* server = static_cast<Server*>(m_server);
-        void* nativeHandle = server->nativeHandle();
-        if (nativeHandle) {
-            // Would get from wlr_output in C layer
-            // For now, return a reasonable default
-        }
+        return server->getOutputHeight();
     }
     return 1080;
 }

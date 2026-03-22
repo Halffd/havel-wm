@@ -79,6 +79,9 @@ public:
     // Output geometry (set from C side)
     void setOutputGeometry(uint32_t workspaceId, const Rect& geom);
     Rect outputGeometry(uint32_t workspaceId) const;
+    int getOutputWidth() const;
+    int getOutputHeight() const;
+    void scheduleRedraw();
 
     // Native server handle for C bridge
     void setNativeHandle(void* handle) { m_nativeHandle = handle; }

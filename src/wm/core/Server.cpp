@@ -547,6 +547,24 @@ Rect Server::outputGeometry(uint32_t workspaceId) const {
     return {};
 }
 
+int Server::getOutputWidth() const {
+    // Return primary output width from m_outputGeoms
+    auto it = m_outputGeoms.begin();
+    if (it != m_outputGeoms.end()) {
+        return it->second.w;
+    }
+    return 1920;  // Default fallback
+}
+
+int Server::getOutputHeight() const {
+    // Return primary output height from m_outputGeoms
+    auto it = m_outputGeoms.begin();
+    if (it != m_outputGeoms.end()) {
+        return it->second.h;
+    }
+    return 1080;  // Default fallback
+}
+
 // ============================================================================
 // Action helpers
 // ============================================================================
