@@ -5,12 +5,13 @@
 #include <vector>
 #include <fstream>
 #include <sstream>
+#include <cstdio>
+#include <cstdlib>
 
 namespace havel {
 
 /**
- * Simple JSON-like configuration parser for plugins
- * Supports basic key-value pairs and arrays
+ * Plugin Configuration - JSON-based plugin settings
  * 
  * Format:
  * {
@@ -29,16 +30,28 @@ public:
     }
 
     bool load(const std::string& path) {
-        std::ifstream file(path);
-        if (!file.is_open()) {
-            return false;
+        // Try paths in order
+        std::vector<std::string> tryPaths = {
+            path,
+            std::string(getenv("HOME") ? getenv("HOME") : "~") + "/.config/havel-wm/plugins.json",
+            "/etc/havel-wm/plugins.json",
+            "plugins.json"
+        };
+        
+        for (const auto& tryPath : tryPaths) {
+            std::ifstream file(tryPath);
+            if (file.is_open()) {
+                std::stringstream buffer;
+                buffer << file.rdbuf();
+                file.close();
+                
+                printf("[PluginConfig] Loaded: %s\n", tryPath.c_str());
+                return parse(buffer.str());
+            }
         }
-
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-        file.close();
-
-        return parse(buffer.str());
+        
+        printf("[PluginConfig] No config file found, using defaults\n");
+        return false;
     }
 
     bool isEnabled(const std::string& pluginName) const {
@@ -46,7 +59,7 @@ public:
         if (it != m_plugins.end()) {
             auto enabledIt = it->second.find("enabled");
             if (enabledIt != it->second.end()) {
-                return enabledIt->second == "true";
+                return enabledIt->second == "true" || enabledIt->second == "1";
             }
         }
         return true;  // Enabled by default
@@ -98,7 +111,6 @@ private:
         m_plugins.clear();
 
         std::string currentPlugin;
-        std::string currentKey;
         bool inPlugin = false;
 
         std::istringstream stream(content);
@@ -117,7 +129,7 @@ private:
             // Remove trailing comma
             if (line.back() == ',') line.pop_back();
 
-            // Plugin section start
+            // Plugin section start: "name": {
             if (line.find("\"") == 0 && line.find("{") != std::string::npos) {
                 size_t nameStart = line.find('"', 1);
                 size_t nameEnd = line.find('"', nameStart + 1);
@@ -135,7 +147,7 @@ private:
                 continue;
             }
 
-            // Key-value pair
+            // Key-value pair: "key": "value"
             if (inPlugin && line.find(':') != std::string::npos) {
                 size_t colonPos = line.find(':');
                 std::string key = line.substr(0, colonPos);
