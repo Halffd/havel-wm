@@ -218,6 +218,7 @@ set(WM_CORE_SOURCES
     src/wm/desktop/FileManager.cpp
     src/wm/desktop/FileManager.hpp
     src/wm/plugins/PluginManager.cpp
+    src/wm/plugins/Plugin.cpp
     src/wm/plugins/ExamplePlugin.cpp
     src/wm/plugins/ScalePlugin.cpp
     src/wm/plugins/WallpaperPlugin.cpp
