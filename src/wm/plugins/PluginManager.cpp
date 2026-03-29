@@ -174,14 +174,39 @@ void PluginManager::loadPluginSettings(Plugin& plugin) {
     // Create settings object
     auto& settings = m_pluginSettings[name];
     
-    // Load from config
+    // Load from config using PluginConfig
     std::unordered_map<std::string, std::string> configData;
     
-    // This would load from PluginConfig - simplified for now
+    // Get all settings for this plugin from PluginConfig
+    // PluginConfig stores settings as plugin.key = value
+    // We need to extract all keys for this plugin
+    auto& globalConfig = PluginConfig::getInstance();
+    
+    // Common settings that plugins might use
+    const char* commonKeys[] = {
+        "enabled", "keybinding",
+        "scaleFactor", "gridSpacing", "thumbnailWidth", "thumbnailHeight", "maxVisibleWindows", "highlightColor",
+        "backgroundColor", "borderColor", "textColor", "accentColor",
+        "barHeight", "foregroundColor",
+        NULL
+    };
+    
+    for (int i = 0; commonKeys[i] != NULL; i++) {
+        std::string value = globalConfig.getValue(name, commonKeys[i], "");
+        if (!value.empty()) {
+            configData[commonKeys[i]] = value;
+        }
+    }
+    
+    // Load settings into plugin
     settings.loadFromMap(configData);
     
-    // Notify plugin
+    // Notify plugin that settings are loaded
     plugin.onSettingsLoaded();
+    
+    if (!configData.empty()) {
+        LOG_INFO("[PluginManager] Loaded %zu settings for plugin '%s'", configData.size(), name.c_str());
+    }
 }
 
 PluginSettings& PluginManager::getPluginSettings(const std::string& name) {

@@ -93,11 +93,17 @@ public:
         // Create overlay renderer for plugins
         if (layer && !m_overlayRenderer) {
             m_overlayRenderer = new OverlayRenderer();
-            m_overlayRenderer->initialize();
+            bool initialized = m_overlayRenderer->initialize();
+            printf("[Server] OverlayRenderer created and initialized: %s\n", initialized ? "SUCCESS" : "FAILED");
         }
     }
     void* overlayLayer() const { return m_overlayLayer; }
-    OverlayRenderer* getOverlayRenderer() { return m_overlayRenderer; }
+    OverlayRenderer* getOverlayRenderer() { 
+        if (!m_overlayRenderer) {
+            printf("[Server] getOverlayRenderer() returning NULL - not initialized\n");
+        }
+        return m_overlayRenderer; 
+    }
 
     // Text Input Manager (IME)
     void setTextInputManager(void* manager) { m_textInputManager = static_cast<TextInputManager*>(manager); }

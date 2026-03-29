@@ -1,6 +1,7 @@
 #include <wm/bridge.h>
 #include <wm/Server.hpp>
 #include <wm/plugins/Plugin.hpp>
+#include <wm/render/OverlayRenderer.hpp>
 #include "../input/GestureRecognizer.hpp"
 #include "WindowGroupManager.hpp"
 #include "../input/ComboManager.hpp"
@@ -254,7 +255,24 @@ void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int hei
 
     // Get plugin manager and render overlays with the overlay renderer
     auto& pluginManager = server->server->pluginManager();
-    pluginManager.renderOverlays(server->server->getOverlayRenderer());
+    havel::OverlayRenderer* renderer = server->server->getOverlayRenderer();
+    
+    if (!renderer) {
+        // Overlay renderer not initialized - this is expected if setOverlayLayer wasn't called
+        // or if OverlayRenderer::initialize() failed
+        static int logCount = 0;
+        if (logCount++ < 5) {
+            printf("[Overlays] SKIPPED - renderer is NULL (call %d)\n", logCount);
+        }
+        return;
+    }
+    
+    static int frameCount = 0;
+    if (++frameCount % 60 == 0) {
+        printf("[Overlays] Rendering %zu plugins\n", pluginManager.plugins().size());
+    }
+    
+    pluginManager.renderOverlays(renderer);
 
     (void)width;
     (void)height;
