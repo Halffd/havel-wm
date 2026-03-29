@@ -178,6 +178,9 @@ set(WM_CORE_SOURCES
     src/wm/core/Window.hpp
     src/wm/core/CoreWindowManager.cpp
     src/wm/core/CoreWindowManager.hpp
+    # C++ Backend API - OOP wrappers over C backend (DISABLED - wlroots 0.20 C99 syntax incompatibility)
+    # src/wm/backend/cpp/BackendApi.hpp
+    # src/wm/backend/cpp/BackendApi.cpp
     src/wm/scene/SceneGraph.hpp
     src/wm/scene/SceneGraph.cpp
     src/wm/scene/SceneGraphOps.cpp
@@ -348,6 +351,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/wm
     ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/backend
     ${CMAKE_CURRENT_SOURCE_DIR}/src/shell/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
     ${PROTOCOL_HEADERS_DIR}
