@@ -178,7 +178,7 @@ set(WM_CORE_SOURCES
     src/wm/core/Window.hpp
     src/wm/core/CoreWindowManager.cpp
     src/wm/core/CoreWindowManager.hpp
-    # C++ Backend API - OOP wrappers over C backend (DISABLED - wlroots 0.20 C99 syntax incompatibility)
+    # C++ Backend API - DISABLED (use BackendCApi.h instead for C++ access)
     # src/wm/backend/cpp/BackendApi.hpp
     # src/wm/backend/cpp/BackendApi.cpp
     src/wm/scene/SceneGraph.hpp
@@ -292,6 +292,8 @@ set(WLR_BRIDGE_SOURCES
     
     # Backend modules
     src/wm/backend/BackendTypes.h
+    src/wm/backend/BackendCApi.h
+    src/wm/backend/BackendCApi.c
     src/wm/backend/output/OutputManager.h
     src/wm/backend/output/OutputManager.c
     src/wm/backend/input/InputHandler.h
