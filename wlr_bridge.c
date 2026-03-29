@@ -599,6 +599,9 @@ static void xdg_handle_request_resize(struct wl_listener *listener, void *data) 
     struct wlr_box geo = view->xdg_surface->current.geometry;
     server->grab.view_start_w = geo.width > 0 ? geo.width : 800;
     server->grab.view_start_h = geo.height > 0 ? geo.height : 600;
+    
+    // wlroots 0.20: Interactive resize handled by our custom grab system
+    // wlr_cursor_start_interactive() doesn't exist in wlroots 0.20
 }
 
 // NEW: Maximize request handler
@@ -669,6 +672,13 @@ static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
 
     LOG_INFO("[XDG] DESTROY: %p (cpp_view=%p)", (void*)view, view->cpp_view);
 
+    // CRITICAL: Save server pointer BEFORE any cleanup (needed for C++ notification)
+    struct havel_wlr_server *server = view->server;
+    void *cpp_view = view->cpp_view;
+    
+    // CRITICAL: Clear cpp_view pointer FIRST to prevent C++ from accessing freed memory
+    view->cpp_view = NULL;
+    
     // CRITICAL: Remove ALL listeners from toplevel->events FIRST
     // These are on toplevel->events which wlroots cleans up during destroy
     wl_list_remove(&view->set_app_id.link);
@@ -689,12 +699,13 @@ static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
         wl_list_remove(&view->surface_commit.link);
     }
 
-    // Notify C++ layer BEFORE freeing - C++ destroys View object
-    if (view->cpp_view) {
-        havel_cpp_on_view_destroyed(view->server->cpp_server, view->cpp_view);
+    // Notify C++ layer - C++ destroys its View object
+    // DO NOT access view-> members after this point!
+    if (cpp_view && server) {
+        havel_cpp_on_view_destroyed(server->cpp_server, cpp_view);
     }
 
-    // Destroy scene graph view
+    // Destroy scene graph view (C owns this, not C++)
     if (view->scene_graph_view) {
         scene_view_destroy((SceneView*)view->scene_graph_view);
         view->scene_graph_view = NULL;
@@ -847,14 +858,22 @@ static void xwayland_view_handle_destroy(struct wl_listener *listener, void *dat
 
     LOG_INFO("[XWayland] DESTROY: %p (cpp_view=%p)", (void*)view, view->cpp_view);
 
+    // CRITICAL: Save pointers BEFORE clearing
+    struct havel_wlr_server *server = view->server;
+    void *cpp_view = view->cpp_view;
+    
+    // CRITICAL: Clear cpp_view pointer FIRST to prevent C++ from accessing freed memory
+    view->cpp_view = NULL;
+    
     wl_list_remove(&view->destroy.link);
 
-    // Notify C++ layer BEFORE freeing - C++ destroys View object
-    if (view->cpp_view) {
-        havel_cpp_on_view_destroyed(view->server->cpp_server, view->cpp_view);
+    // Notify C++ layer - C++ destroys View object
+    // DO NOT access view-> members after this point!
+    if (cpp_view && server) {
+        havel_cpp_on_view_destroyed(server->cpp_server, cpp_view);
     }
 
-    // Destroy scene graph view
+    // Destroy scene graph view (C owns this, not C++)
     if (view->scene_graph_view) {
         scene_view_destroy((SceneView*)view->scene_graph_view);
         view->scene_graph_view = NULL;
