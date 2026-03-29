@@ -1200,6 +1200,8 @@ void Server::animateViewScale(View* view, float from, float to) {
 void Server::registerKeybindings() {
     using namespace std::placeholders;
 
+    LOG_INFO("[Keybindings] Registering keybindings...");
+
     // Ctrl+Meta+F4: Quit compositor
     m_keybindingManager.registerKeybinding(
         KeybindingManager::MOD_CTRL | KeybindingManager::MOD_LOGO, 111,
@@ -1392,6 +1394,10 @@ void Server::registerKeybindings() {
         KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 19,
         "move_to_workspace_10", [this]() { moveViewToWorkspace(9); }
     );
+    
+    // Log all registered bindings
+    m_keybindingManager.listBindings();
+    LOG_INFO("[Keybindings] Registration complete (%zu bindings)", m_keybindingManager.getBindingCount());
 }
 
 // ============================================================================

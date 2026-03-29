@@ -46,6 +46,8 @@ void KeybindingManager::unregisterKeybinding(const char* name) {
 bool KeybindingManager::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
     if (!pressed) return false;
 
+    LOG_INFO("[Keybinding] Check: keycode=%u mods=0x%x (bindings=%zu)", keycode, modifiers, m_bindings.size());
+    
     for (auto& binding : m_bindings) {
         if (binding.modifiers == modifiers && binding.keycode == keycode) {
             LOG_INFO("[Keybinding] TRIGGERED: %s (mod=0x%x key=%u)", binding.name.c_str(), binding.modifiers, binding.keycode);

@@ -1479,7 +1479,9 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
         }
 
         // Forward to C++ layer for keybindings/plugins
+        LOG_INFO("[KEY] Pressed: keycode=%u keysym=0x%x mods=0x%x char='%c'", keycode, keysym, modifiers, key_char ? key_char : ' ');
         bool consumed = havel_cpp_on_key(server->cpp_server, keycode, true, modifiers, keysym, key_char, utf8_buffer);
+        LOG_INFO("[KEY] Consumed=%d", consumed);
 
         // Only forward to seat if not consumed by compositor
         if (!consumed) {
