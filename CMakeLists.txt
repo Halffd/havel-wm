@@ -283,8 +283,24 @@ set(UTIL_SOURCES
 )
 
 # Wlroots C bridge library (isolates wlroots headers from C++)
+# Modular backend structure - C for performance-critical wlroots integration
 set(WLR_BRIDGE_SOURCES
     wlr_bridge.c
+    
+    # Backend modules
+    src/wm/backend/BackendTypes.h
+    src/wm/backend/output/OutputManager.h
+    src/wm/backend/output/OutputManager.c
+    src/wm/backend/input/InputHandler.h
+    src/wm/backend/input/InputHandler.c
+    src/wm/backend/shell/XdgShell.h
+    src/wm/backend/shell/XdgShell.c
+    src/wm/backend/shell/LayerShell.h
+    src/wm/backend/shell/LayerShell.c
+    src/wm/backend/cursor/Cursor.h
+    src/wm/backend/cursor/Cursor.c
+    src/wm/backend/server/Backend.h
+    src/wm/backend/server/Backend.c
 )
 
 add_library(wlr_bridge STATIC ${WLR_BRIDGE_SOURCES})
@@ -293,6 +309,7 @@ target_include_directories(wlr_bridge PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/wm
     ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/backend
     ${CMAKE_CURRENT_SOURCE_DIR}/src/shell/include
     ${PROTOCOL_HEADERS_DIR}
 )
