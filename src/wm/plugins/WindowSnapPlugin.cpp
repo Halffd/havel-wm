@@ -3,6 +3,7 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <wm/render/OverlayRenderer.hpp>
 #include <cstdio>
 #include <cstring>
 
@@ -82,6 +83,44 @@ public:
         return false;
     }
     
+    void onMouseMotion(int x, int y) override {
+        if (!m_enabled) return;
+        
+        // Track cursor position for snap detection
+        m_lastCursorX = x;
+        m_lastCursorY = y;
+        
+        // Check if we should show snap preview
+        if (m_draggingView) {
+            SnapPosition snap = detectSnapPosition(x, y);
+            if (snap != SNAP_NONE && snap != m_currentSnapPreview) {
+                m_currentSnapPreview = snap;
+                m_api->scheduleRedraw();  // Trigger overlay redraw
+            } else if (snap == SNAP_NONE && m_currentSnapPreview != SNAP_NONE) {
+                m_currentSnapPreview = SNAP_NONE;
+                m_api->scheduleRedraw();
+            }
+        }
+    }
+    
+    void renderOverlay(void* rendererPtr) override {
+        if (!m_enabled || !rendererPtr || m_currentSnapPreview == SNAP_NONE) return;
+        
+        OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+        int screenWidth = renderer->getScreenWidth();
+        int screenHeight = renderer->getScreenHeight();
+        
+        // Calculate preview rectangle based on snap position
+        FloatRect previewRect = getSnapPreviewRect(screenWidth, screenHeight);
+        
+        // Draw semi-transparent preview rectangle
+        Color previewColor(0.2f, 0.6f, 1.0f, 0.5f);  // Blue with 50% alpha
+        Color borderColor(0.2f, 0.6f, 1.0f, 1.0f);    // Solid blue border
+        
+        renderer->drawRect(previewRect.x, previewRect.y, previewRect.w, previewRect.h, previewColor);
+        renderer->drawBorder(previewRect, borderColor, 3.0f);
+    }
+    
 private:
     CompositorAPI* m_api = nullptr;
     bool m_enabled;
@@ -89,14 +128,7 @@ private:
     View* m_draggingView;
     int m_lastCursorX, m_lastCursorY;
     
-    // Geometry tracking for restore
-    struct SavedGeometry {
-        int x, y, width, height;
-        bool saved = false;
-    };
-    SavedGeometry m_lastGeometry;
-
-    // Snap positions
+    // Snap positions enum (must be declared before member variables that use it)
     enum SnapPosition {
         SNAP_NONE = 0,
         SNAP_LEFT,
@@ -108,6 +140,16 @@ private:
         SNAP_BOTTOM_RIGHT
     };
     
+    SnapPosition m_currentSnapPreview = SNAP_NONE;  // Current snap preview zone
+    
+    // Geometry tracking for restore
+    struct SavedGeometry {
+        int x, y, width, height;
+        bool saved = false;
+    };
+    SavedGeometry m_lastGeometry;
+
+    // Snap position detection
     SnapPosition detectSnapPosition(int x, int y) {
         int width = m_api->getOutputWidth();
         int height = m_api->getOutputHeight();
@@ -149,6 +191,44 @@ private:
         m_lastGeometry.height = m_api->getViewHeight(view);
         m_lastGeometry.saved = true;
     }
+    
+    // Calculate preview rectangle for snap zones
+    FloatRect getSnapPreviewRect(int screenWidth, int screenHeight) {
+        int width = screenWidth;
+        int height = screenHeight;
+        int halfWidth = width / 2;
+        int quarterWidth = width / 4;
+        int halfHeight = height / 2;
+        
+        // Margin from edge for visual feedback
+        int margin = 20;
+        
+        switch (m_currentSnapPreview) {
+            case SNAP_LEFT:
+                return FloatRect(margin, margin, halfWidth - margin * 2, height - margin * 2);
+            
+            case SNAP_RIGHT:
+                return FloatRect(halfWidth + margin, margin, halfWidth - margin * 2, height - margin * 2);
+            
+            case SNAP_MAXIMIZE:
+                return FloatRect(margin, margin, width - margin * 2, height - margin * 2);
+            
+            case SNAP_TOP_LEFT:
+                return FloatRect(margin, margin, quarterWidth - margin, halfHeight - margin * 2);
+            
+            case SNAP_TOP_RIGHT:
+                return FloatRect(halfWidth + margin, margin, quarterWidth - margin, halfHeight - margin * 2);
+            
+            case SNAP_BOTTOM_LEFT:
+                return FloatRect(margin, halfHeight + margin, quarterWidth - margin, halfHeight - margin * 2);
+            
+            case SNAP_BOTTOM_RIGHT:
+                return FloatRect(halfWidth + margin, halfHeight + margin, quarterWidth - margin, halfHeight - margin * 2);
+            
+            default:
+                return FloatRect(0, 0, 0, 0);
+        }
+    }
 
     void snapLeft(View* view) {
         int width = m_api->getOutputWidth();
@@ -161,6 +241,10 @@ private:
         // REAL snap: set position AND size
         m_api->setViewGeometry(view, 0, 0, halfWidth, height);
         printf("[WindowSnap] Snapped to left half (%dx%d)\n", halfWidth, height);
+        
+        // Clear preview after snap
+        m_currentSnapPreview = SNAP_NONE;
+        m_api->scheduleRedraw();
     }
 
     void snapRight(View* view) {
@@ -174,6 +258,10 @@ private:
         // REAL snap: set position AND size
         m_api->setViewGeometry(view, halfWidth, 0, halfWidth, height);
         printf("[WindowSnap] Snapped to right half (%dx%d at %d,0)\n", halfWidth, height, halfWidth);
+        
+        // Clear preview after snap
+        m_currentSnapPreview = SNAP_NONE;
+        m_api->scheduleRedraw();
     }
 
     void snapMaximize(View* view) {
@@ -186,6 +274,10 @@ private:
         // REAL maximize: full screen
         m_api->setViewGeometry(view, 0, 0, width, height);
         printf("[WindowSnap] Maximized (%dx%d)\n", width, height);
+        
+        // Clear preview after snap
+        m_currentSnapPreview = SNAP_NONE;
+        m_api->scheduleRedraw();
     }
 
     void snapRestore(View* view) {
@@ -225,6 +317,10 @@ private:
                 break;
         }
         printf("[WindowSnap] Snapped to corner\n");
+        
+        // Clear preview after snap
+        m_currentSnapPreview = SNAP_NONE;
+        m_api->scheduleRedraw();
     }
 };
 
