@@ -3,9 +3,11 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <wm/render/OverlayRenderer.hpp>
 #include <cstdio>
 #include <cstdint>
 #include <chrono>
+#include <algorithm>
 
 namespace havel     {
 
@@ -125,6 +127,42 @@ public:
         return false;
     }
     
+    void renderOverlay(void* rendererPtr) override {
+        if (!m_enabled || !rendererPtr || m_lastCorner < 0) return;
+        
+        OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+        int screenWidth = renderer->getScreenWidth();
+        int screenHeight = renderer->getScreenHeight();
+        
+        // Calculate corner highlight rectangle
+        FloatRect highlightRect = getCornerHighlightRect(m_lastCorner, screenWidth, screenHeight);
+        
+        // Calculate fill based on trigger progress
+        uint64_t currentTime = getMonotonicTimeMs();
+        float progress = 0.0f;
+        if (m_cornerEnterTime > 0 && currentTime >= m_cornerEnterTime) {
+            progress = (float)(currentTime - m_cornerEnterTime) / (float)m_triggerDelay;
+            progress = std::min(progress, 1.0f);
+        }
+        
+        // Color based on action type
+        Color highlightColor = getActionColor(m_cornerActions[m_lastCorner]);
+        highlightColor.a = 0.3f + (progress * 0.5f);  // Fade in from 30% to 80%
+        
+        // Draw corner highlight
+        renderer->drawRect(highlightRect.x, highlightRect.y, highlightRect.w, highlightRect.h, highlightColor);
+        
+        // Draw border that fills based on progress
+        Color borderColor = highlightColor;
+        borderColor.a = 0.5f + (progress * 0.5f);  // Fade in border
+        
+        // Draw progress bar along edge
+        if (progress > 0.0f) {
+            FloatRect progressRect = getProgressRect(m_lastCorner, highlightRect, progress, screenWidth, screenHeight);
+            renderer->drawRect(progressRect.x, progressRect.y, progressRect.w, progressRect.h, borderColor);
+        }
+    }
+    
 private:
     CompositorAPI* m_api = nullptr;
     bool m_enabled;
@@ -198,6 +236,70 @@ private:
                 break;
             case ACTION_NONE:
                 break;
+        }
+    }
+    
+    // Get highlight rectangle for a corner
+    FloatRect getCornerHighlightRect(int corner, int screenWidth, int screenHeight) {
+        int size = 100;  // Highlight size in pixels
+        int margin = 0;
+        
+        switch (corner) {
+            case CORNER_TOP_LEFT:
+                return FloatRect(margin, margin, size, size);
+            case CORNER_TOP_RIGHT:
+                return FloatRect(screenWidth - size - margin, margin, size, size);
+            case CORNER_BOTTOM_LEFT:
+                return FloatRect(margin, screenHeight - size - margin, size, size);
+            case CORNER_BOTTOM_RIGHT:
+                return FloatRect(screenWidth - size - margin, screenHeight - size - margin, size, size);
+            default:
+                return FloatRect(0, 0, 0, 0);
+        }
+    }
+    
+    // Get progress bar rectangle
+    FloatRect getProgressRect(int corner, const FloatRect& highlightRect, float progress, int screenWidth, int screenHeight) {
+        float borderWidth = 4.0f;
+        
+        switch (corner) {
+            case CORNER_TOP_LEFT:
+                // Progress bar along bottom edge of highlight
+                return FloatRect(highlightRect.x, highlightRect.y + highlightRect.h - borderWidth,
+                                highlightRect.w * progress, borderWidth);
+            case CORNER_TOP_RIGHT:
+                // Progress bar along bottom edge
+                return FloatRect(highlightRect.x + highlightRect.w * (1.0f - progress),
+                                highlightRect.y + highlightRect.h - borderWidth,
+                                highlightRect.w * progress, borderWidth);
+            case CORNER_BOTTOM_LEFT:
+                // Progress bar along top edge
+                return FloatRect(highlightRect.x, highlightRect.y,
+                                highlightRect.w * progress, borderWidth);
+            case CORNER_BOTTOM_RIGHT:
+                // Progress bar along top edge
+                return FloatRect(highlightRect.x + highlightRect.w * (1.0f - progress),
+                                highlightRect.y,
+                                highlightRect.w * progress, borderWidth);
+            default:
+                return FloatRect(0, 0, 0, 0);
+        }
+    }
+    
+    // Get color for action type
+    Color getActionColor(CornerAction action) {
+        switch (action) {
+            case ACTION_OVERVIEW:
+                return Color(0.2f, 0.6f, 1.0f, 1.0f);  // Blue
+            case ACTION_WINDOWS:
+                return Color(0.2f, 0.8f, 0.4f, 1.0f);  // Green
+            case ACTION_DESKTOP:
+                return Color(0.8f, 0.8f, 0.2f, 1.0f);  // Yellow
+            case ACTION_WORKSPACE_1:
+            case ACTION_WORKSPACE_2:
+                return Color(0.8f, 0.4f, 0.8f, 1.0f);  // Purple
+            default:
+                return Color(0.5f, 0.5f, 0.5f, 1.0f);  // Gray
         }
     }
 };
