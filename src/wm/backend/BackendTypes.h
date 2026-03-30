@@ -68,6 +68,11 @@ typedef struct havel_wlr_server {
     
     // Session (for VT switching)
     struct wlr_session *session;
+    
+    // Performance metrics
+    uint64_t frame_count;      // Total frames rendered
+    float current_fps;         // Current FPS (updated every second)
+    uint64_t startup_time;     // Monotonic time at startup (for uptime calculation)
 } havel_wlr_server_t;
 
 // ============================================================================

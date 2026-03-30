@@ -12,6 +12,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
+
+// Helper: Get monotonic time in milliseconds
+static uint64_t get_monotonic_time_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
+}
 
 // ============================================================================
 // Server Event Handlers
@@ -60,6 +68,11 @@ havel_wlr_server_t* havel_server_create(struct wl_display *display) {
     wl_list_init(&server->keyboards);
     wl_list_init(&server->pointers);
     server->active_workspace = 0;
+    
+    // Initialize performance metrics
+    server->frame_count = 0;
+    server->current_fps = 0.0f;
+    server->startup_time = get_monotonic_time_ms();
     
     // Create backend (auto-detect) - wlroots 0.20 uses wl_event_loop
     struct wl_event_loop *event_loop = wl_display_get_event_loop(display);

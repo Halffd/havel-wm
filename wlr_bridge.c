@@ -11,6 +11,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <time.h>
+
+// Helper: Get monotonic time in milliseconds
+static uint64_t get_monotonic_time_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
+}
 #include <sys/vt.h>
 #include <sys/ioctl.h>
 #include <fcntl.h>
@@ -194,6 +202,11 @@ struct havel_wlr_server {
 
     // C++ server handle - owns WM policy/state
     struct havel_cpp_server *cpp_server;
+    
+    // Performance metrics
+    uint64_t frame_count;      // Total frames rendered
+    float current_fps;         // Current FPS (updated every second)
+    uint64_t startup_time;     // Monotonic time at startup (for uptime calculation)
 };
 
 struct havel_output {
@@ -1104,14 +1117,35 @@ static void server_new_layer_surface(struct wl_listener *listener, void *data) {
 static void output_frame(struct wl_listener *listener, void *data) {
     struct havel_output *output = wl_container_of(listener, output, frame);
     struct havel_wlr_server *server = output->server;
+    
+    // Frame timing for performance metrics
+    static uint64_t lastFrameTime = 0;
+    static uint32_t frameCount = 0;
+    static float fps = 0.0f;
+    
+    uint64_t now = get_monotonic_time_ms();
+    if (lastFrameTime > 0) {
+        frameCount++;
+        if (now - lastFrameTime >= 1000) {  // Update FPS every second
+            fps = (float)frameCount * 1000.0f / (float)(now - lastFrameTime);
+            frameCount = 0;
+            lastFrameTime = now;
+        }
+    } else {
+        lastFrameTime = now;
+    }
+    
+    // Store FPS for stats API
+    server->current_fps = fps;
+    server->frame_count++;
 
     // DEBUG: Confirm frame callback is firing (only every 600 frames = ~10 seconds)
     static int frame_count = 0;
     frame_count++;
     if (frame_count % 600 == 0) {
-        LOG_INFO("[FRAME] Frame #%d on %s (enabled=%d, scene_output=%p)",
+        LOG_INFO("[FRAME] Frame #%d on %s (enabled=%d, scene_output=%p, FPS=%.1f)",
                  frame_count, output->output->name,
-                 output->output->enabled, output->scene_output);
+                 output->output->enabled, output->scene_output, fps);
     }
 
     // Per-frame logging disabled to prevent log spam (60fps = 3600 lines/min)
@@ -1934,6 +1968,11 @@ havel_wlr_server_t* havel_wlr_create(void) {
     // Create C++ server
     server->cpp_server = havel_cpp_server_create();
     havel_cpp_server_set_native_handle(server->cpp_server, server);
+    
+    // Initialize performance metrics
+    server->frame_count = 0;
+    server->current_fps = 0.0f;
+    server->startup_time = get_monotonic_time_ms();
 
     server->display = wl_display_create();
     if (!server->display) {

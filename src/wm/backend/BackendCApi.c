@@ -9,7 +9,15 @@
 #include "cursor/Cursor.h"
 #include <Logger.h>
 #include <string.h>
+#include <time.h>
 #include <wayland-server-core.h>
+
+// Helper: Get monotonic time in milliseconds
+static uint64_t get_monotonic_time_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)ts.tv_nsec / 1000000ULL;
+}
 
 // ============================================================================
 // Backend Lifecycle
@@ -821,12 +829,11 @@ bool havel_backend_get_stats(havel_backend_t* backend, havel_backend_stats_t* st
     stats->pointer_count = havel_backend_get_pointer_count(backend);
     stats->view_count = 0;  // Tracked in C++ layer
     stats->layer_count = havel_backend_get_layer_count(backend);
-    stats->frame_count = 0;  // Would need frame counter
-    stats->uptime_ms = 0;  // Would need startup timestamp
-    stats->fps = 0.0f;  // Would need FPS calculation
+    stats->frame_count = server->frame_count;
+    stats->uptime_ms = get_monotonic_time_ms() - server->startup_time;
+    stats->fps = server->current_fps;
     stats->gpu_memory_used = 0;  // Would need GPU memory tracking
     
-    (void)server;
     return true;
 }
 
@@ -840,6 +847,9 @@ void havel_backend_print_debug_info(havel_backend_t* backend) {
     LOG_INFO("  Keyboards: %zu", havel_backend_get_keyboard_count(backend));
     LOG_INFO("  Pointers: %zu", havel_backend_get_pointer_count(backend));
     LOG_INFO("  Active Workspace: %u", server->active_workspace);
+    LOG_INFO("  FPS: %.1f", server->current_fps);
+    LOG_INFO("  Frames: %" PRIu64, server->frame_count);
+    LOG_INFO("  Uptime: %" PRIu64 "ms", get_monotonic_time_ms() - server->startup_time);
     LOG_INFO("  Session Active: %s", havel_backend_is_session_active(backend) ? "yes" : "no");
     LOG_INFO("  Seat: %s", havel_backend_get_seat_name(backend));
 }

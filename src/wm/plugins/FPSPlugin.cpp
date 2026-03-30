@@ -32,7 +32,7 @@ public:
 
     void init(CompositorAPI* api) override {
         m_api = api;
-        m_enabled = false;
+        m_enabled = true;  // Enabled by default for Phase 2
         m_showGraph = true;
         m_showText = true;
         m_lastFrameTime = std::chrono::steady_clock::now();
@@ -40,7 +40,7 @@ public:
         m_fps = 0.0f;
         m_fpsUpdateTime = 0;
         
-        printf("[FPSPlugin] Initialized\n");
+        printf("[FPSPlugin] Initialized (enabled by default)\n");
     }
 
     void fini() override {
