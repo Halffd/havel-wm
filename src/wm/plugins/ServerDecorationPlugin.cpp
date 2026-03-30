@@ -138,12 +138,18 @@ void ServerDecorationPlugin::renderOverlay(void* rendererPtr) {
     (void)screenWidth;
     (void)screenHeight;
 
-    // Render decorations for all non-minimized, non-fullscreen windows
+    // Render decorations for all non-minimized windows
     for (auto& [viewPtr, deco] : m_decorations) {
-        if (deco.fullscreen || deco.minimized) continue;  // No decorations for fullscreen/minimized windows
+        if (deco.minimized) continue;  // No decorations for minimized windows
 
         // Update focus state
         deco.focused = (viewPtr == m_api->getFocusedView());
+
+        // Render shadow first (behind window)
+        renderShadow(renderer, deco);
+
+        // Render rounded corners
+        renderRoundedCorners(renderer, deco);
 
         // Render border
         renderBorder(renderer, deco);
@@ -154,6 +160,85 @@ void ServerDecorationPlugin::renderOverlay(void* rendererPtr) {
         // Render buttons
         renderButtons(renderer, deco);
     }
+}
+
+void ServerDecorationPlugin::renderShadow(OverlayRenderer* renderer, const WindowDecoration& deco) {
+    if (!renderer) return;
+    
+    // Skip shadow for fullscreen or maximized windows
+    if (deco.fullscreen || deco.maximized) return;
+    
+    // Draw drop shadow behind window
+    // Multiple passes with increasing offset for pseudo-blur effect
+    const int shadowSize = WindowDecoration::SHADOW_BLUR;
+    const int offsetX = WindowDecoration::SHADOW_OFFSET_X;
+    const int offsetY = WindowDecoration::SHADOW_OFFSET_Y;
+    
+    // Draw shadow rectangles (simplified blur by drawing multiple offset passes)
+    for (int i = 1; i <= 3; i++) {
+        float alpha = WindowDecoration::SHADOW_COLOR[3] / (float)i;
+        Color shadowColor(
+            WindowDecoration::SHADOW_COLOR[0],
+            WindowDecoration::SHADOW_COLOR[1],
+            WindowDecoration::SHADOW_COLOR[2],
+            alpha
+        );
+        
+        int passOffset = shadowSize / (4 - i);
+        
+        // Shadow rect behind window
+        renderer->drawRect(
+            (float)(deco.x + offsetX + passOffset),
+            (float)(deco.y + offsetY + passOffset),
+            (float)deco.width,
+            (float)deco.height,
+            shadowColor
+        );
+    }
+}
+
+void ServerDecorationPlugin::renderRoundedCorners(OverlayRenderer* renderer, const WindowDecoration& deco) {
+    if (!renderer) return;
+    
+    // Skip for fullscreen or maximized windows
+    if (deco.fullscreen || deco.maximized) return;
+    
+    const int radius = WindowDecoration::CORNER_RADIUS;
+    const auto& color = deco.focused ? WindowDecoration::FOCUSED_BG : WindowDecoration::UNFOCUSED_BG;
+    Color cornerColor(color[0], color[1], color[2], color[3]);
+    
+    // Draw corner circles to create rounded effect
+    // Top-left
+    renderer->drawCircle(
+        (float)(deco.x + radius),
+        (float)(deco.y + radius),
+        (float)radius,
+        cornerColor
+    );
+    
+    // Top-right
+    renderer->drawCircle(
+        (float)(deco.x + deco.width - radius),
+        (float)(deco.y + radius),
+        (float)radius,
+        cornerColor
+    );
+    
+    // Bottom-left
+    renderer->drawCircle(
+        (float)(deco.x + radius),
+        (float)(deco.y + deco.height - radius),
+        (float)radius,
+        cornerColor
+    );
+    
+    // Bottom-right
+    renderer->drawCircle(
+        (float)(deco.x + deco.width - radius),
+        (float)(deco.y + deco.height - radius),
+        (float)radius,
+        cornerColor
+    );
 }
 
 void ServerDecorationPlugin::renderBorder(OverlayRenderer* renderer, const WindowDecoration& deco) {

@@ -30,12 +30,20 @@ struct WindowDecoration {
     // Decoration dimensions
     static constexpr int TITLE_BAR_HEIGHT = 32;
     static constexpr int BORDER_WIDTH = 1;
+    static constexpr int CORNER_RADIUS = 8;
+    
+    // Shadow settings
+    static constexpr int SHADOW_OFFSET_X = 4;
+    static constexpr int SHADOW_OFFSET_Y = 8;
+    static constexpr int SHADOW_BLUR = 16;
+    static constexpr float SHADOW_ALPHA = 0.4f;
 
     // Colors (inline constexpr to avoid linker errors)
     static inline constexpr std::array<float, 4> FOCUSED_BG   = {0.2f, 0.3f, 0.4f, 1.0f};
     static inline constexpr std::array<float, 4> UNFOCUSED_BG = {0.15f, 0.15f, 0.2f, 1.0f};
     static inline constexpr std::array<float, 4> TEXT_COLOR   = {1.0f, 1.0f, 1.0f, 1.0f};
     static inline constexpr std::array<float, 4> BUTTON_HOVER = {0.4f, 0.4f, 0.5f, 1.0f};
+    static inline constexpr std::array<float, 4> SHADOW_COLOR = {0.0f, 0.0f, 0.0f, SHADOW_ALPHA};
 };
 
 /**
@@ -93,6 +101,8 @@ private:
 
     void updateDecoration(void* view, const WindowDecoration& deco);
     void renderTitleBar(OverlayRenderer* renderer, const WindowDecoration& deco);
+    void renderShadow(OverlayRenderer* renderer, const WindowDecoration& deco);
+    void renderRoundedCorners(OverlayRenderer* renderer, const WindowDecoration& deco);
     void renderBorder(OverlayRenderer* renderer, const WindowDecoration& deco);
     void renderButtons(OverlayRenderer* renderer, const WindowDecoration& deco);
 
