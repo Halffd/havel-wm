@@ -1,4 +1,5 @@
 #include <wm/View.hpp>
+#include <algorithm>
 
 namespace havel {
 
@@ -25,6 +26,12 @@ void View::move(int x, int y) {
 void View::resize(int w, int h) {
     if (w > 0) m_geom.w = w;
     if (h > 0) m_geom.h = h;
+}
+
+void View::setOpacity(float opacity) {
+    m_opacity = std::clamp(opacity, 0.0f, 1.0f);
+    // Note: Actual opacity rendering requires wlroots scene graph support
+    // For now, this is tracked for future implementation
 }
 
 void View::setFloating(bool floating) {

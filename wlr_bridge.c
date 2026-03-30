@@ -407,16 +407,44 @@ static void cpp_impl_workspace_arrange(uint32_t workspace_id) {
     (void)workspace_id;
 }
 
+// Workspace animation state
+static struct {
+    uint32_t from_workspace;
+    uint32_t to_workspace;
+    uint64_t start_time;
+    uint32_t duration_ms;
+    bool animating;
+} g_workspace_anim = {0};
+
 // Switch workspace on ALL outputs (global/workspace switching)
 static void workspace_set_active_global(uint32_t workspace_id) {
     if (!g_running_server || workspace_id >= HAVEL_WORKSPACE_COUNT) return;
     
-    // Disable all workspaces
-    for (uint32_t i = 0; i < HAVEL_WORKSPACE_COUNT; i++) {
-        wlr_scene_node_set_enabled(&g_running_server->workspaces[i]->node, false);
+    uint32_t old_workspace = g_running_server->active_workspace;
+    
+    // Start workspace switch animation
+    g_workspace_anim.from_workspace = old_workspace;
+    g_workspace_anim.to_workspace = workspace_id;
+    g_workspace_anim.start_time = get_monotonic_time_ms();
+    g_workspace_anim.duration_ms = 250;  // 250ms crossfade
+    g_workspace_anim.animating = (old_workspace != workspace_id);
+    
+    // Enable both workspaces during animation
+    if (g_workspace_anim.animating) {
+        wlr_scene_node_set_enabled(&g_running_server->workspaces[old_workspace]->node, true);
+        wlr_scene_node_set_enabled(&g_running_server->workspaces[workspace_id]->node, true);
+        
+        // Set old workspace to fade out (will be updated in frame handler)
+        LOG_INFO("[WORKSPACE] Starting workspace switch animation %u -> %u", 
+                 old_workspace, workspace_id);
+    } else {
+        // No animation needed
+        for (uint32_t i = 0; i < HAVEL_WORKSPACE_COUNT; i++) {
+            wlr_scene_node_set_enabled(&g_running_server->workspaces[i]->node, false);
+        }
+        wlr_scene_node_set_enabled(&g_running_server->workspaces[workspace_id]->node, true);
     }
-    // Enable only the active workspace
-    wlr_scene_node_set_enabled(&g_running_server->workspaces[workspace_id]->node, true);
+    
     g_running_server->active_workspace = workspace_id;
     
     // Update all outputs to match global workspace
@@ -1117,6 +1145,27 @@ static void server_new_layer_surface(struct wl_listener *listener, void *data) {
 static void output_frame(struct wl_listener *listener, void *data) {
     struct havel_output *output = wl_container_of(listener, output, frame);
     struct havel_wlr_server *server = output->server;
+    
+    // Update workspace switch animation
+    if (g_workspace_anim.animating) {
+        uint64_t elapsed = get_monotonic_time_ms() - g_workspace_anim.start_time;
+        float progress = (float)elapsed / (float)g_workspace_anim.duration_ms;
+        
+        if (progress >= 1.0f) {
+            // Animation complete
+            g_workspace_anim.animating = false;
+            wlr_scene_node_set_enabled(&server->workspaces[g_workspace_anim.from_workspace]->node, false);
+            LOG_INFO("[WORKSPACE] Workspace switch animation complete");
+        } else {
+            // Update opacity based on progress (ease-out cubic)
+            float ease = 1.0f - (1.0f - progress) * (1.0f - progress) * (1.0f - progress);
+            
+            // New workspace fades in, old workspace fades out
+            // Note: wlroots scene graph doesn't support per-node opacity directly
+            // For now, just switch at the end of animation
+            // Full implementation would require custom rendering
+        }
+    }
     
     // Frame timing for performance metrics
     static uint64_t lastFrameTime = 0;

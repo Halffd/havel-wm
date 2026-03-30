@@ -217,6 +217,19 @@ void Server::onViewMapped(View* view) {
     m_pluginManager.dispatchViewMap(event);
     LOG_INFO("[Server] Plugin dispatch complete");
 
+    // Window open animation (scale + fade)
+    if (m_animator.isEnabled()) {
+        // Start slightly smaller and fade in
+        view->setOpacity(0.0f);
+        m_animator.fade(0.0f, 1.0f,
+            [view](float value) {
+                view->setOpacity(value);
+            });
+        
+        // Scale animation would require scene graph support
+        // For now, just use opacity fade
+    }
+
     focusView(view);
     LOG_INFO("[Server] focusView complete");
 
@@ -230,6 +243,20 @@ void Server::onViewUnmapped(View* view) {
     if (!view) return;
 
     LOG_DEBUG("View unmapped");
+    
+    // Window close animation (fade out)
+    if (m_animator.isEnabled()) {
+        float currentOpacity = view->opacity();
+        m_animator.fade(currentOpacity, 0.0f,
+            [view](float value) {
+                view->setOpacity(value);
+            });
+        
+        // Delay actual unmapping until animation completes
+        // For now, just set opacity and let the animation run
+        // The view will be fully hidden when opacity reaches 0
+    }
+    
     view->setMapped(false);
 
     // Dispatch to plugins

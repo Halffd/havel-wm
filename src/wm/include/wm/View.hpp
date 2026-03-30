@@ -23,6 +23,10 @@ public:
     void setGeom(int x, int y, int w, int h);
     void move(int x, int y);
     void resize(int w, int h);
+    
+    // Opacity (for animations)
+    float opacity() const { return m_opacity; }
+    void setOpacity(float opacity);
 
     // Floating state
     bool isFloating() const { return m_floating; }
@@ -59,6 +63,7 @@ private:
     bool m_floating = false;
     bool m_haveFloatGeom = false;
     bool m_mapped = false;
+    float m_opacity = 1.0f;  // Opacity for animations (0.0 - 1.0)
     void* m_nativeHandle = nullptr;
     uint64_t m_windowId = 0;
     std::string m_appId;
