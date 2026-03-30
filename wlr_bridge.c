@@ -205,6 +205,9 @@ struct havel_output {
     struct havel_wlr_server *server;
     bool is_primary;
     struct wl_list link;
+    
+    // Per-output workspace tracking
+    uint32_t active_workspace;  // This output's active workspace
 
     // Gamma control v1 manager
     struct wlr_gamma_control_manager_v1 *gamma_control_manager;
@@ -388,20 +391,59 @@ static void cpp_impl_view_minimize(void* view) {
 static void cpp_impl_workspace_arrange(uint32_t workspace_id) {
     // Triggered from C++ when layout needs to be recalculated
     // The actual arrangement logic is now in C++
+    (void)workspace_id;
+}
+
+// Switch workspace on ALL outputs (global/workspace switching)
+static void workspace_set_active_global(uint32_t workspace_id) {
+    if (!g_running_server || workspace_id >= HAVEL_WORKSPACE_COUNT) return;
+    
+    // Disable all workspaces
+    for (uint32_t i = 0; i < HAVEL_WORKSPACE_COUNT; i++) {
+        wlr_scene_node_set_enabled(&g_running_server->workspaces[i]->node, false);
+    }
+    // Enable only the active workspace
+    wlr_scene_node_set_enabled(&g_running_server->workspaces[workspace_id]->node, true);
+    g_running_server->active_workspace = workspace_id;
+    
+    // Update all outputs to match global workspace
+    struct havel_output *output;
+    wl_list_for_each(output, &g_running_server->outputs, link) {
+        output->active_workspace = workspace_id;
+    }
+    
+    LOG_INFO("[WORKSPACE] Global workspace switched to %u", workspace_id);
+}
+
+// Switch workspace on a SPECIFIC output (per-monitor workspace switching)
+static void workspace_set_active_output(struct havel_output *havel_out, uint32_t workspace_id) {
+    if (!havel_out || !g_running_server || workspace_id >= HAVEL_WORKSPACE_COUNT) return;
+    
+    // Update this output's active workspace
+    havel_out->active_workspace = workspace_id;
+    
+    // For per-monitor workspaces, we would need per-output workspace trees
+    // For now, update global workspace if this is the primary output
+    if (havel_out->is_primary) {
+        workspace_set_active_global(workspace_id);
+    }
+    
+    LOG_INFO("[WORKSPACE] Output %s switched to workspace %u", 
+             havel_out->output->name, workspace_id);
 }
 
 static void cpp_impl_workspace_set_active(uint32_t workspace_id) {
-    // Update C layer workspace state
-    if (g_running_server && workspace_id < HAVEL_WORKSPACE_COUNT) {
-        // Disable all workspaces
-        for (uint32_t i = 0; i < HAVEL_WORKSPACE_COUNT; i++) {
-            wlr_scene_node_set_enabled(&g_running_server->workspaces[i]->node, false);
-        }
-        // Enable only the active workspace
-        wlr_scene_node_set_enabled(&g_running_server->workspaces[workspace_id]->node, true);
-        g_running_server->active_workspace = workspace_id;
-        LOG_INFO("[WORKSPACE] Switched to workspace %u", workspace_id);
-    }
+    // Update C layer workspace state (global switching)
+    workspace_set_active_global(workspace_id);
+}
+
+// C API for per-output workspace switching
+void havel_wlr_output_set_workspace(struct havel_output *output, uint32_t workspace_id) {
+    workspace_set_active_output(output, workspace_id);
+}
+
+uint32_t havel_wlr_output_get_workspace(struct havel_output *output) {
+    return output ? output->active_workspace : 0;
 }
 
 static void cpp_impl_server_quit(void) {
@@ -1197,6 +1239,9 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     output->server = server;
     output->output = wlr_output;
     output->scene_output = wlr_scene_output_create(server->scene, wlr_output);
+    
+    // Initialize per-output workspace to global active workspace
+    output->active_workspace = server->active_workspace;
 
     // Initialize gamma/temperature/brightness/zoom state to defaults
     output->gamma = 1.0f;

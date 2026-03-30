@@ -28,6 +28,9 @@ struct havel_cpp_server;
 struct havel_wlr_server;
 typedef struct havel_wlr_server havel_wlr_server_t;
 
+// Opaque handle to output
+struct havel_output;
+
 // Create/destroy C++ server
 struct havel_cpp_server* havel_cpp_server_create(void);
 void havel_cpp_server_destroy(struct havel_cpp_server* server);
@@ -162,6 +165,10 @@ void havel_wlr_minimize_view(void* c_view);
 void havel_wlr_focus_view(void* c_view);
 void havel_wlr_raise_view(void* c_view);
 void havel_wlr_close_view(void* c_view);
+
+// Per-output workspace management
+void havel_wlr_output_set_workspace(struct havel_output *output, uint32_t workspace_id);
+uint32_t havel_wlr_output_get_workspace(struct havel_output *output);
 
 #ifdef __cplusplus
 }
