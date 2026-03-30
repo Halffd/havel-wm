@@ -480,20 +480,17 @@ bool PluginManager::isViewFloating(View* view) {
 
 uint32_t PluginManager::getViewTextureId(View* view) {
     if (!m_server || !view) return 0;
-    auto* server = static_cast<Server*>(m_server);
-    return 0;
+    return view->textureId();
 }
 
 int PluginManager::getViewTextureWidth(View* view) {
     if (!m_server || !view) return 0;
-    auto* server = static_cast<Server*>(m_server);
-    return 0;
+    return view->textureWidth();
 }
 
 int PluginManager::getViewTextureHeight(View* view) {
     if (!m_server || !view) return 0;
-    auto* server = static_cast<Server*>(m_server);
-    return 0;
+    return view->textureHeight();
 }
 
 uint32_t PluginManager::getActiveWorkspace() {

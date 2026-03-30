@@ -27,6 +27,13 @@ public:
     // Opacity (for animations)
     float opacity() const { return m_opacity; }
     void setOpacity(float opacity);
+    
+    // Thumbnail texture (for Alt-Tab, Overview)
+    uint32_t textureId() const { return m_textureId; }
+    void setTextureId(uint32_t id);
+    int textureWidth() const { return m_textureWidth; }
+    int textureHeight() const { return m_textureHeight; }
+    void setTextureSize(int w, int h);
 
     // Floating state
     bool isFloating() const { return m_floating; }
@@ -64,6 +71,12 @@ private:
     bool m_haveFloatGeom = false;
     bool m_mapped = false;
     float m_opacity = 1.0f;  // Opacity for animations (0.0 - 1.0)
+    
+    // Thumbnail texture (for Alt-Tab, Overview)
+    uint32_t m_textureId = 0;
+    int m_textureWidth = 0;
+    int m_textureHeight = 0;
+    
     void* m_nativeHandle = nullptr;
     uint64_t m_windowId = 0;
     std::string m_appId;

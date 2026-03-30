@@ -229,6 +229,14 @@ void Server::onViewMapped(View* view) {
         // Scale animation would require scene graph support
         // For now, just use opacity fade
     }
+    
+    // Capture initial thumbnail texture for Alt-Tab
+    uint32_t texId = havel_wlr_capture_view_texture(view->nativeHandle());
+    if (texId != 0) {
+        view->setTextureId(texId);
+        // Texture dimensions would be captured by the capture function
+        LOG_INFO("[Server] Captured view texture %u for Alt-Tab", texId);
+    }
 
     focusView(view);
     LOG_INFO("[Server] focusView complete");

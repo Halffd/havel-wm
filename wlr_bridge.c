@@ -2,6 +2,7 @@
 // Note: WLR_USE_UNSTABLE is defined in CMakeLists.txt
 
 #include <wm/wlr_bridge.h>
+#include <wm/render/WlrBinding.h>
 #include <Logger.h>
 #include <wm/render_c.h>
 #include <core/LoadingScreen.h>
@@ -2735,4 +2736,43 @@ void havel_wlr_raise_view(void* c_view) {
     if (g_view_raise) {
         g_view_raise(c_view);
     }
+}
+
+// Capture view thumbnail texture for Alt-Tab, Overview
+// Returns non-zero if texture capture succeeded (actual GL texture requires Vulkan-GLES interop)
+uint32_t havel_wlr_capture_view_texture(void* c_view) {
+    if (!c_view) return 0;
+    
+    struct havel_xdg_view *view = (struct havel_xdg_view*)c_view;
+    
+    if (!view->scene_tree || !view->xdg_surface) return 0;
+    
+    // Get the scene surface from the scene tree
+    struct wlr_scene_surface *scene_surface = NULL;
+    
+    // Walk the scene tree to find the surface
+    struct wlr_scene_node *node = &view->scene_tree->node;
+    if (node->type == WLR_SCENE_NODE_BUFFER) {
+        struct wlr_scene_buffer *scene_buffer = wlr_scene_buffer_from_node(node);
+        scene_surface = wlr_scene_surface_try_from_buffer(scene_buffer);
+    }
+    
+    if (!scene_surface) return 0;
+    
+    // Get the underlying wlr_surface
+    struct wlr_surface *surface = scene_surface->surface;
+    if (!surface || !surface->buffer) return 0;
+    
+    // Get Vulkan renderer from server
+    // Note: This requires access to the Vulkan renderer which is in the C++ layer
+    // For now, return 0 to indicate texture capture not fully implemented
+    // Alt-Tab will use fallback colored rectangles
+    
+    // In production: 
+    // 1. Get Vulkan renderer from server->renderer (if using Vulkan)
+    // 2. Call wlr_buffer_import_as_vulkan(renderer, surface->buffer, &texture)
+    // 3. Convert Vulkan texture to GL texture
+    // 4. Store texture ID in view
+    
+    return 0;  // Not implemented - needs Vulkan renderer access
 }

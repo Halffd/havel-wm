@@ -34,6 +34,15 @@ void View::setOpacity(float opacity) {
     // For now, this is tracked for future implementation
 }
 
+void View::setTextureId(uint32_t id) {
+    m_textureId = id;
+}
+
+void View::setTextureSize(int w, int h) {
+    m_textureWidth = w;
+    m_textureHeight = h;
+}
+
 void View::setFloating(bool floating) {
     m_floating = floating;
 }

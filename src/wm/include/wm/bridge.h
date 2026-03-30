@@ -166,6 +166,9 @@ void havel_wlr_focus_view(void* c_view);
 void havel_wlr_raise_view(void* c_view);
 void havel_wlr_close_view(void* c_view);
 
+// View texture capture (for Alt-Tab thumbnails)
+uint32_t havel_wlr_capture_view_texture(void* c_view);
+
 // Per-output workspace management
 void havel_wlr_output_set_workspace(struct havel_output *output, uint32_t workspace_id);
 uint32_t havel_wlr_output_get_workspace(struct havel_output *output);
