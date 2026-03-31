@@ -1,6 +1,7 @@
 #pragma once
 
 #include <shell/WindowManager.hpp>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <functional>
 #include <vector>
@@ -8,6 +9,11 @@
 #include <unordered_set>
 
 namespace havel {
+
+// JSON type aliases for convenience
+using json_t = nlohmann::json;
+using JsonObject = nlohmann::ordered_json;
+using JsonArray = nlohmann::json::array_t;
 
 /**
  * Enhanced IPC Server - Multiple clients, JSON protocol, event subscriptions
@@ -86,6 +92,15 @@ public:
     std::string handleSubscribe(const std::string& args);
     std::string handleUnsubscribe(const std::string& args);
 
+    // JSON helpers (public for use in Server.cpp lambdas)
+    std::string extractJsonString(const std::string& json, const std::string& key, const std::string& defaultValue = "");
+    int extractJsonInt(const std::string& json, const std::string& key, int defaultValue = 0);
+    float extractJsonFloat(const std::string& json, const std::string& key, float defaultValue = 0.0f);
+    bool extractJsonBool(const std::string& json, const std::string& key, bool defaultValue = false);
+    std::string jsonToString(const JsonObject& obj);
+    std::string jsonToString(const JsonArray& arr);
+    std::string createSuccessResponse(const std::string& message);
+
 private:
     // Message processing
     void processMessage(int clientFd, const std::string& msg);
@@ -93,10 +108,6 @@ private:
     std::string createResponse(int id, const std::string& result);
     std::string createError(int id, int code, const std::string& message);
     std::string createEvent(const std::string& method, const std::string& params);
-
-    // JSON helpers (simple manual parsing - no external dependency)
-    std::string extractJsonString(const std::string& json, const std::string& key);
-    int extractJsonInt(const std::string& json, const std::string& key, int defaultValue = 0);
 
     // Event type to string
     static std::string eventTypeToString(EventType type);

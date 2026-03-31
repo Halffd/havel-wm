@@ -523,4 +523,65 @@ std::string IPCServer::handleUnsubscribe(const std::string& args) {
     return "{\"unsubscribed\":true}";
 }
 
+// ============================================================================
+// JSON Helper Implementations
+// ============================================================================
+
+std::string IPCServer::extractJsonString(const std::string& json, const std::string& key, const std::string& defaultValue) {
+    try {
+        auto j = json_t::parse(json);
+        if (j.contains(key) && j[key].is_string()) {
+            return j[key].get<std::string>();
+        }
+    } catch (...) {}
+    return defaultValue;
+}
+
+int IPCServer::extractJsonInt(const std::string& json, const std::string& key, int defaultValue) {
+    try {
+        auto j = json_t::parse(json);
+        if (j.contains(key) && j[key].is_number_integer()) {
+            return j[key].get<int>();
+        }
+    } catch (...) {}
+    return defaultValue;
+}
+
+float IPCServer::extractJsonFloat(const std::string& json, const std::string& key, float defaultValue) {
+    try {
+        auto j = json_t::parse(json);
+        if (j.contains(key)) {
+            return j[key].get<float>();
+        }
+    } catch (...) {}
+    return defaultValue;
+}
+
+bool IPCServer::extractJsonBool(const std::string& json, const std::string& key, bool defaultValue) {
+    try {
+        auto j = json_t::parse(json);
+        if (j.contains(key)) {
+            return j[key].get<bool>();
+        }
+    } catch (...) {}
+    return defaultValue;
+}
+
+std::string IPCServer::jsonToString(const JsonObject& obj) {
+    json_t j = obj;
+    return j.dump();
+}
+
+std::string IPCServer::jsonToString(const JsonArray& arr) {
+    json_t j = arr;
+    return j.dump();
+}
+
+std::string IPCServer::createSuccessResponse(const std::string& message) {
+    json_t j;
+    j["success"] = true;
+    j["message"] = message;
+    return j.dump();
+}
+
 } // namespace havel

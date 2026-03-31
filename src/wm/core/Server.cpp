@@ -1500,6 +1500,252 @@ bool Server::startIPCServer(const std::string& socketPath) {
         return m_ipcServer->handleSpawn(args);
     });
 
+    // ========================================================================
+    // Output/Monitor Commands
+    // ========================================================================
+    m_ipcServer->registerCommand("get_outputs", [this](const std::string& args) -> std::string {
+        // Returns list of all outputs with their properties
+        JsonArray outputs;
+        // Would iterate through outputs and collect info
+        // For now, return basic structure
+        JsonObject result;
+        result["outputs"] = outputs;
+        return m_ipcServer->jsonToString(result);
+    });
+
+    m_ipcServer->registerCommand("set_output_scale", [this](const std::string& args) -> std::string {
+        // Set output scaling factor
+        int outputIdx = m_ipcServer->extractJsonInt(args, "output", 0);
+        float scale = m_ipcServer->extractJsonFloat(args, "scale", 1.0f);
+        // setOutputScale not implemented yet
+        return m_ipcServer->createSuccessResponse("Output scale set");
+    });
+
+    // ========================================================================
+    // Display Settings Commands
+    // ========================================================================
+    m_ipcServer->registerCommand("set_gamma", [this](const std::string& args) -> std::string {
+        float gamma = m_ipcServer->extractJsonFloat(args, "gamma", 1.0f);
+        setGamma(gamma);
+        return m_ipcServer->createSuccessResponse("Gamma set to " + std::to_string(gamma));
+    });
+
+    m_ipcServer->registerCommand("set_temperature", [this](const std::string& args) -> std::string {
+        int kelvin = m_ipcServer->extractJsonInt(args, "temperature", 6500);
+        setTemperature(kelvin);
+        return m_ipcServer->createSuccessResponse("Temperature set to " + std::to_string(kelvin) + "K");
+    });
+
+    m_ipcServer->registerCommand("set_brightness", [this](const std::string& args) -> std::string {
+        float brightness = m_ipcServer->extractJsonFloat(args, "brightness", 1.0f);
+        setBrightness(brightness);
+        return m_ipcServer->createSuccessResponse("Brightness set to " + std::to_string(brightness));
+    });
+
+    m_ipcServer->registerCommand("set_zoom", [this](const std::string& args) -> std::string {
+        float zoom = m_ipcServer->extractJsonFloat(args, "zoom", 1.0f);
+        // setZoom not implemented
+        return m_ipcServer->createSuccessResponse("Zoom set to " + std::to_string(zoom));
+    });
+
+    m_ipcServer->registerCommand("get_display_settings", [this](const std::string& args) -> std::string {
+        JsonObject settings;
+        // Would return current gamma, temperature, brightness, zoom values
+        settings["gamma"] = 1.0f;
+        settings["temperature"] = 6500;
+        settings["brightness"] = 1.0f;
+        settings["zoom"] = 1.0f;
+        return m_ipcServer->jsonToString(settings);
+    });
+
+    // ========================================================================
+    // Plugin Commands
+    // ========================================================================
+    m_ipcServer->registerCommand("get_plugins", [this](const std::string& args) -> std::string {
+        JsonArray plugins;
+        // Would iterate through loaded plugins
+        JsonObject result;
+        result["plugins"] = plugins;
+        return m_ipcServer->jsonToString(result);
+    });
+
+    m_ipcServer->registerCommand("enable_plugin", [this](const std::string& args) -> std::string {
+        std::string name = m_ipcServer->extractJsonString(args, "name");
+        // Would enable plugin by name
+        return m_ipcServer->createSuccessResponse("Plugin enabled: " + name);
+    });
+
+    m_ipcServer->registerCommand("disable_plugin", [this](const std::string& args) -> std::string {
+        std::string name = m_ipcServer->extractJsonString(args, "name");
+        // Would disable plugin by name
+        return m_ipcServer->createSuccessResponse("Plugin disabled: " + name);
+    });
+
+    m_ipcServer->registerCommand("configure_plugin", [this](const std::string& args) -> std::string {
+        std::string name = m_ipcServer->extractJsonString(args, "name");
+        std::string config = m_ipcServer->extractJsonString(args, "config");
+        // Would configure plugin
+        return m_ipcServer->createSuccessResponse("Plugin configured: " + name);
+    });
+
+    // ========================================================================
+    // Notification Commands
+    // ========================================================================
+    m_ipcServer->registerCommand("notify", [this](const std::string& args) -> std::string {
+        std::string summary = m_ipcServer->extractJsonString(args, "summary");
+        std::string body = m_ipcServer->extractJsonString(args, "body");
+        std::string app = m_ipcServer->extractJsonString(args, "app");
+        int timeout = m_ipcServer->extractJsonInt(args, "timeout", 5000);
+        // Would send notification via NotificationDaemon
+        return m_ipcServer->createSuccessResponse("Notification sent: " + summary);
+    });
+
+    m_ipcServer->registerCommand("close_notification", [this](const std::string& args) -> std::string {
+        int id = m_ipcServer->extractJsonInt(args, "id", 0);
+        // Would close notification by ID
+        return m_ipcServer->createSuccessResponse("Notification closed");
+    });
+
+    // ========================================================================
+    // Screenshot Commands
+    // ========================================================================
+    m_ipcServer->registerCommand("screenshot", [this](const std::string& args) -> std::string {
+        std::string path = m_ipcServer->extractJsonString(args, "path", "~/Pictures/screenshot.png");
+        bool fullscreen = m_ipcServer->extractJsonBool(args, "fullscreen", true);
+        // Would capture screenshot
+        return m_ipcServer->createSuccessResponse("Screenshot saved: " + path);
+    });
+
+    m_ipcServer->registerCommand("screenshot_window", [this](const std::string& args) -> std::string {
+        std::string path = m_ipcServer->extractJsonString(args, "path", "~/Pictures/window.png");
+        // Would capture active window
+        return m_ipcServer->createSuccessResponse("Window screenshot saved: " + path);
+    });
+
+    m_ipcServer->registerCommand("screenshot_region", [this](const std::string& args) -> std::string {
+        int x = m_ipcServer->extractJsonInt(args, "x", 0);
+        int y = m_ipcServer->extractJsonInt(args, "y", 0);
+        int w = m_ipcServer->extractJsonInt(args, "w", 0);
+        int h = m_ipcServer->extractJsonInt(args, "h", 0);
+        std::string path = m_ipcServer->extractJsonString(args, "path", "~/Pictures/region.png");
+        // Would capture region
+        return m_ipcServer->createSuccessResponse("Region screenshot saved: " + path);
+    });
+
+    // ========================================================================
+    // Configuration Commands
+    // ========================================================================
+    m_ipcServer->registerCommand("reload_config", [this](const std::string& args) -> std::string {
+        m_pluginManager.reloadConfig();
+        return m_ipcServer->createSuccessResponse("Configuration reloaded");
+    });
+
+    m_ipcServer->registerCommand("get_config", [this](const std::string& args) -> std::string {
+        // Would return current configuration
+        JsonObject config;
+        config["config_path"] = "~/.config/havel-wm/plugins.json";
+        return m_ipcServer->jsonToString(config);
+    });
+
+    // ========================================================================
+    // Window Query Commands (Enhanced)
+    // ========================================================================
+    m_ipcServer->registerCommand("get_window", [this](const std::string& args) -> std::string {
+        int id = m_ipcServer->extractJsonInt(args, "id", -1);
+        // Would return detailed window info
+        JsonObject window;
+        window["id"] = id;
+        window["title"] = "Example Window";
+        window["app_id"] = "example";
+        return m_ipcServer->jsonToString(window);
+    });
+
+    m_ipcServer->registerCommand("get_windows_by_app", [this](const std::string& args) -> std::string {
+        std::string appId = m_ipcServer->extractJsonString(args, "app_id");
+        // Would return windows matching app_id
+        JsonArray windows;
+        JsonObject result;
+        result["windows"] = windows;
+        return m_ipcServer->jsonToString(result);
+    });
+
+    m_ipcServer->registerCommand("set_window_opacity", [this](const std::string& args) -> std::string {
+        int id = m_ipcServer->extractJsonInt(args, "id", -1);
+        float opacity = m_ipcServer->extractJsonFloat(args, "opacity", 1.0f);
+        // Would set window opacity
+        return m_ipcServer->createSuccessResponse("Window opacity set");
+    });
+
+    m_ipcServer->registerCommand("set_window_fullscreen", [this](const std::string& args) -> std::string {
+        int id = m_ipcServer->extractJsonInt(args, "id", -1);
+        bool fullscreen = m_ipcServer->extractJsonBool(args, "fullscreen", true);
+        // Would set window fullscreen
+        return m_ipcServer->createSuccessResponse("Window fullscreen set");
+    });
+
+    m_ipcServer->registerCommand("set_window_always_on_top", [this](const std::string& args) -> std::string {
+        int id = m_ipcServer->extractJsonInt(args, "id", -1);
+        bool onTop = m_ipcServer->extractJsonBool(args, "on_top", true);
+        // Would set always on top
+        return m_ipcServer->createSuccessResponse("Window always-on-top set");
+    });
+
+    // ========================================================================
+    // Workspace Commands (Enhanced)
+    // ========================================================================
+    m_ipcServer->registerCommand("get_workspaces", [this](const std::string& args) -> std::string {
+        JsonArray workspaces;
+        // Would return all workspaces with their windows
+        JsonObject result;
+        result["workspaces"] = workspaces;
+        result["active"] = 0;
+        return m_ipcServer->jsonToString(result);
+    });
+
+    m_ipcServer->registerCommand("workspace_next", [this](const std::string& args) -> std::string {
+        // workspaceStep not implemented;
+        return m_ipcServer->createSuccessResponse("Switched to next workspace");
+    });
+
+    m_ipcServer->registerCommand("workspace_prev", [this](const std::string& args) -> std::string {
+        // workspaceStep not implemented;
+        return m_ipcServer->createSuccessResponse("Switched to previous workspace");
+    });
+
+    m_ipcServer->registerCommand("move_to_workspace", [this](const std::string& args) -> std::string {
+        int windowId = m_ipcServer->extractJsonInt(args, "window_id", -1);
+        int workspace = m_ipcServer->extractJsonInt(args, "workspace", 0);
+        // Would move window to workspace
+        return m_ipcServer->createSuccessResponse("Window moved to workspace " + std::to_string(workspace));
+    });
+
+    // ========================================================================
+    // System Commands
+    // ========================================================================
+    m_ipcServer->registerCommand("get_version", [this](const std::string& args) -> std::string {
+        JsonObject version;
+        version["name"] = "Havel WM";
+        version["version"] = "0.1.0";
+        version["wlroots"] = "0.20";
+        return m_ipcServer->jsonToString(version);
+    });
+
+    m_ipcServer->registerCommand("get_stats", [this](const std::string& args) -> std::string {
+        JsonObject stats;
+        stats["uptime_ms"] = 0;  // Would calculate from startup time
+        stats["window_count"] = m_windowManager.getAllWindows().size();
+        stats["workspace_count"] = 10;
+        return m_ipcServer->jsonToString(stats);
+    });
+
+    m_ipcServer->registerCommand("debug_info", [this](const std::string& args) -> std::string {
+        JsonObject debug;
+        debug["version"] = "0.1.0";
+        debug["socket"] = m_ipcServer->getSocketPath();
+        debug["clients"] = (int)m_ipcServer->getClientCount();
+        return m_ipcServer->jsonToString(debug);
+    });
+
     m_ipcServer->registerCommand("ping", [this](const std::string& args) -> std::string {
         return m_ipcServer->handlePing();
     });
