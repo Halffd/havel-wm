@@ -1,9 +1,10 @@
 // Notifications Plugin - On-screen notifications with overlay rendering
-// Shows notifications for app events, system alerts, and custom messages
+// Shows notifications from D-Bus org.freedesktop.Notifications interface
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
+#include <wm/core/NotificationDaemon.hpp>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -73,10 +74,26 @@ public:
         m_margin = 16;
         m_cornerRadius = 8;
         
+        // Initialize D-Bus notification daemon
+        m_daemon = std::make_unique<DbusNotificationDaemon>();
+        if (m_daemon->initialize()) {
+            // Set callback to receive notifications from D-Bus
+            m_daemon->setDbusNotificationCallback([this](const DbusNotification& notif) {
+                onExternalNotification(notif);
+            });
+            printf("[NotificationsPlugin] D-Bus notification daemon running\n");
+        } else {
+            printf("[NotificationsPlugin] Failed to start D-Bus daemon\n");
+        }
+        
         printf("[NotificationsPlugin] Initialized (max %d notifications)\n", m_maxNotifications);
     }
 
     void fini() override {
+        if (m_daemon) {
+            m_daemon->shutdown();
+            m_daemon.reset();
+        }
         printf("[NotificationsPlugin] Finalized (%lu notifications shown)\n",
                m_totalNotifications);
         m_api = nullptr;
@@ -207,6 +224,7 @@ public:
 
 private:
     CompositorAPI* m_api = nullptr;
+    std::unique_ptr<DbusNotificationDaemon> m_daemon;  // D-Bus notification daemon
     std::vector<Notification> m_notifications;
     size_t m_totalNotifications = 0;
     OutputFrameEvent m_lastFrameEvent;
@@ -231,6 +249,16 @@ private:
                 ++it;
             }
         }
+    }
+    
+    // Handle notifications from D-Bus daemon
+    void onExternalNotification(const havel::DbusNotification& notif) {
+        // Create internal notification from external one
+        m_notifications.emplace_back(notif.summary, notif.body, notif.app, (uint64_t)notif.timeout);
+        m_totalNotifications++;
+        
+        printf("[NotificationsPlugin] External notification: %s - %s\n", 
+               notif.summary.c_str(), notif.body.c_str());
     }
 };
 
