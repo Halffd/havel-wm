@@ -9,8 +9,15 @@
 #include <cstring>
 #include <vector>
 #include <string>
+#include <chrono>
 
 namespace havel {
+
+// Get current time in milliseconds
+static uint64_t getMonotonicTimeMs() {
+    auto now = std::chrono::steady_clock::now();
+    return std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+}
 
 /**
  * Window entry for overview
@@ -74,6 +81,37 @@ public:
         printf("[Overview] Config loaded\n");
     }
     
+    void onOutputFrame(const OutputFrameEvent& event) override {
+        if (!m_visible && m_animOpacity <= 0.0f) return;
+        if (!m_animating) return;
+        
+        // Update animation
+        uint64_t now = getMonotonicTimeMs();
+        float elapsed = (float)(now - m_animStartTime) / 1000.0f;  // seconds
+        float progress = elapsed / m_animDuration;
+        
+        if (progress >= 1.0f) {
+            progress = 1.0f;
+            m_animating = false;
+            
+            if (!m_visible) {
+                m_animOpacity = 0.0f;  // Fully hidden
+            }
+        }
+        
+        // Ease-out cubic for smooth animation
+        progress = 1.0f - (1.0f - progress) * (1.0f - progress) * (1.0f - progress);
+        
+        if (m_visible) {
+            m_animOpacity = progress;  // Fade in from 0 to 1
+        } else {
+            m_animOpacity = 1.0f - progress;  // Fade out from 1 to 0
+        }
+        
+        m_api->scheduleRedraw();
+        (void)event;
+    }
+    
     bool onKey(const KeyEvent& event) override {
         constexpr uint32_t MOD_LOGO = 1 << 6;
 
@@ -128,6 +166,12 @@ private:
     int m_gridCols = 3;
     int m_gridRows = 4;
     
+    // Animation state
+    bool m_animating = false;
+    float m_animOpacity = 0.0f;  // 0.0 = fully transparent, 1.0 = fully opaque
+    uint64_t m_animStartTime = 0;
+    float m_animDuration = 0.25f;  // 250ms fade animation
+    
     void toggle() {
         if (m_visible) {
             hide();
@@ -141,6 +185,11 @@ private:
         m_selectedWorkspace = m_api->getActiveWorkspace();
         m_selectedWindow = -1;
         
+        // Start fade-in animation
+        m_animating = true;
+        m_animStartTime = getMonotonicTimeMs();
+        m_animOpacity = 0.0f;
+        
         // Collect all workspaces and windows
         collectWorkspaces();
         
@@ -152,7 +201,12 @@ private:
     }
     
     void hide() {
-        m_visible = false;
+        // Start fade-out animation
+        m_animating = true;
+        m_animStartTime = getMonotonicTimeMs();
+        // m_animOpacity stays at current value, will fade to 0
+        
+        // Clear data after animation completes
         m_workspaces.clear();
         m_selectedWorkspace = 0;
         m_selectedWindow = -1;
@@ -316,15 +370,20 @@ private:
     }
     
     void renderOverlay(void* rendererPtr) override {
-        if (!m_visible || !rendererPtr) return;
-
+        if (!rendererPtr) return;
+        if (!m_visible && m_animOpacity <= 0.0f) return;
+        
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+        
+        // Apply animation opacity
+        float alpha = m_animOpacity;
+        if (alpha <= 0.01f) return;  // Too transparent to see
 
         int screenWidth = renderer->getScreenWidth();
         int screenHeight = renderer->getScreenHeight();
 
-        // Draw semi-transparent background
-        renderer->drawRect(0, 0, screenWidth, screenHeight, Color(0.0f, 0.0f, 0.0f, 0.8f));
+        // Draw semi-transparent background with animation opacity
+        renderer->drawRect(0, 0, screenWidth, screenHeight, Color(0.0f, 0.0f, 0.0f, 0.8f * alpha));
 
         // Calculate workspace grid layout
         int wsCount = (int)m_workspaces.size();
