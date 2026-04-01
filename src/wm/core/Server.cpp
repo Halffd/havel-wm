@@ -1,8 +1,10 @@
 #include <wm/Server.hpp>
 #include <wm/Layout.hpp>
 #include <wm/plugins/Plugins.hpp>
+#include <shell/IPCServer.hpp>
 #include "core/CoreWindowManager.hpp"
 #include "scene/SceneGraph.hpp"
+#include <nlohmann/json.hpp>
 #include <Logger.h>
 #include <algorithm>
 #include <cstdlib>
@@ -11,6 +13,9 @@
 #include <cstdio>
 
 namespace havel {
+
+using json = nlohmann::json;
+using JsonObject = nlohmann::ordered_json;
 
 Server::Server() {
     LOG_DEBUG("Server constructor");
@@ -120,6 +125,13 @@ void Server::setActiveWorkspace(uint32_t id) {
 
     m_activeWorkspace = id;
     arrangeWorkspace(id);
+    
+    // Broadcast workspace changed event via IPC
+    if (m_ipcServer) {
+        JsonObject params;
+        params["workspace"] = (int)id;
+        m_ipcServer->broadcastEvent(IPCServer::EventType::WorkspaceChanged, m_ipcServer->jsonToString(params));
+    }
 }
 
 void Server::workspaceStep(bool backwards) {
@@ -207,6 +219,16 @@ void Server::onViewMapped(View* view) {
     m_coreWindowManager.addWindow(view);
     LOG_INFO("[Server] Added to WindowManager");
 
+    // Broadcast window created event via IPC
+    if (m_ipcServer) {
+        JsonObject params;
+        params["id"] = (int)view->windowId();
+        params["app_id"] = view->appId();
+        params["title"] = view->title();
+        params["workspace"] = (int)view->workspaceId();
+        m_ipcServer->broadcastEvent(IPCServer::EventType::WindowCreated, m_ipcServer->jsonToString(params));
+    }
+
     // Dispatch to plugins
     ViewEvent event;
     event.view = view;
@@ -290,6 +312,13 @@ void Server::onViewDestroyed(View* view) {
     if (!view) return;
 
     LOG_INFO("View destroyed");
+
+    // Broadcast window destroyed event via IPC
+    if (m_ipcServer) {
+        JsonObject params;
+        params["id"] = (int)view->windowId();
+        m_ipcServer->broadcastEvent(IPCServer::EventType::WindowDestroyed, m_ipcServer->jsonToString(params));
+    }
 
     // Dispatch to plugins first (before removing from internal state)
     ViewEvent event;
