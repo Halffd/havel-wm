@@ -46,6 +46,7 @@ static uint64_t get_monotonic_time_ms(void) {
 #include <wlr/types/wlr_xdg_shell.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
 #include <wlr/types/wlr_xdg_output_v1.h>
+#include <wlr/types/wlr_output_management_v1.h>
 #include <wlr/types/wlr_server_decoration.h>
 #include <wlr/types/wlr_xdg_activation_v1.h>
 #include <wlr/types/wlr_primary_selection_v1.h>
@@ -2181,6 +2182,13 @@ havel_wlr_server_t* havel_wlr_create(void) {
     // Create primary selection device manager (for clipboard)
     wlr_primary_selection_v1_device_manager_create(server->display);
     LOG_INFO("[Primary Selection] primary_selection_v1_device_manager created");
+
+    // Create output management v1 (for dynamic output configuration via wlr-randr)
+    wlr_output_manager_v1_create(server->display);
+    LOG_INFO("[Output Management] output_manager_v1 created (wlr-randr support)");
+
+    // Note: output_power_manager_v1 requires wlr-protocols >= 1.21
+    // Power management available via gamma control in the meantime
 
     // Initialize gamma control v1 manager
     server->gamma_control_manager = wlr_gamma_control_manager_v1_create(server->display);
