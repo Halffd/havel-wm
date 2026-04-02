@@ -377,6 +377,17 @@ echo '{"method":"subscribe","params":{"events":["window_created"]}}' | \
 | **Capture** | xdg-desktop-portal | ✅ | Screen sharing |
 | **Notification** | org.freedesktop.Notifications | ✅ | D-Bus notifications |
 | **IPC** | Havel IPC | ✅ | JSON-RPC control |
+| **Input** | wlr-virtual-pointer-v1 | ✅ NEW | Remote desktop |
+| **Input** | wlr-data-control-v1 | ✅ NEW | Clipboard history |
+| **Input** | wlr-input-method-v2 | ✅ NEW | IME input |
+| **Input** | wlr-cursor-shape-v1 | ✅ NEW | Cursor themes |
+| **Input** | wlr-tablet-v2 | ✅ | Graphics tablets |
+| **Buffer** | wlr-linux-dmabuf-v1 | ✅ NEW | Hardware buffers |
+| **Buffer** | wlr-export-dmabuf-v1 | ✅ NEW | Screen capture |
+| **Timing** | wlr-presentation-time | ✅ NEW | Video sync |
+| **Display** | wlr-fractional-scale-v1 | ✅ NEW | High DPI |
+| **Color** | wlr-color-management-v1 | ✅ NEW | Color calibration |
+| **Window** | wlr-ext-foreign-toplevel-list-v1 | ✅ NEW | Taskbar list |
 
 ---
 

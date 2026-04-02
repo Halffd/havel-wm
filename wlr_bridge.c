@@ -56,6 +56,18 @@ static uint64_t get_monotonic_time_ms(void) {
 #include <wlr/types/wlr_relative_pointer_v1.h>
 #include <wlr/types/wlr_idle_inhibit_v1.h>
 #include <wlr/types/wlr_idle_notify_v1.h>
+#include <wlr/types/wlr_virtual_pointer_v1.h>
+#include <wlr/types/wlr_data_control_v1.h>
+#include <wlr/types/wlr_input_method_v2.h>
+#include <wlr/types/wlr_text_input_v3.h>
+#include <wlr/types/wlr_cursor_shape_v1.h>
+#include <wlr/types/wlr_linux_dmabuf_v1.h>
+#include <wlr/types/wlr_presentation_time.h>
+#include <wlr/types/wlr_tablet_v2.h>
+#include <wlr/types/wlr_fractional_scale_v1.h>
+#include <wlr/types/wlr_export_dmabuf_v1.h>
+#include <wlr/types/wlr_color_management_v1.h>
+#include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
 #include <wlr/util/log.h>
 #include <wlr/xwayland.h>
 
@@ -183,6 +195,41 @@ struct havel_wlr_server {
 
     // Idle notify v1 (screensaver support)
     struct wlr_idle_notifier_v1 *idle_notifier;
+
+    // Virtual pointer v1 (remote desktop)
+    struct wlr_virtual_pointer_manager_v1 *virtual_pointer_manager;
+
+    // Data control v1 (clipboard management)
+    struct wlr_data_control_manager_v1 *data_control_manager;
+
+    // Input method v2 (IME)
+    struct wlr_input_method_manager_v2 *input_method_manager;
+
+    // Text input v3 (text input)
+    struct wlr_text_input_manager_v3 *text_input_manager;
+
+    // Cursor shape v1 (cursor customization)
+    struct wlr_cursor_shape_manager_v1 *cursor_shape_manager;
+
+    // Linux DMA-BUF v1 (buffer sharing)
+    struct wlr_linux_dmabuf_v1 *linux_dmabuf;
+
+    // Presentation time (frame timing)
+    struct wlr_presentation *presentation;
+
+    struct wlr_tablet_manager_v2 *tablet_manager;
+
+    // Fractional scale v1 (high DPI)
+    struct wlr_fractional_scale_manager_v1 *fractional_scale_manager;
+
+    // Export DMA-BUF v1 (screen capture)
+    struct wlr_export_dmabuf_manager_v1 *export_dmabuf_manager;
+
+    // Color management v1 (color calibration)
+    struct wlr_color_manager_v1 *color_manager;
+
+    // Extended foreign toplevel list v1
+    struct wlr_ext_foreign_toplevel_list_v1 *ext_foreign_toplevel_list;
 
     struct wlr_seat *seat;
     struct wlr_cursor *cursor;
@@ -2261,6 +2308,73 @@ havel_wlr_server_t* havel_wlr_create(void) {
     server->idle_notifier = wlr_idle_notifier_v1_create(server->display);
     if (server->idle_notifier) {
         LOG_INFO("[Idle Notify] idle_notifier_v1 created (screensaver support)");
+    }
+
+    // Create virtual pointer manager v1 (remote desktop control)
+    server->virtual_pointer_manager = wlr_virtual_pointer_manager_v1_create(server->display);
+    if (server->virtual_pointer_manager) {
+        LOG_INFO("[Virtual Pointer] virtual_pointer_manager_v1 created (remote desktop)");
+    }
+
+    // Create data control manager v1 (clipboard management)
+    server->data_control_manager = wlr_data_control_manager_v1_create(server->display);
+    if (server->data_control_manager) {
+        LOG_INFO("[Data Control] data_control_manager_v1 created (clipboard history)");
+    }
+
+    // Create input method manager v2 (IME support)
+    server->input_method_manager = wlr_input_method_manager_v2_create(server->display);
+    if (server->input_method_manager) {
+        LOG_INFO("[Input Method] input_method_manager_v2 created (IME support)");
+    }
+
+    // Create text input manager v3 (text input for IME)
+    server->text_input_manager = wlr_text_input_manager_v3_create(server->display);
+    if (server->text_input_manager) {
+        LOG_INFO("[Text Input] text_input_manager_v3 created (text input)");
+    }
+
+    // Create cursor shape manager v1 (cursor shape customization)
+    server->cursor_shape_manager = wlr_cursor_shape_manager_v1_create(server->display, 1);
+    if (server->cursor_shape_manager) {
+        LOG_INFO("[Cursor Shape] cursor_shape_manager_v1 created (cursor themes)");
+    }
+
+    // Create Linux DMA-BUF v1 (hardware buffer sharing)
+    server->linux_dmabuf = wlr_linux_dmabuf_v1_create(server->display, 1, NULL);
+    if (server->linux_dmabuf) {
+        LOG_INFO("[Linux DMA-BUF] linux_dmabuf_v1 created (hardware acceleration)");
+    }
+
+    // Create presentation time (frame timing for video sync)
+    server->presentation = wlr_presentation_create(server->display, server->backend, 1);
+    if (server->presentation) {
+        LOG_INFO("[Presentation] presentation_time created (video sync)");
+    }
+
+
+    // Create fractional scale manager v1 (high DPI scaling)
+    server->fractional_scale_manager = wlr_fractional_scale_manager_v1_create(server->display, 1);
+    if (server->fractional_scale_manager) {
+        LOG_INFO("[Fractional Scale] fractional_scale_manager_v1 created (high DPI)");
+    }
+
+    // Create export DMA-BUF manager v1 (screen capture)
+    server->export_dmabuf_manager = wlr_export_dmabuf_manager_v1_create(server->display);
+    if (server->export_dmabuf_manager) {
+        LOG_INFO("[Export DMA-BUF] export_dmabuf_manager_v1 created (screen capture)");
+    }
+
+    // Create color manager v1 (color calibration)
+    server->color_manager = wlr_color_manager_v1_create(server->display, 1, NULL);
+    if (server->color_manager) {
+        LOG_INFO("[Color Management] color_manager_v1 created (color calibration)");
+    }
+
+    // Create extended foreign toplevel list v1 (taskbar support)
+    server->ext_foreign_toplevel_list = wlr_ext_foreign_toplevel_list_v1_create(server->display, 1);
+    if (server->ext_foreign_toplevel_list) {
+        LOG_INFO("[Foreign Toplevel List] ext_foreign_toplevel_list_v1 created (taskbar)");
     }
 
     server->xwayland = wlr_xwayland_create(server->display, server->compositor, true);
