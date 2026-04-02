@@ -737,6 +737,116 @@ Screenshot region.
 
 ---
 
+---
+
+## Audio/Video Recording Commands
+
+### audio_record
+Start audio recording.
+
+**Parameters:**
+- `path` (string, optional): Output path (default: ~/recording.wav)
+- `duration` (integer, optional): Duration in seconds (0 = until stopped)
+- `source` (string, optional): Audio source (default: auto)
+
+**Request (timed):**
+```json
+{"method":"audio_record","params":{"path":"~/voice.wav","duration":30}}
+```
+
+**Request (until stopped):**
+```json
+{"method":"audio_record","params":{"path":"~/voice.wav"}}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "path": "~/voice.wav",
+  "message": "Audio recording started",
+  "pid": 12345
+}
+```
+
+---
+
+### video_record
+Start screen recording.
+
+**Parameters:**
+- `path` (string, optional): Output path (default: ~/recording.mp4)
+- `duration` (integer, optional): Duration in seconds (0 = until stopped)
+- `geometry` (string, optional): Region to record (e.g., "1920x1080+0+0")
+- `framerate` (integer, optional): Framerate (default: 30)
+
+**Request (fullscreen):**
+```json
+{"method":"video_record","params":{"path":"~/screen.mp4","framerate":60}}
+```
+
+**Request (region):**
+```json
+{"method":"video_record","params":{"geometry":"800x600+100+100","path":"~/region.mp4"}}
+```
+
+**Request (timed):**
+```json
+{"method":"video_record","params":{"duration":60,"path":"~/timed.mp4"}}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "path": "~/screen.mp4",
+  "message": "Video recording started",
+  "pid": 12346
+}
+```
+
+---
+
+### stop_recording
+Stop a running recording.
+
+**Parameters:**
+- `pid` (integer): Process ID of recording
+
+**Request:**
+```json
+{"method":"stop_recording","params":{"pid":12345}}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Recording stopped (PID: 12345)"
+}
+```
+
+---
+
+## Dependencies
+
+Screenshot and recording commands require:
+
+- **grim** - Screenshot utility
+- **slurp** - Region selection (for region screenshots)
+- **wf-recorder** - Screen recording
+- **arecord** (alsa-utils) - Audio recording
+
+Install with:
+```bash
+# Arch Linux
+sudo pacman -S grim slurp wf-recorder alsa-utils
+
+# Debian/Ubuntu
+sudo apt install grim slurp wf-recorder alsa-utils
+```
+
+
 ## Configuration Commands
 
 ### reload_config

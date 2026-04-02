@@ -1639,26 +1639,28 @@ bool Server::startIPCServer(const std::string& socketPath) {
     // Screenshot Commands
     // ========================================================================
     m_ipcServer->registerCommand("screenshot", [this](const std::string& args) -> std::string {
-        std::string path = m_ipcServer->extractJsonString(args, "path", "~/Pictures/screenshot.png");
-        bool fullscreen = m_ipcServer->extractJsonBool(args, "fullscreen", true);
-        // Would capture screenshot
-        return m_ipcServer->createSuccessResponse("Screenshot saved: " + path);
+        return m_ipcServer->handleScreenshot(args);
     });
 
     m_ipcServer->registerCommand("screenshot_window", [this](const std::string& args) -> std::string {
-        std::string path = m_ipcServer->extractJsonString(args, "path", "~/Pictures/window.png");
-        // Would capture active window
-        return m_ipcServer->createSuccessResponse("Window screenshot saved: " + path);
+        return m_ipcServer->handleScreenshotWindow(args);
     });
 
     m_ipcServer->registerCommand("screenshot_region", [this](const std::string& args) -> std::string {
-        int x = m_ipcServer->extractJsonInt(args, "x", 0);
-        int y = m_ipcServer->extractJsonInt(args, "y", 0);
-        int w = m_ipcServer->extractJsonInt(args, "w", 0);
-        int h = m_ipcServer->extractJsonInt(args, "h", 0);
-        std::string path = m_ipcServer->extractJsonString(args, "path", "~/Pictures/region.png");
-        // Would capture region
-        return m_ipcServer->createSuccessResponse("Region screenshot saved: " + path);
+        return m_ipcServer->handleScreenshotRegion(args);
+    });
+
+    // Audio/Video Recording Commands
+    m_ipcServer->registerCommand("audio_record", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleAudioRecord(args);
+    });
+
+    m_ipcServer->registerCommand("video_record", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleVideoRecord(args);
+    });
+
+    m_ipcServer->registerCommand("stop_recording", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleStopRecording(args);
     });
 
     // ========================================================================

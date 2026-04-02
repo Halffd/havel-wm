@@ -567,6 +567,322 @@ bool IPCServer::extractJsonBool(const std::string& json, const std::string& key,
     return defaultValue;
 }
 
+
+// ============================================================================
+// Screenshot & Recording Implementations
+// ============================================================================
+
+std::string IPCServer::handleScreenshot(const std::string& args) {
+    json j;
+    try {
+        j = json::parse(args);
+    } catch (...) {
+        return createError(0, -1, "Invalid JSON");
+    }
+    
+    std::string path = "~/screenshot.png";
+    bool fullscreen = true;
+    
+    if (j.contains("path")) {
+        path = j["path"].get<std::string>();
+    }
+    if (j.contains("fullscreen")) {
+        fullscreen = j["fullscreen"].get<bool>();
+    }
+    
+    // Expand ~ to home directory
+    if (!path.empty() && path[0] == '~') {
+        const char* home = getenv("HOME");
+        if (home) {
+            path = std::string(home) + path.substr(1);
+        }
+    }
+    
+    // Use grim for screenshot
+    std::string cmd;
+    if (fullscreen) {
+        cmd = "grim '" + path + "' 2>&1";
+    } else {
+        cmd = "grim -g \"" + extractJsonString(args, "geometry", "0,0 1920x1080") + "\" '" + path + "' 2>&1";
+    }
+    
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        return createError(0, -2, "Failed to execute screenshot command");
+    }
+    
+    char buffer[256];
+    std::string output;
+    while (fgets(buffer, sizeof(buffer), pipe)) {
+        output += buffer;
+    }
+    pclose(pipe);
+    
+    if (output.empty()) {
+        json result;
+        result["success"] = true;
+        result["path"] = path;
+        result["message"] = "Screenshot saved";
+        return result.dump();
+    } else {
+        return createError(0, -3, output);
+    }
+}
+
+std::string IPCServer::handleScreenshotWindow(const std::string& args) {
+    json j;
+    try {
+        j = json::parse(args);
+    } catch (...) {
+        return createError(0, -1, "Invalid JSON");
+    }
+    
+    std::string path = "~/window.png";
+    if (j.contains("path")) {
+        path = j["path"].get<std::string>();
+    }
+    
+    // Expand ~ to home directory
+    if (!path.empty() && path[0] == '~') {
+        const char* home = getenv("HOME");
+        if (home) {
+            path = std::string(home) + path.substr(1);
+        }
+    }
+    
+    std::string cmd = "grim '" + path + "' 2>&1";
+    
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        return createError(0, -2, "Failed to execute screenshot command");
+    }
+    
+    char buffer[256];
+    std::string output;
+    while (fgets(buffer, sizeof(buffer), pipe)) {
+        output += buffer;
+    }
+    pclose(pipe);
+    
+    if (output.empty()) {
+        json result;
+        result["success"] = true;
+        result["path"] = path;
+        result["message"] = "Window screenshot saved";
+        return result.dump();
+    } else {
+        return createError(0, -3, output);
+    }
+}
+
+std::string IPCServer::handleScreenshotRegion(const std::string& args) {
+    json j;
+    try {
+        j = json::parse(args);
+    } catch (...) {
+        return createError(0, -1, "Invalid JSON");
+    }
+    
+    std::string path = "~/region.png";
+    if (j.contains("path")) {
+        path = j["path"].get<std::string>();
+    }
+    
+    // Expand ~ to home directory
+    if (!path.empty() && path[0] == '~') {
+        const char* home = getenv("HOME");
+        if (home) {
+            path = std::string(home) + path.substr(1);
+        }
+    }
+    
+    std::string geometry = extractJsonString(args, "geometry", "");
+    
+    std::string cmd;
+    if (geometry.empty()) {
+        cmd = "slurp -f '%x,%y %wx%h' | grim -g - '" + path + "' 2>&1";
+    } else {
+        cmd = "grim -g \"" + geometry + "\" '" + path + "' 2>&1";
+    }
+    
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        return createError(0, -2, "Failed to execute screenshot command");
+    }
+    
+    char buffer[256];
+    std::string output;
+    while (fgets(buffer, sizeof(buffer), pipe)) {
+        output += buffer;
+    }
+    pclose(pipe);
+    
+    if (output.empty() || output.find("saved") != std::string::npos) {
+        json result;
+        result["success"] = true;
+        result["path"] = path;
+        result["message"] = "Region screenshot saved";
+        return result.dump();
+    } else {
+        return createError(0, -3, output);
+    }
+}
+
+std::string IPCServer::handleAudioRecord(const std::string& args) {
+    json j;
+    try {
+        j = json::parse(args);
+    } catch (...) {
+        return createError(0, -1, "Invalid JSON");
+    }
+    
+    std::string path = "~/recording.wav";
+    int duration = extractJsonInt(args, "duration", 0);
+    std::string source = extractJsonString(args, "source", "auto");
+    
+    // Expand ~ to home directory
+    if (!path.empty() && path[0] == '~') {
+        const char* home = getenv("HOME");
+        if (home) {
+            path = std::string(home) + path.substr(1);
+        }
+    }
+    
+    std::string cmd;
+    if (duration > 0) {
+        cmd = "arecord -d " + std::to_string(duration) + " -f cd '" + path + "' 2>&1";
+    } else {
+        cmd = "arecord -f cd '" + path + "' & echo $! 2>&1";
+    }
+    
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        return createError(0, -2, "Failed to start audio recording");
+    }
+    
+    char buffer[256];
+    std::string output;
+    while (fgets(buffer, sizeof(buffer), pipe)) {
+        output += buffer;
+    }
+    int status = pclose(pipe);
+    
+    if (status == 0 || !output.empty()) {
+        json result;
+        result["success"] = true;
+        result["path"] = path;
+        result["message"] = "Audio recording started";
+        if (duration > 0) {
+            result["duration"] = duration;
+        } else {
+            result["pid"] = std::stoi(output);
+        }
+        return result.dump();
+    } else {
+        return createError(0, -3, "Failed to start recording: " + output);
+    }
+}
+
+std::string IPCServer::handleVideoRecord(const std::string& args) {
+    json j;
+    try {
+        j = json::parse(args);
+    } catch (...) {
+        return createError(0, -1, "Invalid JSON");
+    }
+    
+    std::string path = "~/recording.mp4";
+    int duration = extractJsonInt(args, "duration", 0);
+    std::string geometry = extractJsonString(args, "geometry", "");
+    int framerate = extractJsonInt(args, "framerate", 30);
+    
+    // Expand ~ to home directory
+    if (!path.empty() && path[0] == '~') {
+        const char* home = getenv("HOME");
+        if (home) {
+            path = std::string(home) + path.substr(1);
+        }
+    }
+    
+    std::string cmd = "wf-recorder";
+    
+    if (!geometry.empty()) {
+        cmd += " -g \"" + geometry + "\"";
+    }
+    
+    cmd += " -f '" + path + "'";
+    cmd += " --framerate " + std::to_string(framerate);
+    
+    if (duration > 0) {
+        cmd += " -d " + std::to_string(duration);
+    } else {
+        cmd += " & echo $!";
+    }
+    
+    cmd += " 2>&1";
+    
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        return createError(0, -2, "Failed to start video recording");
+    }
+    
+    char buffer[256];
+    std::string output;
+    while (fgets(buffer, sizeof(buffer), pipe)) {
+        output += buffer;
+    }
+    int status = pclose(pipe);
+    
+    if (status == 0 || output.find("recording") != std::string::npos) {
+        json result;
+        result["success"] = true;
+        result["path"] = path;
+        result["message"] = "Video recording started";
+        if (duration > 0) {
+            result["duration"] = duration;
+            result["framerate"] = framerate;
+        } else {
+            result["pid"] = std::stoi(output);
+        }
+        return result.dump();
+    } else {
+        return createError(0, -3, "Failed to start recording: " + output);
+    }
+}
+
+std::string IPCServer::handleStopRecording(const std::string& args) {
+    json j;
+    try {
+        j = json::parse(args);
+    } catch (...) {
+        return createError(0, -1, "Invalid JSON");
+    }
+    
+    int pid = extractJsonInt(args, "pid", -1);
+    
+    if (pid <= 0) {
+        return createError(0, -2, "Invalid PID");
+    }
+    
+    std::string cmd = "kill -SIGINT " + std::to_string(pid) + " 2>&1";
+    
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        return createError(0, -3, "Failed to stop recording");
+    }
+    
+    char buffer[256];
+    std::string output;
+    while (fgets(buffer, sizeof(buffer), pipe)) {
+        output += buffer;
+    }
+    pclose(pipe);
+    
+    json result;
+    result["success"] = true;
+    result["message"] = "Recording stopped (PID: " + std::to_string(pid) + ")";
+    return result.dump();
+}
 std::string IPCServer::jsonToString(const JsonObject& obj) {
     json_t j = obj;
     return j.dump();

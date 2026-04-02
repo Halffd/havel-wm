@@ -91,6 +91,14 @@ public:
     std::string handlePing();
     std::string handleSubscribe(const std::string& args);
     std::string handleUnsubscribe(const std::string& args);
+    
+    // Screenshot & Recording
+    std::string handleScreenshot(const std::string& args);
+    std::string handleScreenshotWindow(const std::string& args);
+    std::string handleScreenshotRegion(const std::string& args);
+    std::string handleAudioRecord(const std::string& args);
+    std::string handleVideoRecord(const std::string& args);
+    std::string handleStopRecording(const std::string& args);
 
     // JSON helpers (public for use in Server.cpp lambdas)
     std::string extractJsonString(const std::string& json, const std::string& key, const std::string& defaultValue = "");
