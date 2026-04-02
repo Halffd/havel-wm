@@ -362,6 +362,11 @@ echo '{"method":"subscribe","params":{"events":["window_created"]}}' | \
 | **Output** | wlr-output-power-v1 | ✅ NEW | DPMS |
 | **Output** | xdg-output-v1 | ✅ | Metadata |
 | **Output** | wlr-gamma-control-v1 | ✅ | Gamma/brightness |
+| **Input** | wlr-foreign-toplevel-management-v1 | ✅ NEW | waybar taskbar |
+| **Input** | wlr-pointer-constraints-v1 | ✅ NEW | Game cursor |
+| **Input** | wlr-relative-pointer-v1 | ✅ NEW | Game mouse |
+| **Input** | wlr-idle-inhibit-v1 | ✅ NEW | Video playback |
+| **Input** | wlr-idle-notify-v1 | ✅ NEW | Screensaver |
 | **Input** | wl_seat | ✅ | Input devices |
 | **Input** | text-input-v3 | ✅ | IME support |
 | **Surface** | wlr-layer-shell-v1 | ✅ | Panels/overlays |

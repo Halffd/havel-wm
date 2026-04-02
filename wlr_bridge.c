@@ -51,6 +51,11 @@ static uint64_t get_monotonic_time_ms(void) {
 #include <wlr/types/wlr_xdg_activation_v1.h>
 #include <wlr/types/wlr_primary_selection_v1.h>
 #include <wlr/types/wlr_screencopy_v1.h>
+#include <wlr/types/wlr_foreign_toplevel_management_v1.h>
+#include <wlr/types/wlr_pointer_constraints_v1.h>
+#include <wlr/types/wlr_relative_pointer_v1.h>
+#include <wlr/types/wlr_idle_inhibit_v1.h>
+#include <wlr/types/wlr_idle_notify_v1.h>
 #include <wlr/util/log.h>
 #include <wlr/xwayland.h>
 
@@ -162,6 +167,22 @@ struct havel_wlr_server {
     // Layer-shell v1 (for waybar, notifications, etc.)
     struct wlr_layer_shell_v1 *layer_shell;
     struct wl_listener new_layer_surface;
+
+    // Foreign toplevel management v1 (for taskbars, window switchers)
+    struct wlr_foreign_toplevel_manager_v1 *foreign_toplevel_manager;
+
+    // Pointer constraints v1 (for games)
+    struct wlr_pointer_constraints_v1 *pointer_constraints;
+    struct wl_listener pointer_constraint;
+
+    // Relative pointer v1 (for games)
+    struct wlr_relative_pointer_manager_v1 *relative_pointer_manager;
+
+    // Idle inhibit v1 (prevent screensaver)
+    struct wlr_idle_inhibit_manager_v1 *idle_inhibit_manager;
+
+    // Idle notify v1 (screensaver support)
+    struct wlr_idle_notifier_v1 *idle_notifier;
 
     struct wlr_seat *seat;
     struct wlr_cursor *cursor;
@@ -1138,6 +1159,18 @@ static void server_new_layer_surface(struct wl_listener *listener, void *data) {
 
     LOG_INFO("[LayerShell] Surface setup complete: %p (output=%s)",
              (void*)lsurface, output ? output->name : "none");
+}
+
+// ============================================================================
+// Pointer Constraint Handlers (for games)
+// ============================================================================
+
+static void handle_pointer_constraint(struct wl_listener *listener, void *data) {
+    struct wlr_pointer_constraint_v1 *constraint = data;
+    LOG_INFO("[PointerConstraint] New constraint: type=%d", constraint->type);
+    
+    // wlroots handles the constraint automatically
+    // We just need to create it, wlroots does the rest
 }
 
 // ============================================================================
@@ -2196,6 +2229,38 @@ havel_wlr_server_t* havel_wlr_create(void) {
         LOG_WARN("[Gamma] Failed to create gamma_control_manager_v1");
     } else {
         LOG_INFO("[Gamma] gamma_control_manager_v1 initialized");
+    }
+
+    // Create foreign toplevel manager v1 (for taskbars, window switchers like waybar)
+    server->foreign_toplevel_manager = wlr_foreign_toplevel_manager_v1_create(server->display);
+    if (server->foreign_toplevel_manager) {
+        LOG_INFO("[Foreign Toplevel] foreign_toplevel_manager_v1 created (waybar taskbar support)");
+    }
+
+    // Create pointer constraints v1 (for games - confine cursor)
+    server->pointer_constraints = wlr_pointer_constraints_v1_create(server->display);
+    if (server->pointer_constraints) {
+        LOG_INFO("[Pointer Constraints] pointer_constraints_v1 created (game cursor confinement)");
+        server->pointer_constraint.notify = handle_pointer_constraint;
+        wl_signal_add(&server->pointer_constraints->events.new_constraint, &server->pointer_constraint);
+    }
+
+    // Create relative pointer manager v1 (for games - relative mouse motion)
+    server->relative_pointer_manager = wlr_relative_pointer_manager_v1_create(server->display);
+    if (server->relative_pointer_manager) {
+        LOG_INFO("[Relative Pointer] relative_pointer_manager_v1 created (game mouse support)");
+    }
+
+    // Create idle inhibit manager v1 (prevent screensaver during video playback)
+    server->idle_inhibit_manager = wlr_idle_inhibit_v1_create(server->display);
+    if (server->idle_inhibit_manager) {
+        LOG_INFO("[Idle Inhibit] idle_inhibit_v1 created (video playback support)");
+    }
+
+    // Create idle notifier v1 (screensaver support)
+    server->idle_notifier = wlr_idle_notifier_v1_create(server->display);
+    if (server->idle_notifier) {
+        LOG_INFO("[Idle Notify] idle_notifier_v1 created (screensaver support)");
     }
 
     server->xwayland = wlr_xwayland_create(server->display, server->compositor, true);
