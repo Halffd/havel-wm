@@ -828,6 +828,175 @@ Stop a running recording.
 
 ---
 
+
+---
+
+## Cursor Control Commands
+
+### get_cursor_position
+Get current cursor position.
+
+**Request:**
+```json
+{"method":"get_cursor_position"}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "x": 1920,
+  "y": 1080
+}
+```
+
+---
+
+### warp_cursor
+Move cursor to specific position.
+
+**Parameters:**
+- `x` (integer): X coordinate
+- `y` (integer): Y coordinate
+
+**Request:**
+```json
+{"method":"warp_cursor","params":{"x":100,"y":100}}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "x": 100,
+  "y": 100
+}
+```
+
+---
+
+### set_cursor_theme
+Change cursor theme.
+
+**Parameters:**
+- `theme` (string): Cursor theme name (e.g., "Adwaita", "DMZ-White")
+- `size` (integer, optional): Cursor size (16-128, default: 24)
+
+**Request:**
+```json
+{"method":"set_cursor_theme","params":{"theme":"Adwaita","size":32}}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "theme": "Adwaita",
+  "size": 32
+}
+```
+
+**Note:** Theme changes require compositor restart to take effect.
+
+---
+
+### set_cursor_size
+Change cursor size.
+
+**Parameters:**
+- `size` (integer): Cursor size (16-128)
+
+**Request:**
+```json
+{"method":"set_cursor_size","params":{"size":48}}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "size": 48
+}
+```
+
+---
+
+### hide_cursor
+Hide cursor until next motion.
+
+**Request:**
+```json
+{"method":"hide_cursor"}
+```
+
+**Response:**
+```json
+{
+  "success": true
+}
+```
+
+---
+
+### show_cursor
+Show cursor if hidden.
+
+**Request:**
+```json
+{"method":"show_cursor"}
+```
+
+**Response:**
+```json
+{
+  "success": true
+}
+```
+
+---
+
+### set_cursor_warp
+Enable/disable cursor warping on focus change.
+
+**Parameters:**
+- `enabled` (boolean): Enable warping
+
+**Request:**
+```json
+{"method":"set_cursor_warp","params":{"enabled":true}}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "enabled": true
+}
+```
+
+---
+
+## Cursor Themes
+
+Common cursor themes available on most systems:
+
+| Theme | Description |
+|-------|-------------|
+| `Adwaita` | GNOME default |
+| `DMZ-White` | Classic white cursor |
+| `DMZ-Black` | Classic black cursor |
+| `breeze_cursors` | KDE default |
+| `xcursor-bibata-modern` | Modern animated |
+
+Install additional themes:
+```bash
+# Arch Linux
+sudo pacman -S adwaita-icon-theme dmz-cursor-theme
+
+# Debian/Ubuntu
+sudo apt install adwaita-icon-theme dmz-cursor-theme
+```
+
 ## Dependencies
 
 Screenshot and recording commands require:

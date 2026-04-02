@@ -1664,6 +1664,37 @@ bool Server::startIPCServer(const std::string& socketPath) {
     });
 
     // ========================================================================
+    // Cursor Control Commands
+    // ========================================================================
+    m_ipcServer->registerCommand("get_cursor_position", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleGetCursorPosition(args);
+    });
+
+    m_ipcServer->registerCommand("warp_cursor", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleWarpCursor(args);
+    });
+
+    m_ipcServer->registerCommand("set_cursor_theme", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleSetCursorTheme(args);
+    });
+
+    m_ipcServer->registerCommand("set_cursor_size", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleSetCursorSize(args);
+    });
+
+    m_ipcServer->registerCommand("hide_cursor", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleHideCursor(args);
+    });
+
+    m_ipcServer->registerCommand("show_cursor", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleShowCursor(args);
+    });
+
+    m_ipcServer->registerCommand("set_cursor_warp", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleSetCursorWarp(args);
+    });
+
+    // ========================================================================
     // Configuration Commands
     // ========================================================================
     m_ipcServer->registerCommand("reload_config", [this](const std::string& args) -> std::string {

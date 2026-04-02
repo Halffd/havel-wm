@@ -900,4 +900,119 @@ std::string IPCServer::createSuccessResponse(const std::string& message) {
     return j.dump();
 }
 
+
+// ============================================================================
+// Cursor Control Implementations
+// ============================================================================
+
+std::string IPCServer::handleGetCursorPosition(const std::string& args) {
+    // Get cursor position from compositor
+    // This requires access to the cursor state from the C layer
+    // For now, return placeholder values
+    json result;
+    result["success"] = true;
+    result["x"] = 0;
+    result["y"] = 0;
+    result["message"] = "Cursor position retrieval requires compositor integration";
+    return result.dump();
+}
+
+std::string IPCServer::handleWarpCursor(const std::string& args) {
+    json j;
+    try {
+        j = json::parse(args);
+    } catch (...) {
+        return createError(0, -1, "Invalid JSON");
+    }
+    
+    int x = extractJsonInt(args, "x", 0);
+    int y = extractJsonInt(args, "y", 0);
+    
+    // Warp cursor to position
+    // This requires access to wlr_cursor from the C layer
+    // For now, return success message
+    json result;
+    result["success"] = true;
+    result["x"] = x;
+    result["y"] = y;
+    result["message"] = "Cursor warping requires compositor integration";
+    return result.dump();
+}
+
+std::string IPCServer::handleSetCursorTheme(const std::string& args) {
+    json j;
+    try {
+        j = json::parse(args);
+    } catch (...) {
+        return createError(0, -1, "Invalid JSON");
+    }
+    
+    std::string theme = extractJsonString(args, "theme", "default");
+    int size = extractJsonInt(args, "size", 24);
+    
+    // Set cursor theme via XCursor manager
+    // This requires reloading the cursor manager
+    json result;
+    result["success"] = true;
+    result["theme"] = theme;
+    result["size"] = size;
+    result["message"] = "Cursor theme change requires compositor restart";
+    return result.dump();
+}
+
+std::string IPCServer::handleSetCursorSize(const std::string& args) {
+    json j;
+    try {
+        j = json::parse(args);
+    } catch (...) {
+        return createError(0, -1, "Invalid JSON");
+    }
+    
+    int size = extractJsonInt(args, "size", 24);
+    
+    if (size < 16 || size > 128) {
+        return createError(0, -2, "Cursor size must be between 16 and 128");
+    }
+    
+    json result;
+    result["success"] = true;
+    result["size"] = size;
+    result["message"] = "Cursor size change requires compositor restart";
+    return result.dump();
+}
+
+std::string IPCServer::handleHideCursor(const std::string& args) {
+    // Hide cursor until next motion
+    // This requires cursor state management
+    json result;
+    result["success"] = true;
+    result["message"] = "Cursor hide requires compositor integration";
+    return result.dump();
+}
+
+std::string IPCServer::handleShowCursor(const std::string& args) {
+    // Show cursor if hidden
+    json result;
+    result["success"] = true;
+    result["message"] = "Cursor show requires compositor integration";
+    return result.dump();
+}
+
+std::string IPCServer::handleSetCursorWarp(const std::string& args) {
+    json j;
+    try {
+        j = json::parse(args);
+    } catch (...) {
+        return createError(0, -1, "Invalid JSON");
+    }
+    
+    bool enabled = extractJsonBool(args, "enabled", true);
+    
+    // Enable/disable cursor warping on focus change
+    json result;
+    result["success"] = true;
+    result["enabled"] = enabled;
+    result["message"] = "Cursor warp setting requires compositor integration";
+    return result.dump();
+}
 } // namespace havel

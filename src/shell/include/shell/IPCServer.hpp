@@ -99,6 +99,15 @@ public:
     std::string handleAudioRecord(const std::string& args);
     std::string handleVideoRecord(const std::string& args);
     std::string handleStopRecording(const std::string& args);
+    
+    // Cursor Control
+    std::string handleGetCursorPosition(const std::string& args);
+    std::string handleWarpCursor(const std::string& args);
+    std::string handleSetCursorTheme(const std::string& args);
+    std::string handleSetCursorSize(const std::string& args);
+    std::string handleHideCursor(const std::string& args);
+    std::string handleShowCursor(const std::string& args);
+    std::string handleSetCursorWarp(const std::string& args);
 
     // JSON helpers (public for use in Server.cpp lambdas)
     std::string extractJsonString(const std::string& json, const std::string& key, const std::string& defaultValue = "");
