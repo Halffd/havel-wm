@@ -54,14 +54,14 @@ public:
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
         int screenWidth = renderer->getScreenWidth();
 
-        // Draw bar background with subtle gradient effect
-        renderer->drawRect(0, 0, screenWidth, m_barHeight, m_bgColor);
+        // Draw bar background with subtle gradient effect - more opaque
+        renderer->drawRect(0, 0, screenWidth, m_barHeight, Color(m_bgColor.r, m_bgColor.g, m_bgColor.b, m_bgColor.a * 1.1f));
         
-        // Add subtle top highlight for depth
+        // Add subtle top highlight for depth - more visible
         renderer->drawRect(0, 0, screenWidth, 1, Color(m_bgColor.r*1.3f, m_bgColor.g*1.3f, m_bgColor.b*1.3f, m_bgColor.a));
         
-        // Add bottom shadow
-        renderer->drawRect(0, m_barHeight - 1, screenWidth, 1, Color(0.0f, 0.0f, 0.0f, 0.3f));
+        // Add bottom shadow - more visible
+        renderer->drawRect(0, m_barHeight - 1, screenWidth, 1, Color(0.0f, 0.0f, 0.0f, 0.5f));
 
         // Get current workspace
         uint32_t currentWs = m_api->getActiveWorkspace();
@@ -71,23 +71,23 @@ public:
         char timeStr[32];
         getTimeString(timeStr, sizeof(timeStr));
 
-        // Draw workspace indicator (left side) with pill background
+        // Draw workspace indicator (left side) with pill background - more opaque
         char wsStr[64];
         snprintf(wsStr, sizeof(wsStr), "Workspace %u", currentWs + 1);
         float wsWidth = getTextWidth(wsStr, 16.0f) + 20.0f;
         
         // Pill background for workspace
-        renderer->drawRect(8, 5, wsWidth, m_barHeight - 10, Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 0.3f));
+        renderer->drawRect(8, 5, wsWidth, m_barHeight - 10, Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 0.5f));
         renderer->drawText(wsStr, 18, 8, 16.0f, m_accentColor);
 
-        // Draw window count with subtle background
+        // Draw window count with subtle background - more opaque
         char winStr[64];
         snprintf(winStr, sizeof(winStr), "  |  %d window%s", windowCount, windowCount != 1 ? "s" : "");
-        renderer->drawText(winStr, 18 + wsWidth, 8, 16.0f, Color(m_fgColor.r, m_fgColor.g, m_fgColor.b, m_fgColor.a * 0.8f));
+        renderer->drawText(winStr, 18 + wsWidth, 8, 16.0f, Color(m_fgColor.r, m_fgColor.g, m_fgColor.b, m_fgColor.a * 0.9f));
 
-        // Draw time (right side) with pill background
+        // Draw time (right side) with pill background - more opaque
         float timeWidth = getTextWidth(timeStr, 16.0f) + 20.0f;
-        renderer->drawRect(screenWidth - timeWidth - 8, 5, timeWidth, m_barHeight - 10, Color(0.0f, 0.0f, 0.0f, 0.3f));
+        renderer->drawRect(screenWidth - timeWidth - 8, 5, timeWidth, m_barHeight - 10, Color(0.0f, 0.0f, 0.0f, 0.5f));
         renderer->drawText(timeStr, screenWidth - timeWidth + 2, 8, 16.0f, m_fgColor);
     }
 

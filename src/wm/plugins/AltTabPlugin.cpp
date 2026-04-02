@@ -331,12 +331,12 @@ private:
         int screenWidth = renderer->getScreenWidth();
         int screenHeight = renderer->getScreenHeight();
 
-        // Draw semi-transparent background with subtle gradient (configurable)
-        renderer->drawRect(0, 0, screenWidth, screenHeight, Color(m_bgColor[0], m_bgColor[1], m_bgColor[2], m_bgColor[3]));
+        // Draw semi-transparent background with subtle gradient (configurable) - more opaque
+        renderer->drawRect(0, 0, screenWidth, screenHeight, Color(m_bgColor[0], m_bgColor[1], m_bgColor[2], m_bgColor[3] * 1.05f));
         
-        // Add subtle vignette effect (darker corners for depth)
+        // Add subtle vignette effect (darker corners for depth) - more visible
         for (int i = 0; i < 3; i++) {
-            float vignetteAlpha = 0.05f * (i + 1);
+            float vignetteAlpha = 0.12f * (i + 1);
             int inset = i * 150;
             renderer->drawRect(inset, inset, screenWidth - inset*2, screenHeight - inset*2, 
                               Color(0.0f, 0.0f, 0.0f, vignetteAlpha));
@@ -378,15 +378,15 @@ private:
             const WindowEntry& entry = m_windows[windowIndex];
 
             // Draw drop shadow for thumbnail (offset rectangles for pseudo-blur)
-            float shadowAlpha = isSelected ? 0.4f : 0.25f;
+            float shadowAlpha = isSelected ? 0.5f : 0.35f;
             for (int s = 3; s >= 1; s--) {
                 renderer->drawRect((float)(x + s*2), (float)(y + s*2 + 10), 
                                   (float)thumbnailWidth, (float)thumbnailHeight,
                                   Color(0.0f, 0.0f, 0.0f, shadowAlpha * (float)s / 3.0f));
             }
 
-            // Draw thumbnail background (fallback if no texture)
-            Color bgColor = isSelected ? Color(0.3f, 0.4f, 0.5f, 0.95f) : Color(0.2f, 0.2f, 0.2f, 0.9f);
+            // Draw thumbnail background (fallback if no texture) - more opaque
+            Color bgColor = isSelected ? Color(0.3f, 0.4f, 0.5f, 0.98f) : Color(0.2f, 0.2f, 0.2f, 0.95f);
             renderer->drawRect((float)x, (float)y, (float)thumbnailWidth, (float)thumbnailHeight, bgColor);
 
             // Draw window texture if available
@@ -397,11 +397,11 @@ private:
                                       1.0f);
             }
 
-            // Draw selection glow for selected window
+            // Draw selection glow for selected window - more opaque
             if (isSelected) {
-                // Glow effect (multiple passes with decreasing alpha)
+                // Glow effect (multiple passes with higher alpha)
                 for (int g = 2; g >= 1; g--) {
-                    float glowAlpha = 0.3f * (float)g / 2.0f;
+                    float glowAlpha = 0.5f * (float)g / 2.0f;
                     int glowOffset = g * 2;
                     renderer->drawRect((float)(x - glowOffset), (float)(y - glowOffset),
                                       (float)(thumbnailWidth + glowOffset*2), (float)(thumbnailHeight + glowOffset*2),
@@ -440,25 +440,25 @@ private:
         float textX = (screenWidth - textWidth) / 2.0f;
         float textY = (float)(screenHeight - 55);
         
-        // Draw pill background
-        renderer->drawRect(textX - 20.0f, textY - 5.0f, textWidth, 28.0f, Color(0.0f, 0.0f, 0.0f, 0.7f));
-        renderer->drawBorder(FloatRect(textX - 20.0f, textY - 5.0f, textWidth, 28.0f), Color(0.4f, 0.4f, 0.4f, 0.5f), 1.0f);
+        // Draw pill background - more opaque
+        renderer->drawRect(textX - 20.0f, textY - 5.0f, textWidth, 28.0f, Color(0.0f, 0.0f, 0.0f, 0.85f));
+        renderer->drawBorder(FloatRect(textX - 20.0f, textY - 5.0f, textWidth, 28.0f), Color(0.5f, 0.5f, 0.5f, 0.6f), 1.0f);
         
         // Draw instruction text
-        renderer->drawText(instruction, textX + 20.0f, textY + 15.0f, 14.0f, Color(0.9f, 0.9f, 0.9f, 1.0f));
+        renderer->drawText(instruction, textX + 20.0f, textY + 15.0f, 14.0f, Color(0.95f, 0.95f, 0.95f, 1.0f));
         
-        // Draw window count with pill background
+        // Draw window count with pill background - more opaque
         char countText[32];
         snprintf(countText, sizeof(countText), "%d / %zu", m_selectedIndex + 1, m_windows.size());
         float countWidth = strlen(countText) * 10.0f + 30.0f;
         float countX = screenWidth - countWidth - 20.0f;
         
         // Draw count pill background
-        renderer->drawRect(countX - 15.0f, textY - 5.0f, countWidth, 28.0f, Color(0.1f, 0.1f, 0.15f, 0.8f));
-        renderer->drawBorder(FloatRect(countX - 15.0f, textY - 5.0f, countWidth, 28.0f), Color(m_borderColor[0], m_borderColor[1], m_borderColor[2], 0.5f), 1.0f);
+        renderer->drawRect(countX - 15.0f, textY - 5.0f, countWidth, 28.0f, Color(0.1f, 0.1f, 0.15f, 0.9f));
+        renderer->drawBorder(FloatRect(countX - 15.0f, textY - 5.0f, countWidth, 28.0f), Color(m_borderColor[0], m_borderColor[1], m_borderColor[2], 0.6f), 1.0f);
         
         // Draw count text
-        renderer->drawText(countText, countX + 15.0f, textY + 15.0f, 14.0f, Color(0.9f, 0.9f, 0.9f, 1.0f));
+        renderer->drawText(countText, countX + 15.0f, textY + 15.0f, 14.0f, Color(0.95f, 0.95f, 0.95f, 1.0f));
     }
 };
 
