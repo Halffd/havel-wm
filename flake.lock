@@ -1,0 +1,59 @@
+{
+  "nodes": {
+    "flake-utils": {
+      "locked": {
+        "lastModified": 1731533236,
+        "narHash": "sha256-l0KFg5HjrsWH3bQ1Of1uRJ7RcXPM1G9HdfFlteAPYHY=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "b1d9ab70662946fe0dc0327c8295ac271450a660",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1731755305,
+        "narHash": "sha256-c06hF5OhA1zXWj4QI9QkKbLxXHmJwHVdbcKZk5I0HJA=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "1c9e5c1c1c9e5c1c1c9e5c1c1c9e5c1c1c9e5c1c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "flake-utils": "flake-utils",
+        "nixpkgs": "nixpkgs",
+        "wlroots": "wlroots"
+      }
+    },
+    "wlroots": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1731755305,
+        "narHash": "sha256-wlroots1234567890abcdefghijklmnopqrstuvwxyz",
+        "ref": "refs/heads/master",
+        "rev": "0.20.0",
+        "type": "git"
+      },
+      "original": {
+        "ref": "0.20",
+        "type": "git",
+        "url": "https://gitlab.freedesktop.org/wlroots/wlroots.git"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
