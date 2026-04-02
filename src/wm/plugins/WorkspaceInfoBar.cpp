@@ -54,8 +54,14 @@ public:
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
         int screenWidth = renderer->getScreenWidth();
 
-        // Draw bar background
+        // Draw bar background with subtle gradient effect
         renderer->drawRect(0, 0, screenWidth, m_barHeight, m_bgColor);
+        
+        // Add subtle top highlight for depth
+        renderer->drawRect(0, 0, screenWidth, 1, Color(m_bgColor.r*1.3f, m_bgColor.g*1.3f, m_bgColor.b*1.3f, m_bgColor.a));
+        
+        // Add bottom shadow
+        renderer->drawRect(0, m_barHeight - 1, screenWidth, 1, Color(0.0f, 0.0f, 0.0f, 0.3f));
 
         // Get current workspace
         uint32_t currentWs = m_api->getActiveWorkspace();
@@ -65,22 +71,24 @@ public:
         char timeStr[32];
         getTimeString(timeStr, sizeof(timeStr));
 
-        // Draw workspace indicator (left side)
+        // Draw workspace indicator (left side) with pill background
         char wsStr[64];
         snprintf(wsStr, sizeof(wsStr), "Workspace %u", currentWs + 1);
-        renderer->drawText(wsStr, 15, 8, 16.0f, m_accentColor);
+        float wsWidth = getTextWidth(wsStr, 16.0f) + 20.0f;
+        
+        // Pill background for workspace
+        renderer->drawRect(8, 5, wsWidth, m_barHeight - 10, Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 0.3f));
+        renderer->drawText(wsStr, 18, 8, 16.0f, m_accentColor);
 
-        // Draw window count
+        // Draw window count with subtle background
         char winStr[64];
-        snprintf(winStr, sizeof(winStr), " | %d window%s", windowCount, windowCount != 1 ? "s" : "");
-        renderer->drawText(winStr, 15 + getTextWidth(wsStr, 16.0f), 8, 16.0f, m_fgColor);
+        snprintf(winStr, sizeof(winStr), "  |  %d window%s", windowCount, windowCount != 1 ? "s" : "");
+        renderer->drawText(winStr, 18 + wsWidth, 8, 16.0f, Color(m_fgColor.r, m_fgColor.g, m_fgColor.b, m_fgColor.a * 0.8f));
 
-        // Draw time (right side)
-        float timeWidth = getTextWidth(timeStr, 16.0f);
-        renderer->drawText(timeStr, screenWidth - timeWidth - 15, 8, 16.0f, m_fgColor);
-
-        // Draw separator line
-        renderer->drawRect(0, m_barHeight, screenWidth, 1, Color(0.3f, 0.3f, 0.3f, 1.0f));
+        // Draw time (right side) with pill background
+        float timeWidth = getTextWidth(timeStr, 16.0f) + 20.0f;
+        renderer->drawRect(screenWidth - timeWidth - 8, 5, timeWidth, m_barHeight - 10, Color(0.0f, 0.0f, 0.0f, 0.3f));
+        renderer->drawText(timeStr, screenWidth - timeWidth + 2, 8, 16.0f, m_fgColor);
     }
 
     bool onKey(const KeyEvent& event) override {
