@@ -1,6 +1,3 @@
-// Workspace + Info Bar Plugin
-// Shows current workspace, window count, time, and system info
-
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
@@ -54,38 +51,27 @@ public:
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
         int screenWidth = renderer->getScreenWidth();
 
-        // Draw bar background with subtle gradient effect
         renderer->drawRect(0, 0, screenWidth, m_barHeight, m_bgColor);
-        
-        // Add subtle top highlight for depth
         renderer->drawRect(0, 0, screenWidth, 1, Color(m_bgColor.r*1.2f, m_bgColor.g*1.2f, m_bgColor.b*1.2f, m_bgColor.a));
-        
-        // Add bottom shadow
         renderer->drawRect(0, m_barHeight - 1, screenWidth, 1, Color(0.0f, 0.0f, 0.0f, 0.4f));
 
-        // Get current workspace
         uint32_t currentWs = m_api->getActiveWorkspace();
         int windowCount = getWindowCountOnWorkspace(currentWs);
 
-        // Get current time
         char timeStr[32];
         getTimeString(timeStr, sizeof(timeStr));
 
-        // Draw workspace indicator (left side) with pill background
         char wsStr[64];
         snprintf(wsStr, sizeof(wsStr), "Workspace %u", currentWs + 1);
         float wsWidth = getTextWidth(wsStr, 16.0f) + 20.0f;
         
-        // Pill background for workspace
         renderer->drawRect(8, 5, wsWidth, m_barHeight - 10, Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 0.4f));
         renderer->drawText(wsStr, 18, 8, 16.0f, m_accentColor);
 
-        // Draw window count with subtle background
         char winStr[64];
         snprintf(winStr, sizeof(winStr), "  |  %d window%s", windowCount, windowCount != 1 ? "s" : "");
         renderer->drawText(winStr, 18 + wsWidth, 8, 16.0f, Color(m_fgColor.r, m_fgColor.g, m_fgColor.b, m_fgColor.a * 0.85f));
 
-        // Draw time (right side) with pill background
         float timeWidth = getTextWidth(timeStr, 16.0f) + 20.0f;
         renderer->drawRect(screenWidth - timeWidth - 8, 5, timeWidth, m_barHeight - 10, Color(0.0f, 0.0f, 0.0f, 0.4f));
         renderer->drawText(timeStr, screenWidth - timeWidth + 2, 8, 16.0f, m_fgColor);
@@ -99,7 +85,7 @@ public:
         if (!(event.modifiers & MOD_LOGO)) return false;
 
         // Meta+Shift+B: Toggle bar visibility
-        if ((event.modifiers & MOD_SHIFT) && event.keycode == 48) {  // B
+        if ((event.modifiers & MOD_SHIFT) && event.keycode == 48) {
             m_visible = !m_visible;
             printf("[WorkspaceInfoBar] %s\n", m_visible ? "shown" : "hidden");
             return true;
@@ -117,7 +103,6 @@ private:
     Color m_accentColor;
 
     int getWindowCountOnWorkspace(uint32_t workspace) {
-        // Get all views and count those on the workspace
         auto views = m_api->getAllViews();
         int count = 0;
         return count;
@@ -130,7 +115,7 @@ private:
     }
 
     float getTextWidth(const char* text, float fontSize) {
-        // Approximate: assume 10px per character at 16px font
+        // ~0.6x fontSize per character
         return strlen(text) * fontSize * 0.6f;
     }
 };
