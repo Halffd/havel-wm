@@ -212,7 +212,9 @@ static void handle_new_xdg_toplevel(struct wl_listener *listener, void *data) {
     struct havel_wlr_server *server = wl_container_of(listener, server, new_xdg_toplevel);
     struct wlr_xdg_toplevel *toplevel = data;
     
-    havel_xdg_view_create(server, toplevel);
+    if (!havel_xdg_view_create(server, toplevel)) {
+        LOG_ERROR("[XDG] Failed to create view for toplevel");
+    }
 }
 
 void havel_xdg_shell_init(struct havel_wlr_server *server) {

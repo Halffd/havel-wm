@@ -286,17 +286,39 @@ void* havel_cpp_get_plugin_manager(struct havel_cpp_server* server) {
 void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command) {
     if (!server || !command) return;
 
+    // Parse command into argv (simple space-splitting, no shell)
+    char* cmd_copy = strdup(command);
+    if (!cmd_copy) {
+        LOG_ERROR("[Spawn] strdup failed");
+        return;
+    }
+    
+    char* argv[64];
+    int argc = 0;
+    char* token = strtok(cmd_copy, " \t\n");
+    while (token && argc < 63) {
+        argv[argc++] = token;
+        token = strtok(NULL, " \t\n");
+    }
+    argv[argc] = NULL;
+    
+    if (argc == 0) {
+        free(cmd_copy);
+        return;
+    }
+
     // Fork and exec the command
     pid_t pid = fork();
     if (pid == 0) {
-        // Child process - execute command through shell
-        execl("/bin/sh", "sh", "-c", command, (char*)NULL);
-        _exit(1);  // execl failed
+        // Child process - execute command directly, no shell
+        execvp(argv[0], argv);
+        _exit(1);  // execvp failed
     } else if (pid > 0) {
         LOG_INFO("[Spawn] Launched command: %s (PID: %d)", command, pid);
     } else {
         LOG_ERROR("[Spawn] Failed to fork for command: %s", command);
     }
+    free(cmd_copy);
 }
 
 void havel_cpp_alt_tab_select(struct havel_cpp_server* server, int index) {

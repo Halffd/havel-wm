@@ -52,12 +52,15 @@ struct VulkanRendererInternal {
     bool hasMaintenance5;
     uint32_t vulkanVersion;
     
-    // VSync and frame timing
+// VSync and frame timing
     bool vsyncEnabled;
     uint32_t targetFrameRate;
     uint32_t maxFrameLatency;
     VkPresentModeKHR presentMode;
     
+    // Acquired image index from vkAcquireNextImageKHR
+    uint32_t acquiredImageIndex;
+
     // Frame timing statistics
     VulkanFrameStats frameStats;
     uint64_t lastFrameTime;
@@ -104,6 +107,10 @@ bool vulkan_renderer_is_hdr_capable(VulkanRenderer* renderer_ptr, void* surface)
                                           vkSurface, &formatCount, NULL);
 
     VkSurfaceFormatKHR* formats = (VkSurfaceFormatKHR*)malloc(formatCount * sizeof(VkSurfaceFormatKHR));
+    if (!formats) {
+        LOG_ERROR("[Vulkan] Failed to allocate surface formats");
+        return false;
+    }
     vkGetPhysicalDeviceSurfaceFormatsKHR(renderer->physicalDevice,
                                           vkSurface, &formatCount, formats);
 
@@ -254,6 +261,10 @@ static bool check_validation_layer_support(void) {
     vkEnumerateInstanceLayerProperties(&layerCount, NULL);
     VkLayerProperties* availableLayers = 
         (VkLayerProperties*)malloc(layerCount * sizeof(VkLayerProperties));
+    if (!availableLayers) {
+        LOG_ERROR("[Vulkan] Failed to allocate layer properties");
+        return false;
+    }
     vkEnumerateInstanceLayerProperties(&layerCount, availableLayers);
     
     bool found = false;
@@ -295,6 +306,10 @@ static bool check_device_extension_support(VkPhysicalDevice device) {
     vkEnumerateDeviceExtensionProperties(device, NULL, &extensionCount, NULL);
     VkExtensionProperties* available = 
         (VkExtensionProperties*)malloc(extensionCount * sizeof(VkExtensionProperties));
+    if (!available) {
+        LOG_ERROR("[Vulkan] Failed to allocate extension properties");
+        return false;
+    }
     vkEnumerateDeviceExtensionProperties(device, NULL, &extensionCount, available);
     
     for (uint32_t i = 0; i < g_deviceExtensionCount; i++) {
@@ -318,6 +333,12 @@ static void find_queue_families(VkPhysicalDevice device,
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, NULL);
     VkQueueFamilyProperties* families = 
         (VkQueueFamilyProperties*)malloc(queueFamilyCount * sizeof(VkQueueFamilyProperties));
+    if (!families) {
+        LOG_ERROR("[Vulkan] Failed to allocate queue family properties");
+        *graphicsFamily = UINT32_MAX;
+        *presentFamily = UINT32_MAX;
+        return;
+    }
     vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, families);
     
     *graphicsFamily = UINT32_MAX;
@@ -450,6 +471,10 @@ static VkResult pick_physical_device(struct VulkanRendererInternal* renderer) {
     
     VkPhysicalDevice* devices = 
         (VkPhysicalDevice*)malloc(deviceCount * sizeof(VkPhysicalDevice));
+    if (!devices) {
+        LOG_ERROR("[Vulkan] Failed to allocate physical devices array");
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
     vkEnumeratePhysicalDevices(renderer->instance, &deviceCount, devices);
     
     int bestScore = 0;
@@ -573,6 +598,10 @@ static VkResult create_swapchain(struct VulkanRendererInternal* renderer,
                                               surface, &formatCount, NULL);
 
         VkSurfaceFormatKHR* formats = (VkSurfaceFormatKHR*)malloc(formatCount * sizeof(VkSurfaceFormatKHR));
+        if (!formats) {
+            LOG_ERROR("[Vulkan] Failed to allocate surface formats for HDR");
+            return VK_ERROR_OUT_OF_HOST_MEMORY;
+        }
         vkGetPhysicalDeviceSurfaceFormatsKHR(renderer->physicalDevice,
                                               surface, &formatCount, formats);
 
@@ -646,6 +675,10 @@ static VkResult create_swapchain(struct VulkanRendererInternal* renderer,
 static VkResult create_image_views(struct VulkanRendererInternal* renderer) {
     renderer->swapchainImageViews = 
         (VkImageView*)malloc(renderer->swapchainImageCount * sizeof(VkImageView));
+    if (!renderer->swapchainImageViews) {
+        LOG_ERROR("[Vulkan] Failed to allocate image views");
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
     
     for (uint32_t i = 0; i < renderer->swapchainImageCount; i++) {
         VkImageViewCreateInfo createInfo = {0};
@@ -662,7 +695,13 @@ static VkResult create_image_views(struct VulkanRendererInternal* renderer) {
         VkResult result = vkCreateImageView(renderer->device, &createInfo, NULL, 
                                            &renderer->swapchainImageViews[i]);
         if (result != VK_SUCCESS) {
-            LOG_ERROR("[Vulkan] Failed to create image view: %d", result);
+            LOG_ERROR("[Vulkan] Failed to create image view %u: %d", i, result);
+            // Cleanup already created views
+            for (uint32_t j = 0; j < i; j++) {
+                vkDestroyImageView(renderer->device, renderer->swapchainImageViews[j], NULL);
+            }
+            free(renderer->swapchainImageViews);
+            renderer->swapchainImageViews = NULL;
             return result;
         }
     }
@@ -738,6 +777,10 @@ static VkResult create_graphics_pipeline(struct VulkanRendererInternal* renderer
 static VkResult create_framebuffers(struct VulkanRendererInternal* renderer) {
     renderer->framebuffers = 
         (VkFramebuffer*)malloc(renderer->swapchainImageCount * sizeof(VkFramebuffer));
+    if (!renderer->framebuffers) {
+        LOG_ERROR("[Vulkan] Failed to allocate framebuffers");
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
     
     for (uint32_t i = 0; i < renderer->swapchainImageCount; i++) {
         VkFramebufferCreateInfo createInfo = {0};
@@ -752,7 +795,13 @@ static VkResult create_framebuffers(struct VulkanRendererInternal* renderer) {
         VkResult result = vkCreateFramebuffer(renderer->device, &createInfo, NULL, 
                                              &renderer->framebuffers[i]);
         if (result != VK_SUCCESS) {
-            LOG_ERROR("[Vulkan] Failed to create framebuffer: %d", result);
+            LOG_ERROR("[Vulkan] Failed to create framebuffer %u: %d", i, result);
+            // Cleanup already created framebuffers
+            for (uint32_t j = 0; j < i; j++) {
+                vkDestroyFramebuffer(renderer->device, renderer->framebuffers[j], NULL);
+            }
+            free(renderer->framebuffers);
+            renderer->framebuffers = NULL;
             return result;
         }
     }
@@ -781,6 +830,10 @@ static VkResult create_command_pool(struct VulkanRendererInternal* renderer) {
 static VkResult create_command_buffers(struct VulkanRendererInternal* renderer) {
     renderer->commandBuffers = 
         (VkCommandBuffer*)malloc(renderer->swapchainImageCount * sizeof(VkCommandBuffer));
+    if (!renderer->commandBuffers) {
+        LOG_ERROR("[Vulkan] Failed to allocate command buffers");
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
     
     VkCommandBufferAllocateInfo allocInfo = {0};
     allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -791,6 +844,8 @@ static VkResult create_command_buffers(struct VulkanRendererInternal* renderer) 
     VkResult result = vkAllocateCommandBuffers(renderer->device, &allocInfo, renderer->commandBuffers);
     if (result != VK_SUCCESS) {
         LOG_ERROR("[Vulkan] Failed to create command buffers: %d", result);
+        free(renderer->commandBuffers);
+        renderer->commandBuffers = NULL;
         return result;
     }
     LOG_INFO("[Vulkan] Command buffers created");
@@ -801,10 +856,28 @@ static VkResult create_command_buffers(struct VulkanRendererInternal* renderer) 
 static VkResult create_sync_objects(struct VulkanRendererInternal* renderer) {
     renderer->imageAvailableSemaphores = 
         (VkSemaphore*)malloc(renderer->swapchainImageCount * sizeof(VkSemaphore));
+    if (!renderer->imageAvailableSemaphores) {
+        LOG_ERROR("[Vulkan] Failed to allocate imageAvailableSemaphores");
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
     renderer->renderFinishedSemaphores = 
         (VkSemaphore*)malloc(renderer->swapchainImageCount * sizeof(VkSemaphore));
+    if (!renderer->renderFinishedSemaphores) {
+        LOG_ERROR("[Vulkan] Failed to allocate renderFinishedSemaphores");
+        free(renderer->imageAvailableSemaphores);
+        renderer->imageAvailableSemaphores = NULL;
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
     renderer->inFlightFences = 
         (VkFence*)malloc(renderer->swapchainImageCount * sizeof(VkFence));
+    if (!renderer->inFlightFences) {
+        LOG_ERROR("[Vulkan] Failed to allocate inFlightFences");
+        free(renderer->imageAvailableSemaphores);
+        free(renderer->renderFinishedSemaphores);
+        renderer->imageAvailableSemaphores = NULL;
+        renderer->renderFinishedSemaphores = NULL;
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
     
     VkSemaphoreCreateInfo semaphoreInfo = {0};
     semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
@@ -820,7 +893,19 @@ static VkResult create_sync_objects(struct VulkanRendererInternal* renderer) {
                              &renderer->renderFinishedSemaphores[i]) != VK_SUCCESS ||
             vkCreateFence(renderer->device, &fenceInfo, NULL, 
                          &renderer->inFlightFences[i]) != VK_SUCCESS) {
-            LOG_ERROR("[Vulkan] Failed to create sync objects");
+            LOG_ERROR("[Vulkan] Failed to create sync objects at index %zu", i);
+            // Cleanup already created objects
+            for (size_t j = 0; j < i; j++) {
+                vkDestroySemaphore(renderer->device, renderer->imageAvailableSemaphores[j], NULL);
+                vkDestroySemaphore(renderer->device, renderer->renderFinishedSemaphores[j], NULL);
+                vkDestroyFence(renderer->device, renderer->inFlightFences[j], NULL);
+            }
+            free(renderer->imageAvailableSemaphores);
+            free(renderer->renderFinishedSemaphores);
+            free(renderer->inFlightFences);
+            renderer->imageAvailableSemaphores = NULL;
+            renderer->renderFinishedSemaphores = NULL;
+            renderer->inFlightFences = NULL;
             return VK_ERROR_INITIALIZATION_FAILED;
         }
     }
@@ -1192,12 +1277,11 @@ bool vulkan_renderer_begin_frame(VulkanRenderer* renderer_ptr) {
     vkWaitForFences(renderer->device, 1, &renderer->inFlightFences[renderer->currentFrame], 
                    VK_TRUE, UINT64_MAX);
     
-    uint32_t imageIndex;
     VkResult result = vkAcquireNextImageKHR(renderer->device, renderer->swapchain, 
                                            UINT64_MAX,
                                            renderer->imageAvailableSemaphores[renderer->currentFrame],
                                            VK_NULL_HANDLE,
-                                           &imageIndex);
+                                           &renderer->acquiredImageIndex);
     
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         vulkan_renderer_resize(renderer_ptr, 1920, 1080);
@@ -1207,18 +1291,18 @@ bool vulkan_renderer_begin_frame(VulkanRenderer* renderer_ptr) {
         return false;
     }
     
-    vkResetCommandBuffer(renderer->commandBuffers[imageIndex], 0);
+    vkResetCommandBuffer(renderer->commandBuffers[renderer->acquiredImageIndex], 0);
     
     VkCommandBufferBeginInfo beginInfo = {0};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     
-    if (vkBeginCommandBuffer(renderer->commandBuffers[imageIndex], &beginInfo) != VK_SUCCESS) {
+    if (vkBeginCommandBuffer(renderer->commandBuffers[renderer->acquiredImageIndex], &beginInfo) != VK_SUCCESS) {
         LOG_ERROR("[Vulkan] Failed to begin command buffer");
         return false;
     }
 
     // Record rendering commands - clear screen with background color
-    record_draw_command(renderer, renderer->commandBuffers[imageIndex], imageIndex,
+    record_draw_command(renderer, renderer->commandBuffers[renderer->acquiredImageIndex], renderer->acquiredImageIndex,
                        0, 0, renderer->swapchainExtent.width, renderer->swapchainExtent.height);
 
     return true;
@@ -1228,7 +1312,7 @@ bool vulkan_renderer_end_frame(VulkanRenderer* renderer_ptr) {
     struct VulkanRendererInternal* renderer = (struct VulkanRendererInternal*)renderer_ptr;
     if (!renderer || !renderer->device) return false;
     
-    uint32_t imageIndex = renderer->currentFrame;
+    uint32_t imageIndex = renderer->acquiredImageIndex;
     
     if (vkEndCommandBuffer(renderer->commandBuffers[imageIndex]) != VK_SUCCESS) {
         LOG_ERROR("[Vulkan] Failed to end command buffer");
@@ -1383,7 +1467,12 @@ VulkanTexture* vulkan_renderer_create_texture_from_buffer_with_data(
         #else
             // Manual swizzle: ARGB -> RGBA
             uint32_t* src = (uint32_t*)pixelData;
-            uint32_t* swizzled = malloc(width * height * 4);
+            // Check for integer overflow in width * height * 4
+            if (width > 0 && height > UINT32_MAX / width) {
+                LOG_ERROR("[Vulkan] Texture dimensions too large: %ux%u", width, height);
+                return NULL;
+            }
+            uint32_t* swizzled = malloc((size_t)width * height * 4);
             if (swizzled) {
                 for (uint32_t i = 0; i < width * height; i++) {
                     uint32_t argb = src[i];
@@ -1423,7 +1512,12 @@ void vulkan_renderer_update_texture(VulkanRenderer* renderer_ptr, VulkanTexture*
     #else
         // Manual swizzle: ARGB -> RGBA
         uint32_t* src = (uint32_t*)pixelData;
-        uint32_t* swizzled = malloc(width * height * 4);
+        // Check for integer overflow in width * height * 4
+        if (width > 0 && height > UINT32_MAX / width) {
+            LOG_ERROR("[Vulkan] Texture dimensions too large: %ux%u", width, height);
+            return;
+        }
+        uint32_t* swizzled = malloc((size_t)width * height * 4);
         if (swizzled) {
             for (uint32_t i = 0; i < width * height; i++) {
                 uint32_t argb = src[i];
@@ -1589,7 +1683,14 @@ bool vulkan_renderer_get_surface_formats(VulkanRenderer* renderer_ptr, void* sur
     result = vkGetPhysicalDeviceSurfaceFormatsKHR(
         renderer->physicalDevice, (VkSurfaceKHR)surface, count, *formats);
     
-    return (result == VK_SUCCESS);
+    if (result != VK_SUCCESS) {
+        free(*formats);
+        *formats = NULL;
+        *count = 0;
+        return false;
+    }
+    
+    return true;
 }
 
 bool vulkan_renderer_get_surface_present_modes(VulkanRenderer* renderer_ptr, void* surface,
@@ -1616,7 +1717,14 @@ bool vulkan_renderer_get_surface_present_modes(VulkanRenderer* renderer_ptr, voi
     result = vkGetPhysicalDeviceSurfacePresentModesKHR(
         renderer->physicalDevice, (VkSurfaceKHR)surface, count, *modes);
     
-    return (result == VK_SUCCESS);
+    if (result != VK_SUCCESS) {
+        free(*modes);
+        *modes = NULL;
+        *count = 0;
+        return false;
+    }
+    
+    return true;
 }
 
 bool vulkan_renderer_select_present_mode(VulkanRenderer* renderer_ptr, void* surface,

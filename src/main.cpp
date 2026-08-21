@@ -113,15 +113,32 @@ int main(int argc, char* argv[]) {
     // Execute startup command if specified
     if (startup_cmd) {
         printf("[MAIN] Executing startup command: %s\n", startup_cmd);
-        pid_t pid = fork();
-        if (pid == 0) {
-            // Child process - execute command
-            execl("/bin/sh", "/bin/sh", "-c", startup_cmd, (char*)NULL);
-            _exit(127);  // exec failed
-        } else if (pid > 0) {
-            printf("[MAIN] Startup process spawned (PID: %d)\n", pid);
+        char* cmd_copy = strdup(startup_cmd);
+        if (!cmd_copy) {
+            perror("[MAIN] strdup failed");
         } else {
-            perror("[MAIN] fork() failed");
+            char* argv[64];
+            int argc = 0;
+            char* token = strtok(cmd_copy, " \t\n");
+            while (token && argc < 63) {
+                argv[argc++] = token;
+                token = strtok(NULL, " \t\n");
+            }
+            argv[argc] = NULL;
+            
+            if (argc > 0) {
+                pid_t pid = fork();
+                if (pid == 0) {
+                    // Child process - execute command directly, no shell
+                    execvp(argv[0], argv);
+                    _exit(127);  // exec failed
+                } else if (pid > 0) {
+                    printf("[MAIN] Startup process spawned (PID: %d)\n", pid);
+                } else {
+                    perror("[MAIN] fork() failed");
+                }
+            }
+            free(cmd_copy);
         }
     }
 

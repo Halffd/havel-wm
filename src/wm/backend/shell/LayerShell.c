@@ -82,8 +82,12 @@ havel_layer_surface_t* havel_layer_surface_create(struct havel_wlr_server *serve
     wl_signal_add(&surface->surface->events.commit, &lsurface->surface_commit);
     
     // Configure the layer surface
-    surface->surface->current.scale = surface->output->scale;
-    wlr_surface_send_enter(surface->surface, surface->output);
+    if (surface->output) {
+        surface->surface->current.scale = surface->output->scale;
+        wlr_surface_send_enter(surface->surface, surface->output);
+    } else {
+        LOG_WARN("[LAYER] Layer surface has no output assigned");
+    }
     
     LOG_INFO("[LAYER] Layer surface created: %p", (void*)lsurface);
     

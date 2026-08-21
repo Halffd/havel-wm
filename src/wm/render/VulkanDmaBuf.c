@@ -226,6 +226,9 @@ DmaBufImportResult vulkan_import_dmabuf(
             vulkan_destroy_dmabuf_texture(renderer, texture);
             return DMA_BUF_IMPORT_NO_MEMORY;
         }
+    } else {
+        // Import succeeded: Vulkan now owns the FD, invalidate it in our texture to prevent double-close
+        texture->fds[0] = -1;
     }
 
     // Bind memory to image

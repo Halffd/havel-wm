@@ -571,18 +571,43 @@ static void cpp_impl_server_quit(void) {
 static void cpp_impl_server_spawn(const char* command) {
     if (!command) return;
     
+    // Parse command into argv (simple space-splitting, no shell)
+    // Note: This is a simple parser; for complex commands with quotes/escaping,
+    // the caller should use the IPC JSON argv array format instead.
+    char* cmd_copy = strdup(command);
+    if (!cmd_copy) {
+        LOG_ERROR("[Spawn] strdup failed");
+        return;
+    }
+    
+    char* argv[64];
+    int argc = 0;
+    char* token = strtok(cmd_copy, " \t\n");
+    while (token && argc < 63) {
+        argv[argc++] = token;
+        token = strtok(NULL, " \t\n");
+    }
+    argv[argc] = NULL;
+    
+    if (argc == 0) {
+        free(cmd_copy);
+        return;
+    }
+    
     pid_t pid = fork();
     if (pid < 0) {
         LOG_ERROR("[Spawn] Fork failed for command: %s", command);
+        free(cmd_copy);
         return;
     }
     if (pid == 0) {
-        // Child process - execute command
-        execl("/bin/sh", "/bin/sh", "-c", command, (char*)NULL);
+        // Child process - execute command directly, no shell
+        execvp(argv[0], argv);
         _exit(127);  // exec failed
     }
     // Parent process
     LOG_INFO("[Spawn] Launched: %s (PID: %d)", command, pid);
+    free(cmd_copy);
 }
 
 // ============================================================================
@@ -1651,30 +1676,24 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
         bool alt_pressed = (alt_idx != XKB_MOD_INVALID) &&
                           (xkb_state_mod_index_is_active(keyboard->xkb_state, alt_idx, XKB_STATE_MODS_DEPRESSED) > 0);
 
-        // VT Switching (Ctrl+Alt+F1..F12) - Direct chvt() call
+        // VT Switching (Ctrl+Alt+F1..F12) - Direct ioctl call (no shell)
         if (ctrl_pressed && alt_pressed && keysym >= XKB_KEY_F1 && keysym <= XKB_KEY_F12) {
             unsigned int vt = keysym - XKB_KEY_F1 + 1;
             LOG_INFO("[VT] Switching to VT%u", vt);
             
-            // Method 1: Try direct chvt() command - works even without wlroots session
-            char vt_cmd[32];
-            snprintf(vt_cmd, sizeof(vt_cmd), "chvt %u", vt);
-            int ret = system(vt_cmd);
-            
-            if (ret != 0) {
-                // Method 2: Try ioctl VT_ACTIVATE directly
-                int console_fd = open("/dev/console", O_WRONLY);
-                if (console_fd >= 0) {
-                    ret = ioctl(console_fd, VT_ACTIVATE, vt);
-                    close(console_fd);
-                    if (ret == 0) {
-                        LOG_INFO("[VT] Switched via ioctl");
-                    }
+            // Method 1: Try ioctl VT_ACTIVATE directly
+            int console_fd = open("/dev/console", O_WRONLY);
+            int ret = -1;
+            if (console_fd >= 0) {
+                ret = ioctl(console_fd, VT_ACTIVATE, vt);
+                close(console_fd);
+                if (ret == 0) {
+                    LOG_INFO("[VT] Switched via ioctl");
                 }
             }
             
             if (ret != 0 && server->session) {
-                // Method 3: Fallback to wlroots session VT switch
+                // Method 2: Fallback to wlroots session VT switch
                 wlr_session_change_vt(server->session, vt);
             }
             

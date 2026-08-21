@@ -159,6 +159,7 @@ private:
   // Customizable settings
   int m_thumbnailWidth;
   int m_thumbnailHeight;
+  int m_maxVisibleWindows;
   float m_bgColor[4];
   float m_borderColor[4];
   float m_textColor[4];

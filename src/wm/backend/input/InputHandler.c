@@ -129,7 +129,16 @@ havel_keyboard_t* havel_keyboard_create(struct havel_wlr_server *server, struct 
     
     // Setup XKB keymap
     struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+    if (!context) {
+        LOG_ERROR("[INPUT] Failed to create XKB context");
+        return keyboard;  // Will fail later but don't crash here
+    }
     struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    if (!keymap) {
+        LOG_ERROR("[INPUT] Failed to create XKB keymap");
+        xkb_context_unref(context);
+        return keyboard;
+    }
     
     wlr_keyboard_set_keymap(wlr_keyboard, keymap);
     xkb_keymap_unref(keymap);
@@ -137,6 +146,9 @@ havel_keyboard_t* havel_keyboard_create(struct havel_wlr_server *server, struct 
     
     keyboard->keymap = wlr_keyboard->keymap;
     keyboard->xkb_state = xkb_state_new(keyboard->keymap);
+    if (!keyboard->xkb_state) {
+        LOG_ERROR("[INPUT] Failed to create XKB state");
+    }
     
     // Setup listeners
     keyboard->modifiers.notify = keyboard_handle_modifiers;

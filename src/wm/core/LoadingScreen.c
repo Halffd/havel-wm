@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <sys/random.h>
+#include <unistd.h>
 
 // Loading screen state
 static struct {
@@ -51,11 +53,21 @@ static const char* loading_tips[] = {
 
 static int get_random_tip_index(void) {
     static bool seeded = false;
+    static uint32_t seed = 0;
+    
     if (!seeded) {
-        srand(time(NULL));
+        // Use getrandom for better entropy, fallback to time + pid
+        if (getrandom(&seed, sizeof(seed), GRND_NONBLOCK) != sizeof(seed)) {
+            seed = (uint32_t)(time(NULL) ^ (getpid() << 16));
+        }
         seeded = true;
     }
-    return rand() % (sizeof(loading_tips) / sizeof(loading_tips[0]));
+    
+    // Simple LCG for random number generation
+    seed = seed * 1664525u + 1013904223u;
+    
+    const int tip_count = (int)(sizeof(loading_tips) / sizeof(loading_tips[0]));
+    return (int)(seed % (uint32_t)tip_count);
 }
 
 void loading_screen_init(struct wlr_scene_tree* parent) {

@@ -111,8 +111,21 @@ havel_output_t* havel_output_create(struct havel_wlr_server *server, struct wlr_
         output->gamma_ramp_red = calloc(gamma_size, sizeof(uint16_t));
         output->gamma_ramp_green = calloc(gamma_size, sizeof(uint16_t));
         output->gamma_ramp_blue = calloc(gamma_size, sizeof(uint16_t));
-        output->gamma_ramp_dirty = true;
-        LOG_INFO("[OUTPUT] Gamma LUT allocated for %s (size=%zu)", wlr_output->name, gamma_size);
+        
+        if (!output->gamma_ramp_red || !output->gamma_ramp_green || !output->gamma_ramp_blue) {
+            LOG_ERROR("[OUTPUT] Failed to allocate gamma LUT for %s", wlr_output->name);
+            free(output->gamma_ramp_red);
+            free(output->gamma_ramp_green);
+            free(output->gamma_ramp_blue);
+            output->gamma_ramp_red = NULL;
+            output->gamma_ramp_green = NULL;
+            output->gamma_ramp_blue = NULL;
+            output->gamma_ramp_size = 0;
+            output->gamma_ramp_dirty = false;
+        } else {
+            output->gamma_ramp_dirty = true;
+            LOG_INFO("[OUTPUT] Gamma LUT allocated for %s (size=%zu)", wlr_output->name, gamma_size);
+        }
     } else {
         output->gamma_ramp_size = 0;
         output->gamma_ramp_red = NULL;
@@ -122,9 +135,12 @@ havel_output_t* havel_output_create(struct havel_wlr_server *server, struct wlr_
         LOG_WARN("[OUTPUT] %s does not support gamma control", wlr_output->name);
     }
     
+    // Check if this is the first output BEFORE inserting
+    bool is_first_output = wl_list_empty(&server->outputs);
+    
     // Add to output list
     wl_list_insert(server->outputs.prev, &output->link);
-    output->is_primary = wl_list_empty(&server->outputs) || (server->outputs.next == &output->link);
+    output->is_primary = is_first_output;
     
     LOG_DEBUG("[OUTPUT] %s is %s", wlr_output->name, output->is_primary ? "primary" : "secondary");
     
@@ -136,7 +152,7 @@ havel_output_t* havel_output_create(struct havel_wlr_server *server, struct wlr_
     wl_signal_add(&wlr_output->events.destroy, &output->destroy);
     
     // Position output in layout
-    if (wl_list_empty(&server->outputs)) {
+    if (is_first_output) {
         // First monitor - position at (0,0)
         wlr_output_layout_add_auto(server->output_layout, wlr_output);
     } else {
@@ -144,7 +160,7 @@ havel_output_t* havel_output_create(struct havel_wlr_server *server, struct wlr_
         struct havel_output *last_output;
         struct wlr_box last_box;
         
-        struct wl_list *last_link = server->outputs.prev;
+        struct wl_list *last_link = server->outputs.prev->prev;  // Previous output before the one we just added
         last_output = wl_container_of(last_link, last_output, link);
         wlr_output_layout_get_box(server->output_layout, last_output->output, &last_box);
         

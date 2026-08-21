@@ -106,6 +106,10 @@ static inline size_t array_capacity(void* arr) {
  * Create new dynamic array
  */
 static inline void* array_create(size_t element_size, size_t initial_capacity) {
+    if (element_size == 0 || initial_capacity == 0) return NULL;
+    if (initial_capacity > SIZE_MAX / element_size) return NULL;
+    if (sizeof(ArrayHeader) > SIZE_MAX - element_size * initial_capacity) return NULL;
+    
     ArrayHeader* header = (ArrayHeader*)malloc(sizeof(ArrayHeader) + element_size * initial_capacity);
     if (!header) return NULL;
     
@@ -119,14 +123,24 @@ static inline void* array_create(size_t element_size, size_t initial_capacity) {
  */
 static inline void* array_ensure_capacity(void* arr, size_t element_size, size_t additional) {
     if (!arr) return NULL;
+    if (element_size == 0) return NULL;
     
     ArrayHeader* header = array_header(arr);
     size_t needed = header->size + additional;
     
     if (needed <= header->capacity) return arr;
     
-    size_t new_capacity = header->capacity * 2;
-    while (new_capacity < needed) new_capacity *= 2;
+    // Check for overflow in new_capacity calculation
+    size_t new_capacity = header->capacity;
+    if (new_capacity > SIZE_MAX / 2) return NULL;
+    new_capacity *= 2;
+    while (new_capacity < needed) {
+        if (new_capacity > SIZE_MAX / 2) return NULL;
+        new_capacity *= 2;
+    }
+    
+    if (new_capacity > SIZE_MAX / element_size) return NULL;
+    if (sizeof(ArrayHeader) > SIZE_MAX - element_size * new_capacity) return NULL;
     
     ArrayHeader* new_header = (ArrayHeader*)realloc(header, 
         sizeof(ArrayHeader) + element_size * new_capacity);
@@ -138,6 +152,9 @@ static inline void* array_ensure_capacity(void* arr, size_t element_size, size_t
 
 /**
  * Push element to array
+ * NOTE: If this returns NULL, the original array pointer may have been lost
+ * due to realloc failure in array_ensure_capacity (the old pointer is leaked).
+ * Caller must handle NULL return and should not use the old pointer.
  */
 static inline void* array_push(void* arr, size_t element_size, const void* element) {
     arr = array_ensure_capacity(arr, element_size, 1);
@@ -221,6 +238,9 @@ static inline char* str_concat(const char* a, const char* b) {
     
     size_t len_a = strlen(a);
     size_t len_b = strlen(b);
+    
+    if (len_a > SIZE_MAX - len_b - 1) return NULL;
+    
     char* result = (char*)malloc(len_a + len_b + 1);
     
     if (result) {
@@ -282,6 +302,8 @@ static inline int strcasecmp_custom(const char* a, const char* b) {
 
 /**
  * Trim whitespace from string (in-place)
+ * NOTE: Returns pointer into original allocation; do NOT free() the returned pointer
+ * unless it's the same as the original allocation pointer.
  */
 static inline char* str_trim(char* str) {
     if (!str) return NULL;
@@ -573,7 +595,7 @@ static inline Color color_from_hex(const char* hex) {
     
     hex++;  // Skip '#'
     
-    unsigned int r, g, b, a = 255;
+    unsigned int r = 0, g = 0, b = 0, a = 255;
     if (strlen(hex) == 6) {
         sscanf(hex, "%2x%2x%2x", &r, &g, &b);
     } else if (strlen(hex) == 8) {
@@ -606,6 +628,8 @@ static inline uint32_t color_to_rgba32(const Color* c) {
  * Linear interpolation between colors
  */
 static inline Color color_lerp(const Color* a, const Color* b, float t) {
+    if (!a || !b) return (Color){0, 0, 0, 0};
+    
     Color result;
     t = clamp_float(t, 0.0f, 1.0f);
     

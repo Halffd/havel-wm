@@ -14,8 +14,64 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstdio>
+#include <sys/wait.h>
+#include <libgen.h>
+#include <limits.h>
 
 using json = nlohmann::json;
+
+namespace {
+    // Validate path: no directory traversal, no shell metacharacters
+    bool isSafePath(const std::string& path) {
+        if (path.empty()) return false;
+        // Check for path traversal
+        if (path.find("..") != std::string::npos) return false;
+        // Check for shell metacharacters
+        static const char* bad_chars = "|&;$(){}[]<>*'\"\\`\n\r";
+        if (path.find_first_of(bad_chars) != std::string::npos) return false;
+        // Must be absolute or relative without traversal
+        return true;
+    }
+
+    // Validate geometry string for grim/slurp (format: "x,y wxh" or "x,y,w,h")
+    bool isSafeGeometry(const std::string& geom) {
+        if (geom.empty()) return true;  // Empty means use slurp interactively
+        for (char c : geom) {
+            if (!isdigit(c) && c != ',' && c != 'x' && c != ' ' && c != '-') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Safe execvp wrapper: forks, execs, returns PID or -1 on error
+    pid_t safeExec(const std::vector<std::string>& argv) {
+        if (argv.empty()) return -1;
+        
+        std::vector<char*> cargv;
+        cargv.reserve(argv.size() + 1);
+        for (const auto& s : argv) cargv.push_back(const_cast<char*>(s.c_str()));
+        cargv.push_back(nullptr);
+        
+        pid_t pid = fork();
+        if (pid == 0) {
+            execvp(cargv[0], cargv.data());
+            _exit(127);
+        }
+        return pid;
+    }
+
+    // Wait for process and capture output
+    int waitForProcess(pid_t pid, std::string* output = nullptr) {
+        int status;
+        waitpid(pid, &status, 0);
+        if (output) {
+            // Note: We can't easily capture child output with fork/exec without pipes
+            // For now, we rely on the tools writing to their output files
+        }
+        return WEXITSTATUS(status);
+    }
+} // anonymous namespace
 
 namespace havel {
 
@@ -449,7 +505,6 @@ std::string IPCServer::handleSpawn(const std::string& args) {
         cmd = j.value("cmd", "");
     } catch (...) {
         cmd = args;
-        // Trim quotes if present
         if (!cmd.empty() && cmd.front() == '"') cmd.erase(0, 1);
         if (!cmd.empty() && cmd.back() == '"') cmd.pop_back();
     }
@@ -459,11 +514,36 @@ std::string IPCServer::handleSpawn(const std::string& args) {
         return err.dump();
     }
 
-    // Spawn command
-    std::string spawnCmd = cmd + " &";
-    int ret = system(spawnCmd.c_str());
+    // Parse command into argv (simple space-splitting, no shell)
+    std::vector<std::string> argv;
+    std::stringstream ss(cmd);
+    std::string token;
+    while (ss >> token) {
+        argv.push_back(token);
+    }
+    if (argv.empty()) {
+        json err = {{"error", "No command specified"}};
+        return err.dump();
+    }
 
-    json result = {{"spawned", cmd}, {"pid", ret}};
+    // Convert to char* array for execvp
+    std::vector<char*> cargv;
+    cargv.reserve(argv.size() + 1);
+    for (auto& s : argv) cargv.push_back(const_cast<char*>(s.c_str()));
+    cargv.push_back(nullptr);
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        json err = {{"error", "fork failed"}};
+        return err.dump();
+    }
+    if (pid == 0) {
+        // Child: exec directly, no shell
+        execvp(cargv[0], cargv.data());
+        _exit(127);
+    }
+
+    json result = {{"spawned", cmd}, {"pid", static_cast<int>(pid)}};
     return result.dump();
 }
 
@@ -598,34 +678,38 @@ std::string IPCServer::handleScreenshot(const std::string& args) {
         }
     }
     
-    // Use grim for screenshot
-    std::string cmd;
-    if (fullscreen) {
-        cmd = "grim '" + path + "' 2>&1";
-    } else {
-        cmd = "grim -g \"" + extractJsonString(args, "geometry", "0,0 1920x1080") + "\" '" + path + "' 2>&1";
+    // Validate path
+    if (!isSafePath(path)) {
+        return createError(0, -2, "Invalid path");
     }
     
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) {
-        return createError(0, -2, "Failed to execute screenshot command");
+    std::vector<std::string> argv = {"grim"};
+    if (!fullscreen) {
+        std::string geometry = extractJsonString(args, "geometry", "");
+        if (!geometry.empty()) {
+            if (!isSafeGeometry(geometry)) {
+                return createError(0, -2, "Invalid geometry");
+            }
+            argv.push_back("-g");
+            argv.push_back(geometry);
+        }
+    }
+    argv.push_back(path);
+    
+    pid_t pid = safeExec(argv);
+    if (pid < 0) {
+        return createError(0, -2, "Failed to execute grim");
     }
     
-    char buffer[256];
-    std::string output;
-    while (fgets(buffer, sizeof(buffer), pipe)) {
-        output += buffer;
-    }
-    pclose(pipe);
-    
-    if (output.empty()) {
+    int status = waitForProcess(pid);
+    if (status == 0) {
         json result;
         result["success"] = true;
         result["path"] = path;
         result["message"] = "Screenshot saved";
         return result.dump();
     } else {
-        return createError(0, -3, output);
+        return createError(0, -3, "grim failed with exit code " + std::to_string(status));
     }
 }
 
@@ -650,28 +734,26 @@ std::string IPCServer::handleScreenshotWindow(const std::string& args) {
         }
     }
     
-    std::string cmd = "grim '" + path + "' 2>&1";
-    
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) {
-        return createError(0, -2, "Failed to execute screenshot command");
+    if (!isSafePath(path)) {
+        return createError(0, -2, "Invalid path");
     }
     
-    char buffer[256];
-    std::string output;
-    while (fgets(buffer, sizeof(buffer), pipe)) {
-        output += buffer;
-    }
-    pclose(pipe);
+    std::vector<std::string> argv = {"grim", path};
     
-    if (output.empty()) {
+    pid_t pid = safeExec(argv);
+    if (pid < 0) {
+        return createError(0, -2, "Failed to execute grim");
+    }
+    
+    int status = waitForProcess(pid);
+    if (status == 0) {
         json result;
         result["success"] = true;
         result["path"] = path;
         result["message"] = "Window screenshot saved";
         return result.dump();
     } else {
-        return createError(0, -3, output);
+        return createError(0, -3, "grim failed with exit code " + std::to_string(status));
     }
 }
 
@@ -696,35 +778,40 @@ std::string IPCServer::handleScreenshotRegion(const std::string& args) {
         }
     }
     
+    if (!isSafePath(path)) {
+        return createError(0, -2, "Invalid path");
+    }
+    
     std::string geometry = extractJsonString(args, "geometry", "");
     
-    std::string cmd;
-    if (geometry.empty()) {
-        cmd = "slurp -f '%x,%y %wx%h' | grim -g - '" + path + "' 2>&1";
+    std::vector<std::string> argv = {"grim"};
+    if (!geometry.empty()) {
+        if (!isSafeGeometry(geometry)) {
+            return createError(0, -2, "Invalid geometry");
+        }
+        argv.push_back("-g");
+        argv.push_back(geometry);
     } else {
-        cmd = "grim -g \"" + geometry + "\" '" + path + "' 2>&1";
+        // No geometry provided - cannot use slurp pipe safely without shell
+        // Return error asking for explicit geometry
+        return createError(0, -2, "Geometry required for region screenshot (use slurp separately to get geometry)");
+    }
+    argv.push_back(path);
+    
+    pid_t pid = safeExec(argv);
+    if (pid < 0) {
+        return createError(0, -2, "Failed to execute grim");
     }
     
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) {
-        return createError(0, -2, "Failed to execute screenshot command");
-    }
-    
-    char buffer[256];
-    std::string output;
-    while (fgets(buffer, sizeof(buffer), pipe)) {
-        output += buffer;
-    }
-    pclose(pipe);
-    
-    if (output.empty() || output.find("saved") != std::string::npos) {
+    int status = waitForProcess(pid);
+    if (status == 0) {
         json result;
         result["success"] = true;
         result["path"] = path;
         result["message"] = "Region screenshot saved";
         return result.dump();
     } else {
-        return createError(0, -3, output);
+        return createError(0, -3, "grim failed with exit code " + std::to_string(status));
     }
 }
 
@@ -748,38 +835,45 @@ std::string IPCServer::handleAudioRecord(const std::string& args) {
         }
     }
     
-    std::string cmd;
-    if (duration > 0) {
-        cmd = "arecord -d " + std::to_string(duration) + " -f cd '" + path + "' 2>&1";
-    } else {
-        cmd = "arecord -f cd '" + path + "' & echo $! 2>&1";
+    if (!isSafePath(path)) {
+        return createError(0, -2, "Invalid path");
     }
     
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) {
+    if (duration < 0 || duration > 86400) {
+        return createError(0, -2, "Invalid duration");
+    }
+    
+    std::vector<std::string> argv = {"arecord", "-f", "cd", path};
+    if (duration > 0) {
+        argv.insert(argv.begin() + 1, "-d");
+        argv.insert(argv.begin() + 2, std::to_string(duration));
+    }
+    
+    pid_t pid = safeExec(argv);
+    if (pid < 0) {
         return createError(0, -2, "Failed to start audio recording");
     }
     
-    char buffer[256];
-    std::string output;
-    while (fgets(buffer, sizeof(buffer), pipe)) {
-        output += buffer;
-    }
-    int status = pclose(pipe);
-    
-    if (status == 0 || !output.empty()) {
+    if (duration > 0) {
+        int status = waitForProcess(pid);
+        if (status == 0) {
+            json result;
+            result["success"] = true;
+            result["path"] = path;
+            result["message"] = "Audio recording completed";
+            result["duration"] = duration;
+            return result.dump();
+        } else {
+            return createError(0, -3, "arecord failed with exit code " + std::to_string(status));
+        }
+    } else {
+        // Background recording - return PID immediately
         json result;
         result["success"] = true;
         result["path"] = path;
         result["message"] = "Audio recording started";
-        if (duration > 0) {
-            result["duration"] = duration;
-        } else {
-            result["pid"] = std::stoi(output);
-        }
+        result["pid"] = pid;
         return result.dump();
-    } else {
-        return createError(0, -3, "Failed to start recording: " + output);
     }
 }
 
@@ -804,49 +898,59 @@ std::string IPCServer::handleVideoRecord(const std::string& args) {
         }
     }
     
-    std::string cmd = "wf-recorder";
+    if (!isSafePath(path)) {
+        return createError(0, -2, "Invalid path");
+    }
     
+    if (!isSafeGeometry(geometry)) {
+        return createError(0, -2, "Invalid geometry");
+    }
+    
+    if (framerate < 1 || framerate > 120) {
+        return createError(0, -2, "Invalid framerate");
+    }
+    
+    if (duration < 0 || duration > 86400) {
+        return createError(0, -2, "Invalid duration");
+    }
+    
+    std::vector<std::string> argv = {"wf-recorder", "-f", path, "--framerate", std::to_string(framerate)};
     if (!geometry.empty()) {
-        cmd += " -g \"" + geometry + "\"";
+        argv.push_back("-g");
+        argv.push_back(geometry);
     }
-    
-    cmd += " -f '" + path + "'";
-    cmd += " --framerate " + std::to_string(framerate);
-    
     if (duration > 0) {
-        cmd += " -d " + std::to_string(duration);
-    } else {
-        cmd += " & echo $!";
+        argv.push_back("-d");
+        argv.push_back(std::to_string(duration));
     }
     
-    cmd += " 2>&1";
-    
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) {
+    pid_t pid = safeExec(argv);
+    if (pid < 0) {
         return createError(0, -2, "Failed to start video recording");
     }
     
-    char buffer[256];
-    std::string output;
-    while (fgets(buffer, sizeof(buffer), pipe)) {
-        output += buffer;
-    }
-    int status = pclose(pipe);
-    
-    if (status == 0 || output.find("recording") != std::string::npos) {
+    if (duration > 0) {
+        int status = waitForProcess(pid);
+        if (status == 0) {
+            json result;
+            result["success"] = true;
+            result["path"] = path;
+            result["message"] = "Video recording completed";
+            result["duration"] = duration;
+            result["framerate"] = framerate;
+            return result.dump();
+        } else {
+            return createError(0, -3, "wf-recorder failed with exit code " + std::to_string(status));
+        }
+    } else {
+        // Background recording - return PID immediately
         json result;
         result["success"] = true;
         result["path"] = path;
         result["message"] = "Video recording started";
-        if (duration > 0) {
-            result["duration"] = duration;
-            result["framerate"] = framerate;
-        } else {
-            result["pid"] = std::stoi(output);
-        }
+        result["pid"] = pid;
+        result["framerate"] = framerate;
         return result.dump();
-    } else {
-        return createError(0, -3, "Failed to start recording: " + output);
     }
 }
 
@@ -864,24 +968,14 @@ std::string IPCServer::handleStopRecording(const std::string& args) {
         return createError(0, -2, "Invalid PID");
     }
     
-    std::string cmd = "kill -SIGINT " + std::to_string(pid) + " 2>&1";
-    
-    FILE* pipe = popen(cmd.c_str(), "r");
-    if (!pipe) {
-        return createError(0, -3, "Failed to stop recording");
+    if (kill(pid, SIGINT) == 0) {
+        json result;
+        result["success"] = true;
+        result["message"] = "Recording stopped (PID: " + std::to_string(pid) + ")";
+        return result.dump();
+    } else {
+        return createError(0, -3, "Failed to stop recording: " + std::string(strerror(errno)));
     }
-    
-    char buffer[256];
-    std::string output;
-    while (fgets(buffer, sizeof(buffer), pipe)) {
-        output += buffer;
-    }
-    pclose(pipe);
-    
-    json result;
-    result["success"] = true;
-    result["message"] = "Recording stopped (PID: " + std::to_string(pid) + ")";
-    return result.dump();
 }
 std::string IPCServer::jsonToString(const JsonObject& obj) {
     json_t j = obj;

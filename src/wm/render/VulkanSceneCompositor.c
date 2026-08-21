@@ -72,11 +72,17 @@ VulkanSceneTexture* vulkan_scene_import_buffer(
     
     // Add to texture cache
     if (compositor->textureCount >= compositor->textureCapacity) {
-        compositor->textureCapacity = compositor->textureCapacity ? 
+        size_t new_capacity = compositor->textureCapacity ? 
             compositor->textureCapacity * 2 : 16;
-        compositor->textures = (VulkanSceneTexture**)realloc(
+        VulkanSceneTexture** new_textures = (VulkanSceneTexture**)realloc(
             compositor->textures, 
-            compositor->textureCapacity * sizeof(VulkanSceneTexture*));
+            new_capacity * sizeof(VulkanSceneTexture*));
+        if (!new_textures) {
+            LOG_ERROR("[VulkanScene] Failed to realloc texture cache");
+            return NULL;
+        }
+        compositor->textures = new_textures;
+        compositor->textureCapacity = new_capacity;
     }
     compositor->textures[compositor->textureCount++] = texture;
     compositor->stats.textureCount = compositor->textureCount;

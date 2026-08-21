@@ -131,9 +131,11 @@ void DestroyOnClosePlugin::updateAnimations(float dt) {
                 break;
                 
             case DestroyEffect::Dissolve:
-                // Particles fade randomly
+                // Particles fade randomly - use thread_local RNG instead of rand()
+                static thread_local std::mt19937 rng{std::random_device{}()};
+                static thread_local std::uniform_real_distribution<float> dist(0.0f, 1.0f);
                 for (auto& p : destroy.particles) {
-                    if (p.life > 0 && static_cast<float>(rand()) / RAND_MAX < dt * 2) {
+                    if (p.life > 0 && dist(rng) < dt * 2) {
                         p.life -= dt / destroy.duration;
                     }
                 }
