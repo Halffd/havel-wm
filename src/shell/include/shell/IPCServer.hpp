@@ -117,6 +117,7 @@ public:
     std::string jsonToString(const JsonObject& obj);
     std::string jsonToString(const JsonArray& arr);
     std::string createSuccessResponse(const std::string& message);
+    std::string createErrorResponse(int code, const std::string& message);
 
 private:
     // Message processing

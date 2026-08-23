@@ -157,19 +157,25 @@ Connect to the IPC socket:
 
 ```bash
 # Get all windows
-echo '{"method":"get_windows"}' | socat - UNIX-CONNECT:/tmp/havel-wm-ipc.sock
+echo '{"method":"get_windows"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
 
 # Send notification
 echo '{"method":"notify","params":{"summary":"Hello","body":"World"}}' | \
-  socat - UNIX-CONNECT:/tmp/havel-wm-ipc.sock
+  socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
 
 # Subscribe to events
 echo '{"method":"subscribe","params":{"events":["window_created"]}}' | \
-  socat - UNIX-CONNECT:/tmp/havel-wm-ipc.sock
+  socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
 
 # Take screenshot
 echo '{"method":"screenshot","params":{"path":"~/pic.png"}}' | \
-  socat - UNIX-CONNECT:/tmp/havel-wm-ipc.sock
+  socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
+```
+
+Or use fallback:
+
+```bash
+echo '{"method":"get_windows"}' | socat - UNIX-CONNECT:/tmp/havel-wm.sock
 ```
 
 See `test_ipc.sh` for more examples.

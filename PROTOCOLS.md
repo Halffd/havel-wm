@@ -26,15 +26,18 @@
 
 ---
 
-### ✅ xwayland
-**Status:** Fully Implemented  
+### ⚠️ xwayland
+**Status:** Partial (DnD only)  
 **Purpose:** X11 compatibility layer
 
-- X11 application support
-- X11/Wayland interoperability
-- Clipboard sharing
+- XWayland DnD (Drag and Drop) support implemented via `XWaylandDnD.cpp`
+- XWayland surface handling for window management
+- **Missing:** Full XWayland server initialization (`wlr_xwayland_create()`)
+- **Missing:** X11 application support (requires full XWayland server)
 
-**Used by:** X11 applications, legacy software
+**Used by:** X11 applications (limited - DnD only currently)
+
+**Note:** Full XWayland support requires calling `wlr_xwayland_create()` during compositor initialization and handling XCB events. Currently only DnD protocol is implemented.
 
 ---
 
@@ -357,7 +360,7 @@ echo '{"method":"subscribe","params":{"events":["window_created"]}}' | \
 | Category | Protocol | Status | Notes |
 |----------|----------|--------|-------|
 | **Core** | xdg-shell | ✅ | Primary window protocol |
-| **Core** | xwayland | ✅ | X11 compatibility |
+| **Core** | xwayland | ⚠️ Partial | X11 DnD only, full server missing |
 | **Output** | wlr-output-management-v1 | ✅ NEW | Dynamic config |
 | **Output** | wlr-output-power-v1 | ✅ NEW | DPMS |
 | **Output** | xdg-output-v1 | ✅ | Metadata |

@@ -252,6 +252,9 @@ private:
     bool m_grayscaleEnabled = false;
     bool m_negativeEnabled = false;
 
+    // Start time for uptime calculation
+    std::chrono::steady_clock::time_point m_startTime = std::chrono::steady_clock::now();
+
     // Grab state for mouse operations
     enum class GrabMode : uint8_t {
         None = 0,

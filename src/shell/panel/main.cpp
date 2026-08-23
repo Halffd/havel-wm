@@ -17,7 +17,7 @@ int main(int argc, char* argv[]) {
         QStringList() << "s" << "socket",
         "IPC socket path",
         "path",
-        "/tmp/havel-ipc.sock"
+        "/tmp/havel-wm.sock"
     );
     parser.addOption(socketOption);
     

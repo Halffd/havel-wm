@@ -410,6 +410,7 @@ void PluginManager::focusView(View* view) {
 void PluginManager::closeView(View* view) {
     if (!m_server || !view) return;
     auto* server = static_cast<Server*>(m_server);
+    (void)server;
     // closeView not implemented;
 }
 
@@ -450,31 +451,31 @@ std::string PluginManager::getViewTitle(View* view) {
 
 int PluginManager::getViewX(View* view) {
     if (!m_server || !view) return 0;
-    auto* server = static_cast<Server*>(m_server);
+    (void)m_server;
     return view->geom().x;
 }
 
 int PluginManager::getViewY(View* view) {
     if (!m_server || !view) return 0;
-    auto* server = static_cast<Server*>(m_server);
+    (void)m_server;
     return view->geom().y;
 }
 
 int PluginManager::getViewWidth(View* view) {
     if (!m_server || !view) return 0;
-    auto* server = static_cast<Server*>(m_server);
+    (void)m_server;
     return view->geom().w;
 }
 
 int PluginManager::getViewHeight(View* view) {
     if (!m_server || !view) return 0;
-    auto* server = static_cast<Server*>(m_server);
+    (void)m_server;
     return view->geom().h;
 }
 
 bool PluginManager::isViewFloating(View* view) {
     if (!m_server || !view) return false;
-    auto* server = static_cast<Server*>(m_server);
+    (void)m_server;
     return view->isFloating();
 }
 
@@ -571,7 +572,10 @@ void PluginManager::setBrightnessForOutput(int output_index, float brightness) {
 
 void PluginManager::setZoomForOutput(int output_index, float zoom) {
     if (!m_server) return;
+    (void)output_index;
+    (void)zoom;
     auto* server = static_cast<Server*>(m_server);
+    (void)server;
     // setZoom not implemented
 }
 

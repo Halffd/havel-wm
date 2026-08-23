@@ -994,6 +994,13 @@ std::string IPCServer::createSuccessResponse(const std::string& message) {
     return j.dump();
 }
 
+std::string IPCServer::createErrorResponse(int code, const std::string& message) {
+    json_t j;
+    j["success"] = false;
+    j["error"] = {{"code", code}, {"message", message}};
+    return j.dump();
+}
+
 
 // ============================================================================
 // Cursor Control Implementations

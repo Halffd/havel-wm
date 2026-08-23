@@ -637,29 +637,22 @@ void Server::spawnTerminal() {
     const char* terminals[] = {"alacritty", "foot", nullptr};
 
     for (int i = 0; terminals[i] != nullptr; i++) {
-        // Check if terminal exists
-        char checkCmd[256];
-        snprintf(checkCmd, sizeof(checkCmd), "command -v %s", terminals[i]);
-        FILE* f = popen(checkCmd, "r");
-        if (f) {
-            char path[256];
-            if (fgets(path, sizeof(path), f) != nullptr) {
-                pclose(f);
-                // Terminal found, spawn it
-                LOG_INFO("Spawning terminal: %s", terminals[i]);
-                if (g_server_spawn) {
-                    g_server_spawn(terminals[i]);
-                } else {
-                    // Fallback to fork/exec
-                    pid_t pid = fork();
-                    if (pid == 0) {
-                        execlp(terminals[i], terminals[i], (char*)NULL);
-                        _exit(127);
-                    }
+        // Check if terminal exists using access()
+        char checkPath[256];
+        snprintf(checkPath, sizeof(checkPath), "/usr/bin/%s", terminals[i]);
+        if (access(checkPath, X_OK) == 0) {
+            // Terminal found, spawn it
+            LOG_INFO("Spawning terminal: %s", terminals[i]);
+            if (g_server_spawn) {
+                g_server_spawn(terminals[i]);
+            } else {
+                pid_t pid = fork();
+                if (pid == 0) {
+                    execlp(terminals[i], terminals[i], (char*)NULL);
+                    _exit(127);
                 }
-                return;
             }
-            pclose(f);
+            return;
         }
     }
 
@@ -686,12 +679,10 @@ void Server::spawnBrowser() {
     const char* browsers[] = {"firefox", "chromium", "google-chrome", "brave", nullptr};
     
     for (int i = 0; browsers[i] != nullptr; i++) {
-        char cmd[256];
-        snprintf(cmd, sizeof(cmd), "command -v %s > /dev/null 2>&1", browsers[i]);
-        FILE* f = popen(cmd, "r");
-        if (f) {
-            int result = pclose(f);
-            if (result == 0 && g_server_spawn) {
+        char checkPath[256];
+        snprintf(checkPath, sizeof(checkPath), "/usr/bin/%s", browsers[i]);
+        if (access(checkPath, X_OK) == 0) {
+            if (g_server_spawn) {
                 g_server_spawn(browsers[i]);
                 LOG_INFO("Spawned browser: %s", browsers[i]);
                 return;
@@ -704,12 +695,10 @@ void Server::spawnFileManager() {
     const char* managers[] = {"nautilus", "dolphin", "thunar", "pcmanfm", nullptr};
     
     for (int i = 0; managers[i] != nullptr; i++) {
-        char cmd[256];
-        snprintf(cmd, sizeof(cmd), "command -v %s > /dev/null 2>&1", managers[i]);
-        FILE* f = popen(cmd, "r");
-        if (f) {
-            int result = pclose(f);
-            if (result == 0 && g_server_spawn) {
+        char checkPath[256];
+        snprintf(checkPath, sizeof(checkPath), "/usr/bin/%s", managers[i]);
+        if (access(checkPath, X_OK) == 0) {
+            if (g_server_spawn) {
                 g_server_spawn(managers[i]);
                 LOG_INFO("Spawned file manager: %s", managers[i]);
                 return;
@@ -1544,8 +1533,8 @@ bool Server::startIPCServer(const std::string& socketPath) {
 
     m_ipcServer->registerCommand("set_output_scale", [this](const std::string& args) -> std::string {
         // Set output scaling factor
-        int outputIdx = m_ipcServer->extractJsonInt(args, "output", 0);
-        float scale = m_ipcServer->extractJsonFloat(args, "scale", 1.0f);
+        (void)m_ipcServer->extractJsonInt(args, "output", 0);
+        (void)m_ipcServer->extractJsonFloat(args, "scale", 1.0f);
         // setOutputScale not implemented yet
         return m_ipcServer->createSuccessResponse("Output scale set");
     });
@@ -1623,14 +1612,14 @@ bool Server::startIPCServer(const std::string& socketPath) {
     m_ipcServer->registerCommand("notify", [this](const std::string& args) -> std::string {
         std::string summary = m_ipcServer->extractJsonString(args, "summary");
         std::string body = m_ipcServer->extractJsonString(args, "body");
-        std::string app = m_ipcServer->extractJsonString(args, "app");
-        int timeout = m_ipcServer->extractJsonInt(args, "timeout", 5000);
+        (void)m_ipcServer->extractJsonString(args, "app");
+        (void)m_ipcServer->extractJsonInt(args, "timeout", 5000);
         // Would send notification via NotificationDaemon
         return m_ipcServer->createSuccessResponse("Notification sent: " + summary);
     });
 
     m_ipcServer->registerCommand("close_notification", [this](const std::string& args) -> std::string {
-        int id = m_ipcServer->extractJsonInt(args, "id", 0);
+        (void)m_ipcServer->extractJsonInt(args, "id", 0);
         // Would close notification by ID
         return m_ipcServer->createSuccessResponse("Notification closed");
     });
@@ -1732,22 +1721,22 @@ bool Server::startIPCServer(const std::string& socketPath) {
     });
 
     m_ipcServer->registerCommand("set_window_opacity", [this](const std::string& args) -> std::string {
-        int id = m_ipcServer->extractJsonInt(args, "id", -1);
-        float opacity = m_ipcServer->extractJsonFloat(args, "opacity", 1.0f);
+        (void)m_ipcServer->extractJsonInt(args, "id", -1);
+        (void)m_ipcServer->extractJsonFloat(args, "opacity", 1.0f);
         // Would set window opacity
         return m_ipcServer->createSuccessResponse("Window opacity set");
     });
 
     m_ipcServer->registerCommand("set_window_fullscreen", [this](const std::string& args) -> std::string {
-        int id = m_ipcServer->extractJsonInt(args, "id", -1);
-        bool fullscreen = m_ipcServer->extractJsonBool(args, "fullscreen", true);
+        (void)m_ipcServer->extractJsonInt(args, "id", -1);
+        (void)m_ipcServer->extractJsonBool(args, "fullscreen", true);
         // Would set window fullscreen
         return m_ipcServer->createSuccessResponse("Window fullscreen set");
     });
 
     m_ipcServer->registerCommand("set_window_always_on_top", [this](const std::string& args) -> std::string {
-        int id = m_ipcServer->extractJsonInt(args, "id", -1);
-        bool onTop = m_ipcServer->extractJsonBool(args, "on_top", true);
+        (void)m_ipcServer->extractJsonInt(args, "id", -1);
+        (void)m_ipcServer->extractJsonBool(args, "on_top", true);
         // Would set always on top
         return m_ipcServer->createSuccessResponse("Window always-on-top set");
     });
@@ -1775,10 +1764,10 @@ bool Server::startIPCServer(const std::string& socketPath) {
     });
 
     m_ipcServer->registerCommand("move_to_workspace", [this](const std::string& args) -> std::string {
-        int windowId = m_ipcServer->extractJsonInt(args, "window_id", -1);
-        int workspace = m_ipcServer->extractJsonInt(args, "workspace", 0);
+        (void)m_ipcServer->extractJsonInt(args, "window_id", -1);
+        (void)m_ipcServer->extractJsonInt(args, "workspace", 0);
         // Would move window to workspace
-        return m_ipcServer->createSuccessResponse("Window moved to workspace " + std::to_string(workspace));
+        return m_ipcServer->createSuccessResponse("Window moved to workspace");
     });
 
     // ========================================================================

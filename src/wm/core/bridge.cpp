@@ -56,8 +56,32 @@ struct havel_cpp_server* havel_cpp_server_create(void) {
 
 void havel_cpp_server_destroy(struct havel_cpp_server* server) {
     if (!server) return;
-    server->server->stopIPCServer();
-    delete server->server;
+    
+    // Delete C-layer objects that were created with new
+    if (server->server) {
+        // Delete TextInputManager
+        if (server->server->textInputManager()) {
+            delete server->server->textInputManager();
+        }
+        
+        // Delete GestureRecognizer
+        if (server->server->gestureRecognizer()) {
+            delete static_cast<havel::GestureRecognizer*>(server->server->gestureRecognizer());
+        }
+        
+        // Delete WindowGroupManager
+        if (server->server->windowGroupManager()) {
+            delete static_cast<havel::WindowGroupManager*>(server->server->windowGroupManager());
+        }
+        
+        // Delete DesktopManager
+        if (server->server->desktopManager()) {
+            delete static_cast<havel::DesktopManager*>(server->server->desktopManager());
+        }
+        
+        server->server->stopIPCServer();
+        delete server->server;
+    }
     delete server;
 }
 

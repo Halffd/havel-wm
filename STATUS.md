@@ -119,7 +119,7 @@ Havel WM is a **modern Wayland compositor** built on wlroots with:
 | Protocol | Status | Tools |
 |----------|--------|-------|
 | xdg-shell | ✅ | All Wayland apps |
-| xwayland | ✅ | X11 apps |
+| xwayland | ⚠️ Partial | X11 DnD only, full server missing |
 | wlr-output-management-v1 | ✅ | `wlr-randr`, `kanshi` |
 | xdg-output-v1 | ✅ | Waybar |
 | wlr-gamma-control-v1 | ✅ | `gammastep` |

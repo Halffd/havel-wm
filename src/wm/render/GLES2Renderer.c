@@ -308,9 +308,17 @@ GLES2Texture* gles2_renderer_create_texture(GLES2Renderer* renderer, uint32_t wi
     
     // Add to texture cache
     if (renderer->textureCount >= renderer->textureCapacity) {
-        renderer->textureCapacity = renderer->textureCapacity ? renderer->textureCapacity * 2 : 16;
-        renderer->textures = (GLES2Texture**)realloc(renderer->textures, 
-                            renderer->textureCapacity * sizeof(GLES2Texture*));
+        size_t new_capacity = renderer->textureCapacity ? renderer->textureCapacity * 2 : 16;
+        GLES2Texture** new_textures = (GLES2Texture**)realloc(
+            renderer->textures, 
+            new_capacity * sizeof(GLES2Texture*));
+        if (!new_textures) {
+            LOG_ERROR("[GLES2] Failed to realloc texture cache");
+            free(texture);
+            return NULL;
+        }
+        renderer->textures = new_textures;
+        renderer->textureCapacity = new_capacity;
     }
     renderer->textures[renderer->textureCount++] = texture;
     renderer->stats.textureCount = renderer->textureCount;

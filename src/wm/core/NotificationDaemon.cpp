@@ -1,5 +1,5 @@
 // DbusNotification Daemon - D-Bus notification server implementation
-// Implements org.freedesktop.DbusNotifications specification
+// Implements org.freedesktop.Notifications specification
 
 #include "NotificationDaemon.hpp"
 #include <Logger.h>
@@ -8,12 +8,12 @@
 
 namespace havel {
 
-// D-Bus introspection XML for DbusNotifications interface
+// D-Bus introspection XML for Notifications interface
 const gchar* DbusNotificationDaemon::s_introspectionXml = R"(
 <!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN"
                       "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
 <node>
-  <interface name="org.freedesktop.DbusNotifications">
+  <interface name="org.freedesktop.Notifications">
     <method name="Notify">
       <arg type="s" name="app_name" direction="in"/>
       <arg type="u" name="replaces_id" direction="in"/>
@@ -25,7 +25,7 @@ const gchar* DbusNotificationDaemon::s_introspectionXml = R"(
       <arg type="i" name="expire_timeout" direction="in"/>
       <arg type="u" name="id" direction="out"/>
     </method>
-    <method name="CloseDbusNotification">
+    <method name="CloseNotification">
       <arg type="u" name="id" direction="in"/>
     </method>
     <method name="GetCapabilities">
@@ -37,7 +37,7 @@ const gchar* DbusNotificationDaemon::s_introspectionXml = R"(
       <arg type="s" name="version" direction="out"/>
       <arg type="s" name="spec_version" direction="out"/>
     </method>
-    <signal name="DbusNotificationClosed">
+    <signal name="NotificationClosed">
       <arg type="u" name="id"/>
       <arg type="u" name="reason"/>
     </signal>
@@ -88,7 +88,7 @@ bool DbusNotificationDaemon::initialize() {
     
     m_registrationId = g_dbus_connection_register_object(
         m_connection,
-        "/org/freedesktop/DbusNotifications",
+        "/org/freedesktop/Notifications",
         introspectionData->interfaces[0],
         &vtable,
         this,  // user_data
@@ -109,7 +109,7 @@ bool DbusNotificationDaemon::initialize() {
     // Request well-known name
     guint ownerId = g_bus_own_name_on_connection(
         m_connection,
-        "org.freedesktop.DbusNotifications",
+        "org.freedesktop.Notifications",
         G_BUS_NAME_OWNER_FLAGS_NONE,
         nullptr,  // name_acquired
         nullptr,  // name_lost
@@ -126,7 +126,7 @@ bool DbusNotificationDaemon::initialize() {
     }
     
     m_running = true;
-    LOG_INFO("[DbusNotificationDaemon] D-Bus service running as org.freedesktop.DbusNotifications");
+    LOG_INFO("[DbusNotificationDaemon] D-Bus service running as org.freedesktop.Notifications");
     
     return true;
 }
@@ -185,15 +185,15 @@ void DbusNotificationDaemon::closeDbusNotification(uint32_t id) {
             notif.dismissed = true;
             LOG_INFO("[DbusNotificationDaemon] DbusNotification %u closed", id);
             
-            // Emit DbusNotificationClosed signal
+            // Emit NotificationClosed signal
             if (m_connection && m_registrationId > 0) {
                 GVariant* signal = g_variant_new("(uu)", id, 1u);  // reason=1 (dismissed)
                 g_dbus_connection_emit_signal(
                     m_connection,
                     nullptr,  // destination (broadcast)
-                    "/org/freedesktop/DbusNotifications",
-                    "org.freedesktop.DbusNotifications",
-                    "DbusNotificationClosed",
+                    "/org/freedesktop/Notifications",
+                    "org.freedesktop.Notifications",
+                    "NotificationClosed",
                     signal,
                     nullptr
                 );
@@ -293,7 +293,7 @@ void DbusNotificationDaemon::onMethodCall(
     
     if (g_strcmp0(methodName, "Notify") == 0) {
         daemon->handleNotify(invocation, parameters);
-    } else if (g_strcmp0(methodName, "CloseDbusNotification") == 0) {
+    } else if (g_strcmp0(methodName, "CloseNotification") == 0) {
         daemon->handleCloseDbusNotification(invocation, parameters);
     } else if (g_strcmp0(methodName, "GetCapabilities") == 0) {
         daemon->handleGetCapabilities(invocation);
