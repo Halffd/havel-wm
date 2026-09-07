@@ -2,7 +2,6 @@
 // Note: WLR_USE_UNSTABLE is defined in CMakeLists.txt
 
 #include <wm/wlr_bridge.h>
-#include <wm/render/WlrBinding.h>
 #include <Logger.h>
 #include <wm/render_c.h>
 #include <core/LoadingScreen.h>

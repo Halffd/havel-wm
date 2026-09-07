@@ -3,7 +3,6 @@
 #pragma once
 
 #include <wm/plugins/Plugin.hpp>
-#include <wm/render/ShaderEffect.hpp>
 #include <vector>
 #include <chrono>
 

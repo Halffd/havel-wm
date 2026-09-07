@@ -25,26 +25,6 @@ pkg_check_modules(VULKAN REQUIRED vulkan)
 # Find nlohmann/json for JSON parsing
 find_package(nlohmann_json CONFIG REQUIRED)
 
-# Renderer selection (default: Vulkan with GLES2 fallback)
-option(USE_VULKAN "Use Vulkan renderer (default ON)" ON)
-option(USE_GLES2 "Use GLES2 renderer as fallback (default ON)" ON)
-
-if(USE_VULKAN)
-    add_compile_definitions(USE_VULKAN=1)
-    message(STATUS "Vulkan renderer enabled")
-else()
-    add_compile_definitions(USE_VULKAN=0)
-    message(STATUS "Vulkan renderer disabled")
-endif()
-
-if(USE_GLES2)
-    add_compile_definitions(USE_GLES2=1)
-    message(STATUS "GLES2 renderer enabled")
-else()
-    add_compile_definitions(USE_GLES2=0)
-    message(STATUS "GLES2 renderer disabled")
-endif()
-
 # Find PipeWire for screen sharing
 pkg_check_modules(PIPEWIRE libpipewire-0.3)
 if(PIPEWIRE_FOUND)
@@ -192,12 +172,9 @@ set(WM_CORE_SOURCES
     src/wm/core/LoadingScreen.c
     src/wm/core/LoadingScreen.h
     src/wm/render/render_c_wrappers.c
-    src/wm/render/ShaderEffect.cpp
     src/wm/render/OverlayRenderer.cpp
     src/wm/render/OverlayRenderer.hpp
     src/wm/render/OverlayRendering.cpp
-    src/wm/render/BitmapFont.cpp
-    src/wm/render/BitmapFont.hpp
     src/wm/render/FreeTypeFont.cpp
     src/wm/render/FreeTypeFont.hpp
     src/wm/render/AppIconLoader.cpp
@@ -240,22 +217,6 @@ set(WM_CORE_SOURCES
     src/wm/plugins/FPSPlugin.cpp
     src/wm/plugins/ZoomPlugin.cpp
     src/wm/plugins/WorkspaceInfoBar.cpp
-    src/wm/render/VulkanRenderer.c
-    src/wm/render/VulkanRendererBridge.h
-    src/wm/render/VulkanSceneCompositor.c
-    src/wm/render/VulkanSceneCompositor.h
-    src/wm/render/VulkanOverlayRenderer.c
-    src/wm/render/VulkanOverlayRenderer.h
-    src/wm/render/VulkanDmaBuf.c
-    src/wm/render/VulkanDmaBuf.h
-    src/wm/render/GLES2Renderer.c
-    src/wm/render/GLES2Renderer.h
-    src/wm/render/UnifiedRenderer.c
-    src/wm/render/UnifiedRenderer.h
-    src/wm/render/WlrBinding.c
-    src/wm/render/WlrBinding.h
-    src/wm/render/DamageTracker.c
-    src/wm/render/DamageTracker.h
     # Animation plugins (WIP - need interface adjustments)
     # src/wm/plugins/WobblyWindowsPlugin.cpp
     # src/wm/plugins/DestroyOnClosePlugin.cpp
