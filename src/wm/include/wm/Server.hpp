@@ -5,9 +5,8 @@
 #include <wm/Focus.hpp>
 #include <wm/Animator.hpp>
 #include <wm/bridge.h>
-#include <wm/overlay/AltTabOverlay.hpp>
-#include <wm/overlay/OverviewOverlay.hpp>
-#include <wm/overlay/AppLauncherOverlay.hpp>
+#include <wm/DisplaySettings.hpp>
+#include <wm/OverlayController.hpp>
 #include <wm/render/OverlayRenderer.hpp>
 #include <wm/plugins/PluginManager.hpp>
 #include <input/KeybindingManager.hpp>
@@ -86,7 +85,10 @@ public:
     void scheduleRedraw();
 
     // Native server handle for C bridge
-    void setNativeHandle(void* handle) { m_nativeHandle = handle; }
+    void setNativeHandle(void* handle) {
+        m_nativeHandle = handle;
+        m_displaySettings.setApplyHandle(reinterpret_cast<havel_wlr_server_t*>(handle));
+    }
     void* nativeHandle() const { return m_nativeHandle; }
 
     // Overlay layer for plugin rendering
@@ -236,9 +238,9 @@ private:
     TextInputManager* m_textInputManager = nullptr;
 
     // Overlays
-    AltTabOverlay m_altTabOverlay;
-    OverviewOverlay m_overviewOverlay;
-    AppLauncherOverlay m_launcherOverlay;
+    // Overlay UI state machines (alt-tab, overview, launcher), extracted
+    // from Server in phase 3. Public overlay methods below forward to it.
+    OverlayController m_overlays;
     PluginManager m_pluginManager;
     
     // IPC server for external tool communication
@@ -272,12 +274,9 @@ private:
     // Desktop manager
     void* m_desktopManager = nullptr;
 
-    // Gamma/temperature (for gamma plugin)
-    float m_gamma = 1.0f;
-    int m_temperature = 6500;  // Kelvin
-    float m_brightness = 1.0f;
-    bool m_grayscaleEnabled = false;
-    bool m_negativeEnabled = false;
+    // Display settings (gamma/temperature/brightness/effects), extracted
+    // from Server in phase 3. Public setters below forward to it.
+    DisplaySettings m_displaySettings;
 
     // Start time for uptime calculation
     std::chrono::steady_clock::time_point m_startTime = std::chrono::steady_clock::now();

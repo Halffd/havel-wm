@@ -81,9 +81,22 @@ Current state: 25 commands registered in Server.cpp return fabricated success (`
 Server.hpp: 125 public methods; the class mixes composition-root duties with workspace state, display settings, overlay state, keybinding dispatch, animation, grab-state.
 
 **Extract (each keeps Server as composition root, holding unique_ptrs):**
-- `WorkspaceManager` — `m_workspaces[10]`, `m_activeWorkspace`, `setActiveWorkspace`, `stepWorkspace`, workspace view queries (Server.cpp already has a clean seam: `getViewsInWorkspace`, `activeWorkspace()`)
-- `DisplaySettings` — `m_gamma`, `m_temperature`, `m_brightness`, grayscale/negative flags, their setters/toggles
-- `OverlayController` — alt-tab show/hide/next/select, overview, launcher state (already has AltTabOverlay/OverviewOverlay/AppLauncherOverlay value members; move the control surface together)
+- `WorkspaceManager` — **executed phase 3, verdict: do not extract.** The
+  m_workspaces[] array has 15 direct touchpoints woven through view
+  creation, grab handling, and arrangeWorkspace; it is the layout
+  engine's working memory, not separable state. Extracting would either
+  relocate Server's hot path (unverifiable without a live session) or
+  create a hollow state-holder (indirection with no benefit). Access
+  continues via m_workspaces[] + activeWorkspace()/setActiveWorkspace().
+- `DisplaySettings` — **done.** Owns gamma/temperature/brightness/
+  grayscale/negative; applies through C bridge handle injected by
+  Server::setNativeHandle. Server setters are forwarders (GammaPlugin
+  and C bridge see identical API).
+- `OverlayController` — **done.** Owns alt-tab/overview/launcher state
+  machines; data dependencies injected as four callbacks
+  (collectWindows, focusWindow, switchWorkspace, spawnApp) wired in
+  the Server constructor. Server's 20 overlay methods are one-line
+  forwarders.
 - Grab-state machine (`GrabMode` enum, pointer-button flow) can stay in Server — it is genuinely core-event routing
 
 **Do not extract:** keybinding dispatch (it fans out into everything — extraction would create a circular dependency).

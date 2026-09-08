@@ -143,6 +143,8 @@ set(WM_CORE_SOURCES
     src/wm/core/Layout.cpp
     src/wm/core/Focus.cpp
     src/wm/core/Server.cpp
+    src/wm/core/DisplaySettings.cpp
+    src/wm/core/OverlayController.cpp
     src/wm/core/bridge.cpp
     src/wm/core/Animation.cpp
     src/wm/core/Animator.cpp
