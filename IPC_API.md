@@ -483,48 +483,6 @@ Move window to workspace.
 
 ---
 
-## Output Commands
-
-### get_outputs
-List all outputs.
-
-**Request:**
-```json
-{"method":"get_outputs"}
-```
-
-**Response:**
-```json
-{
-  "outputs": [
-    {
-      "name": "HDMI-A-1",
-      "enabled": true,
-      "width": 1920,
-      "height": 1080,
-      "refresh": 60000,
-      "scale": 1.0
-    }
-  ]
-}
-```
-
----
-
-### set_output_scale
-Set output scaling factor.
-
-**Parameters:**
-- `output` (integer): Output index
-- `scale` (float): Scale factor
-
-**Request:**
-```json
-{"method":"set_output_scale","params":{"output":0,"scale":2.0}}
-```
-
----
-
 ## Display Commands
 
 ### set_gamma
@@ -566,19 +524,6 @@ Set brightness.
 
 ---
 
-### set_zoom
-Set zoom level.
-
-**Parameters:**
-- `zoom` (float): Zoom factor (0.25-4.0)
-
-**Request:**
-```json
-{"method":"set_zoom","params":{"zoom":1.5}}
-```
-
----
-
 ### get_display_settings
 Get all display settings.
 
@@ -593,7 +538,8 @@ Get all display settings.
   "gamma": 1.0,
   "temperature": 6500,
   "brightness": 1.0,
-  "zoom": 1.0
+  "grayscale": false,
+  "negative": false
 }
 ```
 
@@ -619,45 +565,10 @@ List all loaded plugins.
 }
 ```
 
----
-
-### enable_plugin
-Enable a plugin.
-
-**Parameters:**
-- `name` (string): Plugin name
-
-**Request:**
-```json
-{"method":"enable_plugin","params":{"name":"fps"}}
-```
-
----
-
-### disable_plugin
-Disable a plugin.
-
-**Parameters:**
-- `name` (string): Plugin name
-
-**Request:**
-```json
-{"method":"disable_plugin","params":{"name":"fps"}}
-```
-
----
-
-### configure_plugin
-Configure plugin settings.
-
-**Parameters:**
-- `name` (string): Plugin name
-- `config` (string): JSON configuration
-
-**Request:**
-```json
-{"method":"configure_plugin","params":{"name":"scale","config":"{\"scaleFactor\":0.75}"}}
-```
+**Note:** enable_plugin / disable_plugin / configure_plugin are not
+supported. Plugin config is a read-only parsed file
+(`~/.config/havel-wm/plugins.json`); edit it and call `reload_config`
+to apply changes.
 
 ---
 
@@ -675,6 +586,11 @@ Send a notification.
 **Request:**
 ```json
 {"method":"notify","params":{"summary":"Hello","body":"World","app":"test","timeout":5000}}
+```
+
+**Response:**
+```json
+{"id": 1}
 ```
 
 ---

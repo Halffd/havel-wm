@@ -3,6 +3,7 @@
 #include <wm/plugins/Plugins.hpp>
 #include <shell/IPCServer.hpp>
 #include "core/CoreWindowManager.hpp"
+#include "core/NotificationDaemon.hpp"
 #include "scene/SceneGraph.hpp"
 #include <nlohmann/json.hpp>
 #include <Logger.h>
@@ -878,19 +879,28 @@ void Server::getBackgroundColor(float* r, float* g, float* b) const {
 void Server::setGamma(float gamma) {
     m_gamma = gamma;
     LOG_INFO("Gamma set to %.2f", gamma);
-    // Would apply to all outputs via C bridge
+    // Apply to all outputs via C bridge
+    if (m_nativeHandle) {
+        havel_wlr_set_gamma((havel_wlr_server_t*)m_nativeHandle, gamma);
+    }
 }
 
 void Server::setTemperature(int kelvin) {
     m_temperature = kelvin;
     LOG_INFO("Temperature set to %dK", kelvin);
-    // Would apply to all outputs via C bridge
+    // Apply to all outputs via C bridge
+    if (m_nativeHandle) {
+        havel_wlr_set_temperature((havel_wlr_server_t*)m_nativeHandle, kelvin);
+    }
 }
 
 void Server::setBrightness(float brightness) {
     m_brightness = brightness;
     LOG_INFO("Brightness set to %.2f", brightness);
-    // Would apply to all outputs via C bridge
+    // Apply to all outputs via C bridge
+    if (m_nativeHandle) {
+        havel_wlr_set_brightness((havel_wlr_server_t*)m_nativeHandle, brightness);
+    }
 }
 
 // ============================================================================
@@ -964,8 +974,7 @@ void Server::showAltTab(bool reverse) {
     m_altTabOverlay.show(thumbnails);
     m_altTabOverlay.setSelectCallback([this](uint64_t windowId) {
         // Focus the selected window
-        // Would need to find view by windowId and call focusView()
-        printf("[AltTab] Would focus window %lu\n", windowId);
+        m_coreWindowManager.focusWindow(windowId);
     });
     
     if (reverse) {
@@ -1521,23 +1530,10 @@ bool Server::startIPCServer(const std::string& socketPath) {
     // ========================================================================
     // Output/Monitor Commands
     // ========================================================================
-    m_ipcServer->registerCommand("get_outputs", [this](const std::string& args) -> std::string {
-        // Returns list of all outputs with their properties
-        JsonArray outputs;
-        // Would iterate through outputs and collect info
-        // For now, return basic structure
-        JsonObject result;
-        result["outputs"] = outputs;
-        return m_ipcServer->jsonToString(result);
-    });
-
-    m_ipcServer->registerCommand("set_output_scale", [this](const std::string& args) -> std::string {
-        // Set output scaling factor
-        (void)m_ipcServer->extractJsonInt(args, "output", 0);
-        (void)m_ipcServer->extractJsonFloat(args, "scale", 1.0f);
-        // setOutputScale not implemented yet
-        return m_ipcServer->createSuccessResponse("Output scale set");
-    });
+    // NOTE: get_outputs / set_output_scale removed in the IPC honesty pass
+    // (phase 1). The C bridge exposes no output iteration or scale-setting
+    // entry points, so these commands had no honest implementation path.
+    // Re-add them when bridge support exists.
 
     // ========================================================================
     // Display Settings Commands
@@ -1560,19 +1556,16 @@ bool Server::startIPCServer(const std::string& socketPath) {
         return m_ipcServer->createSuccessResponse("Brightness set to " + std::to_string(brightness));
     });
 
-    m_ipcServer->registerCommand("set_zoom", [this](const std::string& args) -> std::string {
-        float zoom = m_ipcServer->extractJsonFloat(args, "zoom", 1.0f);
-        // setZoom not implemented
-        return m_ipcServer->createSuccessResponse("Zoom set to " + std::to_string(zoom));
-    });
+    // set_zoom removed in the IPC honesty pass (phase 1): no implementation
+    // path exists (no zoom state, no bridge entry point).
 
     m_ipcServer->registerCommand("get_display_settings", [this](const std::string& args) -> std::string {
         JsonObject settings;
-        // Would return current gamma, temperature, brightness, zoom values
-        settings["gamma"] = 1.0f;
-        settings["temperature"] = 6500;
-        settings["brightness"] = 1.0f;
-        settings["zoom"] = 1.0f;
+        settings["gamma"] = m_gamma;
+        settings["temperature"] = m_temperature;
+        settings["brightness"] = m_brightness;
+        settings["grayscale"] = m_grayscaleEnabled;
+        settings["negative"] = m_negativeEnabled;
         return m_ipcServer->jsonToString(settings);
     });
 
@@ -1581,30 +1574,23 @@ bool Server::startIPCServer(const std::string& socketPath) {
     // ========================================================================
     m_ipcServer->registerCommand("get_plugins", [this](const std::string& args) -> std::string {
         JsonArray plugins;
-        // Would iterate through loaded plugins
+        for (const auto& plugin : m_pluginManager.plugins()) {
+            if (!plugin) continue;
+            JsonObject p;
+            p["name"] = plugin->name();
+            p["enabled"] = m_pluginManager.isPluginEnabled(plugin->name());
+            plugins.push_back(p);
+        }
         JsonObject result;
         result["plugins"] = plugins;
         return m_ipcServer->jsonToString(result);
     });
 
-    m_ipcServer->registerCommand("enable_plugin", [this](const std::string& args) -> std::string {
-        std::string name = m_ipcServer->extractJsonString(args, "name");
-        // Would enable plugin by name
-        return m_ipcServer->createSuccessResponse("Plugin enabled: " + name);
-    });
-
-    m_ipcServer->registerCommand("disable_plugin", [this](const std::string& args) -> std::string {
-        std::string name = m_ipcServer->extractJsonString(args, "name");
-        // Would disable plugin by name
-        return m_ipcServer->createSuccessResponse("Plugin disabled: " + name);
-    });
-
-    m_ipcServer->registerCommand("configure_plugin", [this](const std::string& args) -> std::string {
-        std::string name = m_ipcServer->extractJsonString(args, "name");
-        std::string config = m_ipcServer->extractJsonString(args, "config");
-        // Would configure plugin
-        return m_ipcServer->createSuccessResponse("Plugin configured: " + name);
-    });
+    // enable_plugin / disable_plugin / configure_plugin removed in the IPC
+    // honesty pass (phase 1): PluginConfig is a read-only parsed config with
+    // no runtime enable/disable mechanism, so these had no honest path.
+    // Toggling plugins is done by editing ~/.config/havel-wm/plugins.json
+    // and calling reload_config.
 
     // ========================================================================
     // Notification Commands
@@ -1612,15 +1598,33 @@ bool Server::startIPCServer(const std::string& socketPath) {
     m_ipcServer->registerCommand("notify", [this](const std::string& args) -> std::string {
         std::string summary = m_ipcServer->extractJsonString(args, "summary");
         std::string body = m_ipcServer->extractJsonString(args, "body");
-        (void)m_ipcServer->extractJsonString(args, "app");
-        (void)m_ipcServer->extractJsonInt(args, "timeout", 5000);
-        // Would send notification via NotificationDaemon
-        return m_ipcServer->createSuccessResponse("Notification sent: " + summary);
+        std::string app = m_ipcServer->extractJsonString(args, "app", "havel-wm");
+        int timeout = m_ipcServer->extractJsonInt(args, "timeout", 5000);
+        if (summary.empty()) {
+            return m_ipcServer->createErrorResponse(-5, "Missing summary");
+        }
+        if (!m_notificationDaemon) {
+            m_notificationDaemon = std::make_unique<DbusNotificationDaemon>();
+            if (!m_notificationDaemon->initialize()) {
+                m_notificationDaemon.reset();
+                return m_ipcServer->createErrorResponse(-5, "Notification daemon unavailable");
+            }
+        }
+        uint32_t id = m_notificationDaemon->showDbusNotification(app, summary, body, {}, timeout);
+        JsonObject result;
+        result["id"] = id;
+        return m_ipcServer->jsonToString(result);
     });
 
     m_ipcServer->registerCommand("close_notification", [this](const std::string& args) -> std::string {
-        (void)m_ipcServer->extractJsonInt(args, "id", 0);
-        // Would close notification by ID
+        int id = m_ipcServer->extractJsonInt(args, "id", -1);
+        if (id < 0) {
+            return m_ipcServer->createErrorResponse(-5, "Invalid notification id");
+        }
+        if (!m_notificationDaemon || !m_notificationDaemon->isRunning()) {
+            return m_ipcServer->createErrorResponse(-5, "Notification daemon not running");
+        }
+        m_notificationDaemon->closeDbusNotification(static_cast<uint32_t>(id));
         return m_ipcServer->createSuccessResponse("Notification closed");
     });
 
@@ -1692,9 +1696,10 @@ bool Server::startIPCServer(const std::string& socketPath) {
     });
 
     m_ipcServer->registerCommand("get_config", [this](const std::string& args) -> std::string {
-        // Would return current configuration
         JsonObject config;
         config["config_path"] = "~/.config/havel-wm/plugins.json";
+        config["plugin_count"] = m_pluginManager.plugins().size();
+        config["initialized"] = m_pluginManager.isInitialized();
         return m_ipcServer->jsonToString(config);
     });
 
@@ -1703,42 +1708,78 @@ bool Server::startIPCServer(const std::string& socketPath) {
     // ========================================================================
     m_ipcServer->registerCommand("get_window", [this](const std::string& args) -> std::string {
         int id = m_ipcServer->extractJsonInt(args, "id", -1);
-        // Would return detailed window info
-        JsonObject window;
-        window["id"] = id;
-        window["title"] = "Example Window";
-        window["app_id"] = "example";
-        return m_ipcServer->jsonToString(window);
+        Window* window = (id >= 0) ? m_coreWindowManager.getWindow(static_cast<uint64_t>(id)) : nullptr;
+        if (!window) {
+            return m_ipcServer->createErrorResponse(-5, "Window not found");
+        }
+        JsonObject result;
+        result["id"] = window->id();
+        result["title"] = window->title();
+        result["app_id"] = window->appId();
+        Rect geom = window->geometry();
+        result["x"] = geom.x;
+        result["y"] = geom.y;
+        result["width"] = geom.w;
+        result["height"] = geom.h;
+        result["workspace"] = window->workspace();
+        result["floating"] = window->isFloating();
+        result["minimized"] = window->isMinimized();
+        result["maximized"] = window->isMaximized();
+        result["fullscreen"] = window->isFullscreen();
+        result["always_on_top"] = window->isAlwaysOnTop();
+        result["opacity"] = window->opacity();
+        return m_ipcServer->jsonToString(result);
     });
 
     m_ipcServer->registerCommand("get_windows_by_app", [this](const std::string& args) -> std::string {
         std::string appId = m_ipcServer->extractJsonString(args, "app_id");
-        // Would return windows matching app_id
         JsonArray windows;
+        for (Window* window : m_coreWindowManager.getAllWindows()) {
+            if (window->appId() != appId) continue;
+            JsonObject w;
+            w["id"] = window->id();
+            w["title"] = window->title();
+            w["app_id"] = window->appId();
+            w["workspace"] = window->workspace();
+            w["fullscreen"] = window->isFullscreen();
+            windows.push_back(w);
+        }
         JsonObject result;
         result["windows"] = windows;
         return m_ipcServer->jsonToString(result);
     });
 
     m_ipcServer->registerCommand("set_window_opacity", [this](const std::string& args) -> std::string {
-        (void)m_ipcServer->extractJsonInt(args, "id", -1);
-        (void)m_ipcServer->extractJsonFloat(args, "opacity", 1.0f);
-        // Would set window opacity
+        int id = m_ipcServer->extractJsonInt(args, "id", -1);
+        float opacity = m_ipcServer->extractJsonFloat(args, "opacity", 1.0f);
+        Window* window = (id >= 0) ? m_coreWindowManager.getWindow(static_cast<uint64_t>(id)) : nullptr;
+        if (!window) {
+            return m_ipcServer->createErrorResponse(-5, "Window not found");
+        }
+        window->setOpacity(opacity);
         return m_ipcServer->createSuccessResponse("Window opacity set");
     });
 
     m_ipcServer->registerCommand("set_window_fullscreen", [this](const std::string& args) -> std::string {
-        (void)m_ipcServer->extractJsonInt(args, "id", -1);
-        (void)m_ipcServer->extractJsonBool(args, "fullscreen", true);
-        // Would set window fullscreen
-        return m_ipcServer->createSuccessResponse("Window fullscreen set");
+        int id = m_ipcServer->extractJsonInt(args, "id", -1);
+        bool fullscreen = m_ipcServer->extractJsonBool(args, "fullscreen", true);
+        Window* window = (id >= 0) ? m_coreWindowManager.getWindow(static_cast<uint64_t>(id)) : nullptr;
+        if (!window) {
+            return m_ipcServer->createErrorResponse(-5, "Window not found");
+        }
+        m_coreWindowManager.fullscreenWindow(window, fullscreen);
+        return m_ipcServer->createSuccessResponse(fullscreen ? "Window fullscreen enabled" : "Window fullscreen disabled");
     });
 
     m_ipcServer->registerCommand("set_window_always_on_top", [this](const std::string& args) -> std::string {
-        (void)m_ipcServer->extractJsonInt(args, "id", -1);
-        (void)m_ipcServer->extractJsonBool(args, "on_top", true);
-        // Would set always on top
-        return m_ipcServer->createSuccessResponse("Window always-on-top set");
+        int id = m_ipcServer->extractJsonInt(args, "id", -1);
+        bool onTop = m_ipcServer->extractJsonBool(args, "on_top", true);
+        Window* window = (id >= 0) ? m_coreWindowManager.getWindow(static_cast<uint64_t>(id)) : nullptr;
+        if (!window) {
+            return m_ipcServer->createErrorResponse(-5, "Window not found");
+        }
+        window->setAlwaysOnTop(onTop);
+        return m_ipcServer->createSuccessResponse(onTop ? "Window always-on-top enabled" : "Window always-on-top disabled");
     });
 
     // ========================================================================
@@ -1746,28 +1787,49 @@ bool Server::startIPCServer(const std::string& socketPath) {
     // ========================================================================
     m_ipcServer->registerCommand("get_workspaces", [this](const std::string& args) -> std::string {
         JsonArray workspaces;
-        // Would return all workspaces with their windows
+        for (uint32_t i = 0; i < WORKSPACE_COUNT; ++i) {
+            JsonObject ws;
+            ws["id"] = i;
+            ws["active"] = (i == m_activeWorkspace);
+            auto windowsOnWs = m_coreWindowManager.getWindowsOnWorkspace(i);
+            JsonArray windowIds;
+            for (Window* window : windowsOnWs) {
+                windowIds.push_back(window->id());
+            }
+            ws["window_count"] = windowIds.size();
+            ws["windows"] = windowIds;
+            workspaces.push_back(ws);
+        }
         JsonObject result;
         result["workspaces"] = workspaces;
-        result["active"] = 0;
+        result["active"] = m_activeWorkspace;
         return m_ipcServer->jsonToString(result);
     });
 
     m_ipcServer->registerCommand("workspace_next", [this](const std::string& args) -> std::string {
-        // workspaceStep not implemented;
-        return m_ipcServer->createSuccessResponse("Switched to next workspace");
+        uint32_t next = (m_activeWorkspace + 1) % WORKSPACE_COUNT;
+        setActiveWorkspace(next);
+        return m_ipcServer->createSuccessResponse("Switched to workspace " + std::to_string(next));
     });
 
     m_ipcServer->registerCommand("workspace_prev", [this](const std::string& args) -> std::string {
-        // workspaceStep not implemented;
-        return m_ipcServer->createSuccessResponse("Switched to previous workspace");
+        uint32_t prev = (m_activeWorkspace == 0) ? (WORKSPACE_COUNT - 1) : (m_activeWorkspace - 1);
+        setActiveWorkspace(prev);
+        return m_ipcServer->createSuccessResponse("Switched to workspace " + std::to_string(prev));
     });
 
     m_ipcServer->registerCommand("move_to_workspace", [this](const std::string& args) -> std::string {
-        (void)m_ipcServer->extractJsonInt(args, "window_id", -1);
-        (void)m_ipcServer->extractJsonInt(args, "workspace", 0);
-        // Would move window to workspace
-        return m_ipcServer->createSuccessResponse("Window moved to workspace");
+        int windowId = m_ipcServer->extractJsonInt(args, "window_id", -1);
+        int workspace = m_ipcServer->extractJsonInt(args, "workspace", -1);
+        if (windowId < 0 || workspace < 0 || static_cast<uint32_t>(workspace) >= WORKSPACE_COUNT) {
+            return m_ipcServer->createErrorResponse(-5, "Invalid window_id or workspace");
+        }
+        Window* window = m_coreWindowManager.getWindow(static_cast<uint64_t>(windowId));
+        if (!window) {
+            return m_ipcServer->createErrorResponse(-5, "Window not found");
+        }
+        m_coreWindowManager.moveWindowToWorkspace(window, static_cast<uint32_t>(workspace));
+        return m_ipcServer->createSuccessResponse("Window moved to workspace " + std::to_string(workspace));
     });
 
     // ========================================================================
@@ -1782,10 +1844,12 @@ bool Server::startIPCServer(const std::string& socketPath) {
     });
 
     m_ipcServer->registerCommand("get_stats", [this](const std::string& args) -> std::string {
+        auto uptimeMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - m_startTime).count();
         JsonObject stats;
-        stats["uptime_ms"] = 0;  // Would calculate from startup time
-        stats["window_count"] = m_windowManager.getAllWindows().size();
-        stats["workspace_count"] = 10;
+        stats["uptime_ms"] = (uint64_t)uptimeMs;
+        stats["window_count"] = m_coreWindowManager.getAllWindows().size();
+        stats["workspace_count"] = WORKSPACE_COUNT;
         return m_ipcServer->jsonToString(stats);
     });
 
@@ -1799,6 +1863,14 @@ bool Server::startIPCServer(const std::string& socketPath) {
 
     m_ipcServer->registerCommand("ping", [this](const std::string& args) -> std::string {
         return m_ipcServer->handlePing();
+    });
+
+    m_ipcServer->registerCommand("subscribe", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleSubscribe(args);
+    });
+
+    m_ipcServer->registerCommand("unsubscribe", [this](const std::string& args) -> std::string {
+        return m_ipcServer->handleUnsubscribe(args);
     });
 
     m_ipcServer->registerCommand("quit", [this](const std::string& args) -> std::string {

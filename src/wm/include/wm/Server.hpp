@@ -22,6 +22,8 @@
 
 namespace havel {
 
+class DbusNotificationDaemon;
+
 // Forward declarations for C bridge
 struct wlr_xdg_surface;
 struct wlr_xwayland_surface;
@@ -219,6 +221,9 @@ private:
     
     // IPC server for external tool communication
     std::unique_ptr<IPCServer> m_ipcServer;
+
+    // D-Bus notification daemon (lazily created by the IPC notify command)
+    std::unique_ptr<DbusNotificationDaemon> m_notificationDaemon;
 
     // Overlay scene layer (for Alt-Tab, Overview, etc.)
     void* m_overlayLayer = nullptr;  // wlr_scene_tree*
