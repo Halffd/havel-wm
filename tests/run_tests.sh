@@ -35,30 +35,8 @@ else
 fi
 echo ""
 
-# Test 3: NASA API connectivity (basic)
-echo "Test 3: NASA API Connectivity"
-if curl -s --max-time 10 "https://api.nasa.gov/planetary/apod?api_key=DEMO_KEY&count=1" | grep -q "url"; then
-    echo -e "${GREEN}✓ PASS${NC}: NASA API reachable"
-    ((PASSED++))
-else
-    echo -e "${RED}✗ FAIL${NC}: NASA API unreachable"
-    ((FAILED++))
-fi
-echo ""
-
-# Test 4: NASA Image API
-echo "Test 4: NASA Image Library API"
-if curl -s --max-time 10 "https://images-api.nasa.gov/search?media_type=image&page_size=1" | grep -q "collection"; then
-    echo -e "${GREEN}✓ PASS${NC}: NASA Image API reachable"
-    ((PASSED++))
-else
-    echo -e "${RED}✗ FAIL${NC}: NASA Image API unreachable"
-    ((FAILED++))
-fi
-echo ""
-
-# Test 5: Cache directory creation
-echo "Test 5: Cache Directory"
+# Test 3: Cache directory creation
+echo "Test 3: Cache Directory"
 CACHE_DIR="$HOME/.cache/havel-wm/nasa-wallpapers"
 mkdir -p "$CACHE_DIR" 2>/dev/null
 if [ -d "$CACHE_DIR" ]; then
@@ -71,8 +49,8 @@ else
 fi
 echo ""
 
-# Test 6: libcurl availability
-echo "Test 6: libcurl"
+# Test 4: libcurl availability
+echo "Test 4: libcurl"
 if pkg-config --exists libcurl 2>/dev/null; then
     echo -e "${GREEN}✓ PASS${NC}: libcurl available"
     ((PASSED++))

@@ -21,8 +21,12 @@ cmake .. \
     "$@"
 
 # Build
-echo "Building..."
-cmake --build . -j"$(nproc)"
+# Cap parallel jobs: default nproc parallelism OOM-kills cc1plus on this box
+# (multiple large Qt/wayland TUs compiled simultaneously). 2 is the verified
+# stable value; override with HAVEL_BUILD_JOBS if you have more RAM.
+JOBS="${HAVEL_BUILD_JOBS:-2}"
+echo "Building... (-j${JOBS})"
+cmake --build . -j"${JOBS}"
 
 echo ""
 echo "=== Build Complete ==="

@@ -199,6 +199,28 @@ public:
     bool isIPCServerRunning() const;
     void processIPCEvents();
 
+    // IPC command handlers (extracted from startIPCServer lambdas, phase 2).
+    // Each returns the JSON-RPC result string for its command.
+    std::string ipcSetGamma(const std::string& args);
+    std::string ipcSetTemperature(const std::string& args);
+    std::string ipcSetBrightness(const std::string& args);
+    std::string ipcGetDisplaySettings();
+    std::string ipcGetPlugins();
+    std::string ipcNotify(const std::string& args);
+    std::string ipcCloseNotification(const std::string& args);
+    std::string ipcReloadConfig();
+    std::string ipcGetConfig();
+    std::string ipcGetWindow(const std::string& args);
+    std::string ipcGetWindowsByApp(const std::string& args);
+    std::string ipcSetWindowOpacity(const std::string& args);
+    std::string ipcSetWindowFullscreen(const std::string& args);
+    std::string ipcSetWindowAlwaysOnTop(const std::string& args);
+    std::string ipcGetWorkspaces();
+    std::string ipcWorkspaceStep(int direction);
+    std::string ipcMoveToWorkspace(const std::string& args);
+    std::string ipcGetVersion();
+    std::string ipcGetStats();
+
 private:
     std::array<std::unique_ptr<Workspace>, WORKSPACE_COUNT> m_workspaces;
     uint32_t m_activeWorkspace = 0;
