@@ -160,9 +160,6 @@ set(WM_CORE_SOURCES
     src/wm/core/Window.hpp
     src/wm/core/CoreWindowManager.cpp
     src/wm/core/CoreWindowManager.hpp
-    # C++ Backend API - DISABLED (use BackendCApi.h instead for C++ access)
-    # src/wm/backend/cpp/BackendApi.hpp
-    # src/wm/backend/cpp/BackendApi.cpp
     src/wm/scene/SceneGraph.hpp
     src/wm/scene/SceneGraph.cpp
     src/wm/scene/SceneGraphOps.cpp
@@ -252,23 +249,6 @@ set(UTIL_SOURCES
 # Modular backend structure - C for performance-critical wlroots integration
 set(WLR_BRIDGE_SOURCES
     wlr_bridge.c
-    
-    # Backend modules
-    src/wm/backend/BackendTypes.h
-    src/wm/backend/BackendCApi.h
-    src/wm/backend/BackendCApi.c
-    src/wm/backend/output/OutputManager.h
-    src/wm/backend/output/OutputManager.c
-    src/wm/backend/input/InputHandler.h
-    src/wm/backend/input/InputHandler.c
-    src/wm/backend/shell/XdgShell.h
-    src/wm/backend/shell/XdgShell.c
-    src/wm/backend/shell/LayerShell.h
-    src/wm/backend/shell/LayerShell.c
-    src/wm/backend/cursor/Cursor.h
-    src/wm/backend/cursor/Cursor.c
-    src/wm/backend/server/Backend.h
-    src/wm/backend/server/Backend.c
 )
 
 add_library(wlr_bridge STATIC ${WLR_BRIDGE_SOURCES})
