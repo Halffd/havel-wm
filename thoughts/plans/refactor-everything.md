@@ -140,19 +140,28 @@ Mechanically: one concern per commit, move listeners + their statics together, k
 
 ---
 
-## Phase 6: split Common.h
+## Phase 6: split Common.h — **executed with a different verdict than planned**
 
-1,139 lines, 84 static-inline functions in the global namespace, one header included from most of the tree (exact include count to be measured with `grep -rl '#include.*Common.h'` at execution time).
+Measured reality: Common.h (1,139 lines, 84 functions) had **zero
+production includes** — its only consumer anywhere in the tree is
+`tests/test_utilities.c` (586-line test binary, 41 tests, all passing,
+which is also what validates the earlier overflow-guard security fixes).
+The "split into Arrays/Strings/Color/Math headers" plan would have been
+reorganizing test-only code.
 
-**Split into focused headers under `src/utils/`:**
-- `Arrays.h` — ArrayHeader, array_create/push/free (the overflow-guarded set from commit 19498cb)
-- `Strings.h` — str_dup/concat/trim (overflow guards preserved)
-- `Color.h` — Color struct, color_from_hex/lerp (null-guarded versions preserved)
-- `MathUtils.h` — clamp/lerp
-- `LogMacros.h` or fold into Logger — if any of the 84 functions are logging helpers
-- Keep `Common.h` as a forwarding header including all of the above, so consumers need no edits in this phase; remove forwarding only if/when convenient
+Executed instead:
+- Common.h kept, with its test (hardened + covered; C code needing
+  arrays/strings has a proven home)
+- Deleted 17 genuinely dead utils files (zero consumers in src/,
+  wlr_bridge.c, or tests/): CUtil, Utils, Timer, print, JSON.hpp,
+  SafeQueue, Rect.hpp (live Rect is in wm/Types.hpp), Range, Object,
+  NumPut, Notifier, ConstExpr, Chain — ~1,500 lines
+- Note: initial grep scoped `Common.h` consumers to src/ + wlr_bridge.c
+  and missed the tests/ consumer; caught at the build gate when
+  test-utilities failed to compile, restored before commit.
 
-**Gate:** clean build (any missed include breaks loudly, which is the point of keeping Common.h as an umbrella first).
+**Gate:** clean `rm -rf build` + build green; test-utilities 41/41;
+test-scene-graph 11/11; run_tests.sh 4/4; binary runs.
 
 ---
 
