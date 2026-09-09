@@ -10,13 +10,20 @@
 
 ## Features
 
-- 🧩 **Plugin System** - 15+ built-in plugins (Alt-Tab, Overview, Hot Corners, etc.)
-- 💬 **Comprehensive IPC** - 40+ JSON-RPC commands for scripting and automation
+- 🧩 **Plugin System** - 15 built-in plugins (Alt-Tab, Overview, Hot Corners, etc.)
+- 💬 **Comprehensive IPC** - 51 JSON-RPC commands for scripting and automation
 - 🔔 **D-Bus Notifications** - org.freedesktop.Notifications compatible
 - ✨ **Smooth Animations** - Fade effects, workspace transitions
 - 🎨 **Visual Polish** - Shadows, rounded corners, blur effects
 - 📊 **Real-time Stats** - FPS counter, frame timing, performance metrics
 - 🔌 **Full Protocol Support** - 14+ Wayland protocols
+
+### Renderer architecture
+
+Windows are rendered by wlroots itself via `wlr_renderer_autocreate()`
+and the `wlr_scene` API. The custom code in `src/wm/render/` is the
+GLES2 overlay path used by plugins and UI overlays (alt-tab, overview,
+launcher); there is no second window renderer.
 
 ---
 
@@ -109,7 +116,7 @@ Select "Havel WM" from the Wayland session menu.
 
 | Keybinding | Action |
 |------------|--------|
-| `Meta+Return` | Spawn terminal (foot) |
+| `Meta+Return` | Spawn terminal (alacritty, falls back to foot) |
 | `Meta+D` | App launcher |
 | `Meta+W` | Workspace overview |
 | `Meta+Tab` | Alt-Tab window switcher |
@@ -250,19 +257,28 @@ cmake --build build
 ### Running Tests
 
 ```bash
-cd build
-ctest --output-on-failure
+# Main suite (build check, binary check, environment)
+bash tests/run_tests.sh
+
+# Unit test binaries (built into build/)
+./build/test-utilities      # C utility library (41 tests)
+./build/test-scene-graph    # Scene graph (11 tests)
 ```
 
 ### Code Structure
 
 ```
 src/wm/
-├── backend/      # C wlroots integration
-├── core/         # C++ compositor logic
+├── core/         # C++ compositor logic (Server, window managers, overlays)
+├── include/wm/   # Public headers (Server, DisplaySettings, OverlayController)
 ├── plugins/      # 15 built-in plugins
-├── render/       # Rendering (Vulkan, GLES2)
-└── shell/        # IPC, panel, utilities
+├── render/       # GLES2 overlay path (windows are rendered by wlroots/wlr_scene)
+├── overlay/      # Overlay UI (Alt-Tab, Overview, App Launcher)
+├── scene/        # Scene graph (wlr_scene wrapper)
+└── shell/        # IPC server, panel, terminal, and other shell apps
+
+src/utils/        # Logger (used tree-wide) + Common.h (tested C utilities)
+wlr_bridge.c      # wlroots C ABI seam (display, input, shells, outputs)
 ```
 
 ### Contributing

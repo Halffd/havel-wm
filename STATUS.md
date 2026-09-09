@@ -10,8 +10,8 @@
 ## 🎯 Project Goals
 
 Havel WM is a **modern Wayland compositor** built on wlroots with:
-- Full plugin system (15+ built-in plugins)
-- Comprehensive IPC API (40+ commands)
+- Full plugin system (15 built-in plugins)
+- Comprehensive IPC API (51 commands)
 - D-Bus notification daemon
 - Smooth animations
 - Professional visual polish
@@ -71,10 +71,10 @@ Havel WM is a **modern Wayland compositor** built on wlroots with:
 | Window Snap Preview | ✅ Complete | Ghost window shows snap zone |
 | Hot Corners Feedback | ✅ Complete | Color-coded highlights with progress bars |
 | Notification Daemon | ✅ Complete | D-Bus org.freedesktop.Notifications |
-| Comprehensive IPC | ✅ Complete | 40+ JSON-RPC commands |
+| Comprehensive IPC | ✅ Complete | 51 JSON-RPC commands (parity-checked) |
 | Protocol Support | ✅ Complete | All major Wayland protocols |
 
-### IPC Commands (40+):
+### IPC Commands (51 total, exact parity with IPC_API.md):
 
 **Window Management (15):**
 - `get_windows`, `get_window`, `get_focused`, `get_windows_by_app`
@@ -87,13 +87,14 @@ Havel WM is a **modern Wayland compositor** built on wlroots with:
 - `workspace`, `workspace_next`, `workspace_prev`
 - `move_to_workspace`
 
-**Display (5):**
-- `get_outputs`, `set_output_scale`
-- `set_gamma`, `set_temperature`, `set_brightness`, `set_zoom`
+**Display (4):**
+- `set_gamma`, `set_temperature`, `set_brightness`
 - `get_display_settings`
 
-**Plugins (4):**
-- `get_plugins`, `enable_plugin`, `disable_plugin`, `configure_plugin`
+**Plugins (1):**
+- `get_plugins`
+- (`enable/disable/configure_plugin` removed — config is a read-only
+  file; edit plugins.json and `reload_config`)
 
 **Notifications (2):**
 - `notify`, `close_notification`
@@ -101,11 +102,21 @@ Havel WM is a **modern Wayland compositor** built on wlroots with:
 **Screenshots (3):**
 - `screenshot`, `screenshot_window`, `screenshot_region`
 
+**Recording (3):**
+- `audio_record`, `video_record`, `stop_recording`
+
+**Cursor (7):**
+- `get_cursor_position`, `warp_cursor`, `set_cursor_theme`
+- `set_cursor_size`, `hide_cursor`, `show_cursor`, `set_cursor_warp`
+
 **Configuration (2):**
 - `reload_config`, `get_config`
 
 **System (4):**
-- `get_version`, `get_stats`, `debug_info`, `ping`, `quit`, `spawn`
+- `get_version`, `get_stats`, `debug_info`, `ping`
+
+**Session (4):**
+- `quit`, `spawn`, `subscribe`, `unsubscribe`
 
 ### Event Broadcasting:
 - `window_created` - Real-time window lifecycle
@@ -161,16 +172,18 @@ src/wm/
 │   ├── FPSPlugin.cpp
 │   ├── NotificationsPlugin.cpp
 │   └── ...
-└── render/            # Rendering
+└── render/            # GLES2 overlay path (windows rendered by wlroots/wlr_scene)
     ├── OverlayRenderer.*
-    ├── VulkanRenderer.*
-    └── WlrBinding.*
+    ├── OverlayRendering.*
+    ├── render_c_wrappers.*
+    ├── FreeTypeFont.*
+    └── AppIconLoader.*
 ```
 
 ### Design Principles:
 1. **C for Performance** - wlroots integration in pure C
 2. **C++ for Logic** - Plugins, window management in C++
-3. **Clean APIs** - BackendCApi.h for C/C++ boundary
+3. **Single ABI seam** - wlr_bridge.c is the C/C++ boundary
 4. **No wlroots in C++** - Prevents C99 syntax issues
 5. **Plugin Architecture** - Extensible via Plugin interface
 
@@ -183,7 +196,7 @@ src/wm/
 | Source Files | 167 |
 | Lines of Code | ~25,000+ |
 | Plugins | 15 |
-| IPC Commands | 40+ |
+| IPC Commands | 51 |
 | Wayland Protocols | 14+ |
 | Build Time | ~30 seconds |
 | Memory Usage | ~50MB idle |

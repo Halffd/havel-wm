@@ -11,7 +11,7 @@
 - [ ] **Window content not updating** - Foot terminal shows black screen with only caret
   - Suspect: Buffer commit signals not being processed
   - Suspect: Damage tracking not triggering redraws
-  - Files: `wlr_bridge.c`, `src/wm/render/WlrBinding.c`
+  - Files: `wlr_bridge.c`
 
 - [ ] **Input events escaping to other WMs** - Keybindings spawn windows in X11/Wayland
   - Suspect: `wlr_seat_keyboard_notify_key()` called even after consuming
@@ -139,8 +139,8 @@
   - Files: `wlr_bridge.c`
 
 ### Output
-- [ ] **HDR support incomplete** - Vulkan renderer has HDR code but not integrated
-  - Files: `src/wm/render/VulkanRenderer.c`, `wlr_bridge.c`
+- [ ] **No HDR support** - custom HDR renderer code was removed with the dead renderer paths; wlroots autocreate renderer is SDR-only for now
+  - Files: `wlr_bridge.c`
 
 - [ ] **No output profiles** - Can't save per-monitor configurations
   - Files: `src/wm/core/Server.cpp`
@@ -238,8 +238,8 @@
   - Files: N/A
 
 - [ ] **HDR10+ / Dolby Vision** - Dynamic metadata
-  - Partial: HDR10 PQ/HLG support exists
-  - Files: `src/wm/render/VulkanRenderer.c`
+  - Removed with the dead Vulkan renderer paths; would need a new design on top of wlroots' renderer
+  - Files: N/A
 
 - [ ] **Variable refresh rate** - VRR/FreeSync/G-Sync
   - Would need: wlroots support
