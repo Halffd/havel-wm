@@ -50,6 +50,32 @@ Server::Server() {
         }
     };
 
+    // Attach the shell/IPC window projection to the real window store
+    // and route its mutations back into the compositor (phase 4).
+    WindowManager::ServerActions actions;
+    actions.focus = [this](uint64_t id) { m_coreWindowManager.focusWindow(id); };
+    actions.minimize = [this](uint64_t id) {
+        if (Window* w = m_coreWindowManager.getWindow(id)) m_coreWindowManager.minimizeWindow(w);
+    };
+    actions.maximize = [this](uint64_t id) {
+        if (Window* w = m_coreWindowManager.getWindow(id)) m_coreWindowManager.maximizeWindow(w);
+    };
+    actions.restore = [this](uint64_t id) {
+        if (Window* w = m_coreWindowManager.getWindow(id)) m_coreWindowManager.toggleMaximize(w);
+    };
+    actions.close = [this](uint64_t id) { m_coreWindowManager.closeWindow(id); };
+    actions.move = [this](uint64_t id, int x, int y) {
+        if (Window* w = m_coreWindowManager.getWindow(id)) m_coreWindowManager.moveWindow(w, x, y);
+    };
+    actions.resize = [this](uint64_t id, int width, int height) {
+        if (Window* w = m_coreWindowManager.getWindow(id)) m_coreWindowManager.resizeWindow(w, width, height);
+    };
+    actions.setFloating = [this](uint64_t id, bool floating) {
+        if (Window* w = m_coreWindowManager.getWindow(id)) m_coreWindowManager.setFloating(w, floating);
+    };
+    actions.switchWorkspace = [this](uint32_t ws) { setActiveWorkspace(ws); };
+    m_windowManager.attach(&m_coreWindowManager, std::move(actions));
+
     // Load plugin configuration
     const char* home = getenv("HOME");
     if (home) {
@@ -515,10 +541,9 @@ void Server::focusView(View* view) {
         ws->setActiveView(view);
     }
 
-    // Update window manager focus state
-    if (view->windowId() != 0) {
-        m_windowManager.focusWindow(view->windowId());
-    }
+    // Focus state is derived by the shell projection from core state
+    // (WindowManager::focusedWindow queries getFocusedWindow); no
+    // mirror-update needed here since phase 4.
 
     // Raise and focus the view
     raiseView(view);
