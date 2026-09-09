@@ -51,6 +51,9 @@ void havel_cpp_server_init_text_input(struct havel_cpp_server* server, struct wl
 void* havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* c_view, uint32_t workspace_id, const char* appId, const char* title);
 void havel_cpp_on_view_mapped(struct havel_cpp_server* server, void* c_view);
 void havel_cpp_on_view_unmapped(struct havel_cpp_server* server, void* c_view);
+// XDG title change: propagates the new toplevel title into the C++ layer
+// (View + core Window) and re-broadcasts to IPC subscribers.
+void havel_cpp_on_view_title_changed(struct havel_cpp_server* server, void* c_view, const char* title);
 void havel_cpp_on_view_destroyed(struct havel_cpp_server* server, void* c_view);
 
 // Input events - returns true if consumed by compositor

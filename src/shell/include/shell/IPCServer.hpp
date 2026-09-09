@@ -42,6 +42,7 @@ public:
         WindowCreated,
         WindowDestroyed,
         WindowFocused,
+        WindowTitleChanged,
         WindowMoved,
         WindowResized,
         WorkspaceChanged,

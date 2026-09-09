@@ -85,23 +85,28 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Configure renderer based on command-line option
-    // Note: wlroots handles all actual rendering via wlr_renderer_autocreate()
-    // The -r flag just passes the backend preference to wlroots
+    // Configure renderer based on command-line option.
+    // wlroots picks its backend from the WLR_RENDERER env var (read by
+    // wlr_renderer_autocreate), so setting it before server creation
+    // actually selects the backend instead of just printing a line.
+    const char* wlr_renderer = NULL;
     switch (renderer) {
         case RENDERER_AUTO:
-            printf("[MAIN] Renderer: wlroots (auto-detect backend)\n");
-            break;
+        case RENDERER_WLROOTS:
+            break;  // leave unset, wlroots auto-detects
         case RENDERER_GLES2:
-            printf("[MAIN] Renderer: wlroots (GLES2 backend)\n");
+            wlr_renderer = "gles2";
             break;
         case RENDERER_VULKAN:
-            printf("[MAIN] Renderer: wlroots (Vulkan backend)\n");
-            printf("[MAIN] Note: Custom buffer import (SHM/DMA-BUF) available for texture access\n");
+            wlr_renderer = "vulkan";
             break;
-        case RENDERER_WLROOTS:
-            printf("[MAIN] Renderer: wlroots (default backend)\n");
-            break;
+    }
+    if (wlr_renderer) {
+        if (setenv("WLR_RENDERER", wlr_renderer, 1) != 0) {
+            fprintf(stderr, "[MAIN] Warning: failed to set WLR_RENDERER\n");
+        } else {
+            printf("[MAIN] WLR_RENDERER=%s for wlroots backend selection\n", wlr_renderer);
+        }
     }
 
     // Disable loading screen if requested

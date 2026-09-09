@@ -736,7 +736,10 @@ static void xdg_handle_title(struct wl_listener *listener, void *data) {
     const char *title = view->xdg_surface->toplevel->title;
     LOG_INFO("[XDG] Title set: %s", title ? title : "(null)");
 
-    // C++ layer owns View metadata - it will query via CompositorAPI
+    // Propagate into the C++ layer (View + core Window + IPC broadcast)
+    if (title && view->server && view->server->cpp_server) {
+        havel_cpp_on_view_title_changed(view->server->cpp_server, view->cpp_view, title);
+    }
 }
 
 // NEW: Window move request handler - THIS IS WHY WINDOWS CAN NOW MOVE!

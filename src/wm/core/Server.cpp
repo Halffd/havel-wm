@@ -325,7 +325,7 @@ void Server::onViewUnmapped(View* view) {
     if (!view) return;
 
     LOG_DEBUG("View unmapped");
-    
+
     // Window close animation (fade out)
     if (m_animator.isEnabled()) {
         float currentOpacity = view->opacity();
@@ -357,6 +357,26 @@ void Server::onViewUnmapped(View* view) {
 
     if (m_workspaces[view->workspaceId()]->isTilingEnabled()) {
         arrangeWorkspace(view->workspaceId());
+    }
+}
+
+void Server::onViewTitleChanged(View* view, const std::string& title) {
+    if (!view || title.empty()) return;
+
+    view->setTitle(title);
+
+    // Keep the core Window wrapper in sync — the shell projection and
+    // IPC queries read from it (Window::setTitle also re-syncs the View).
+    if (Window* window = m_coreWindowManager.getWindow(view)) {
+        window->setTitle(title);
+    }
+
+    // Re-broadcast to IPC listeners
+    if (m_ipcServer) {
+        JsonObject params;
+        params["id"] = (int)view->windowId();
+        params["title"] = title;
+        m_ipcServer->broadcastEvent(IPCServer::EventType::WindowTitleChanged, m_ipcServer->jsonToString(params));
     }
 }
 

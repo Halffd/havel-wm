@@ -139,6 +139,12 @@ void havel_cpp_on_view_unmapped(struct havel_cpp_server* server, void* c_view) {
     server->server->onViewUnmapped(view);
 }
 
+void havel_cpp_on_view_title_changed(struct havel_cpp_server* server, void* c_view, const char* title) {
+    if (!server || !c_view || !title) return;
+    auto* view = static_cast<havel::View*>(c_view);
+    server->server->onViewTitleChanged(view, std::string(title));
+}
+
 void havel_cpp_on_view_destroyed(struct havel_cpp_server* server, void* c_view) {
     if (!server || !c_view) return;
     auto* view = static_cast<havel::View*>(c_view);

@@ -973,6 +973,7 @@ Subscribe to events.
 - `window_created`
 - `window_destroyed`
 - `window_focused`
+- `window_title_changed`
 - `window_moved`
 - `window_resized`
 - `workspace_changed`

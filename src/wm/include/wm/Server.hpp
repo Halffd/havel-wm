@@ -49,6 +49,9 @@ public:
     View* createXwaylandView(void* xwaylandSurface);
     void onViewMapped(View* view);
     void onViewUnmapped(View* view);
+    // Title change from the C bridge: syncs the core Window (which the
+    // shell projection reads) and re-broadcasts to IPC listeners.
+    void onViewTitleChanged(View* view, const std::string& title);
     void onViewDestroyed(View* view);
 
     // Input handling - returns true if consumed by compositor

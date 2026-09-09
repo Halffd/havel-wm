@@ -369,6 +369,7 @@ std::string IPCServer::eventTypeToString(EventType type) {
         case EventType::WindowCreated: return "window_created";
         case EventType::WindowDestroyed: return "window_destroyed";
         case EventType::WindowFocused: return "window_focused";
+        case EventType::WindowTitleChanged: return "window_title_changed";
         case EventType::WindowMoved: return "window_moved";
         case EventType::WindowResized: return "window_resized";
         case EventType::WorkspaceChanged: return "workspace_changed";
@@ -586,6 +587,8 @@ std::string IPCServer::handleSubscribe(const std::string& args) {
                     m_clientSubscriptions[clientFd].insert(EventType::WindowDestroyed);
                 } else if (eventName == "window_focused") {
                     m_clientSubscriptions[clientFd].insert(EventType::WindowFocused);
+                } else if (eventName == "window_title_changed") {
+                    m_clientSubscriptions[clientFd].insert(EventType::WindowTitleChanged);
                 } else if (eventName == "window_moved") {
                     m_clientSubscriptions[clientFd].insert(EventType::WindowMoved);
                 } else if (eventName == "window_resized") {
