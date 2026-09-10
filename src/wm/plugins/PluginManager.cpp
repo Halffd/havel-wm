@@ -409,9 +409,12 @@ void PluginManager::focusView(View* view) {
 
 void PluginManager::closeView(View* view) {
     if (!m_server || !view) return;
-    auto* server = static_cast<Server*>(m_server);
-    (void)server;
-    // closeView not implemented;
+    // Route the close request through the C bridge — same path as
+    // Server::closeFocusedWindow. The compositor still gets the
+    // view-destroyed sequence afterwards.
+    if (view->nativeHandle()) {
+        havel_wlr_close_view(view->nativeHandle());
+    }
 }
 
 std::vector<View*> PluginManager::getAllViews() {
@@ -571,12 +574,12 @@ void PluginManager::setBrightnessForOutput(int output_index, float brightness) {
 }
 
 void PluginManager::setZoomForOutput(int output_index, float zoom) {
-    if (!m_server) return;
-    (void)output_index;
-    (void)zoom;
-    auto* server = static_cast<Server*>(m_server);
-    (void)server;
-    // setZoom not implemented
+    // No zoom state exists in the compositor and the C bridge has no zoom
+    // entry point (same reason the set_zoom IPC command was removed in the
+    // phase 1 honesty pass). ZoomPlugin's calls land here and are refused
+    // honestly instead of silently pretending to apply.
+    LOG_WARN("[PluginManager] setZoomForOutput(%d, %.2f) refused: no zoom support in compositor",
+             output_index, zoom);
 }
 
 void PluginManager::scheduleRedraw() {
