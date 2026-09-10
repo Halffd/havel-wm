@@ -194,3 +194,31 @@ Measured drift beyond what commit `f4a9481` already fixed (socket paths, D-Bus n
 - One window state owner
 - IPC: every command either real or absent
 - Docs matching measured reality
+
+---
+
+## FINAL STATUS (post-execution)
+
+All phases executed except phase 5. Commit map:
+
+| Phase | Commit | Notes |
+|---|---|---|
+| renderer consolidation (pre-plan) | 48e70ea | −10,620 lines, 38 files |
+| 0 dead weight | 0b462de | −53,842 lines; whole parallel backend tree |
+| 1 IPC honesty | 47e31d9 | 25 stubs → 0; 6 lying commands removed |
+| 2 registration wall | 9e92aa1 | 55 lambdas → table + 18 named ipcXxx |
+| 3 Server split | 4ce668d | DisplaySettings + OverlayController out; WorkspaceManager declined with evidence (15 hot-path touchpoints) |
+| 4 WM unify | fa5e39d | projection + ServerActions; fixed dual-ID-space and phantom-mutation bugs |
+| 6 utils | 9ec3064 | Common.h kept (41 tests), 17 dead files deleted |
+| 7 docs | 0a67b08 | all counts/lists parity-checked |
+| follow-ups | e1ddfcf, 11c89af | title propagation (new window_title_changed event), -r flag wired to WLR_RENDERER, closeView/setZoomForOutput no-ops closed |
+
+Phase 5 (wlr_bridge.c split) remains blocked: its gate needs a live
+session (real display, VT switching, multi-monitor) that this
+environment cannot run. The split plan text above is kept intact for
+whenever that session exists.
+
+Reconciliation of estimate vs reality: the "expected end state" line
+count above was written before measurement revealed the dead parallel
+backend (phase 0) and orphan apps; actual net removal across the
+effort is ~66,000 lines including the pre-plan renderer cut.
