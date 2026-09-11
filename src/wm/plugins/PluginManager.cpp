@@ -1,5 +1,6 @@
 // Plugin Manager Implementation - Enhanced Architecture
 
+#include <chrono>
 #include "PluginManager.hpp"
 #include <wm/Server.hpp>
 #include <Logger.h>
@@ -207,7 +208,8 @@ PluginSettings& PluginManager::getPluginSettings(const std::string& name) {
 
 bool PluginManager::emitEvent(PluginEvent& event) {
     // Set timestamp
-    event.timestamp = 0;  // Would use actual time
+    event.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
     
     // Call event listeners first
     bool consumed = false;

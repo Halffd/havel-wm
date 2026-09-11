@@ -751,25 +751,25 @@ void ComboManager::triggerCombo(Combo& combo) {
 }
 
 void ComboManager::applyGrab(const Combo& combo) {
+    // NOTE: seat grabs are not implemented — the C bridge has no
+    // keyboard/pointer grab entry points. Recording the combo as active
+    // so releaseGrab stays paired, but input keeps flowing to clients.
     if (combo.grabMode == ComboGrabMode::Keyboard ||
         combo.grabMode == ComboGrabMode::Both) {
-        // Would grab keyboard
-        LOG_DEBUG("[ComboManager] Grabbing keyboard for combo %lu", combo.id);
+        LOG_WARN("[ComboManager] Keyboard grab requested by combo %lu but seat grabs are not implemented", combo.id);
     }
-    
+
     if (combo.grabMode == ComboGrabMode::Pointer ||
         combo.grabMode == ComboGrabMode::Both) {
-        // Would grab pointer
-        LOG_DEBUG("[ComboManager] Grabbing pointer for combo %lu", combo.id);
+        LOG_WARN("[ComboManager] Pointer grab requested by combo %lu but seat grabs are not implemented", combo.id);
     }
-    
+
     m_activeGrabComboId = combo.id;
 }
 
 void ComboManager::releaseGrab(const Combo& combo) {
     if (m_activeGrabComboId == combo.id) {
-        // Would release keyboard and pointer
-        LOG_DEBUG("[ComboManager] Releasing grab for combo %lu", combo.id);
+        // See applyGrab: nothing was actually grabbed, just clear pairing.
         m_activeGrabComboId = 0;
     }
 }
