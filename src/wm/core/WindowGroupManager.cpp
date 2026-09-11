@@ -652,4 +652,12 @@ void WindowGroupManager::arrangeGroupWindows(uint64_t groupId) {
     updateGroupGeometry(groupId);
 }
 
+// Destroy the process-wide singleton (called from havel_cpp_server_destroy).
+// Nulls the global so any post-shutdown accessor call lazily creates a
+// fresh instance instead of dereferencing freed memory.
+void destroyWindowGroupManager() {
+    delete g_windowManager;
+    g_windowManager = nullptr;
+}
+
 } // namespace havel

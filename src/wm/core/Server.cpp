@@ -154,7 +154,12 @@ Server::~Server() {
         LOG_INFO("[Scene] Scene graph destroyed");
     }
 
-    // TextInputManager is owned by C layer, don't delete here
+    // TextInputManager / GestureRecognizer are NOT owned by Server: they
+    // are created with new in bridge.cpp (havel_cpp_*_init) and deleted in
+    // havel_cpp_server_destroy BEFORE ~Server runs. WindowGroupManager /
+    // DesktopManager are process-wide singletons owned by their own .cpp
+    // globals; havel_cpp_server_destroy nulls them via their destroy
+    // helpers. Do not add deletes for any of these here — double-free.
 }
 
 void Server::registerPlugin(std::unique_ptr<Plugin> plugin) {

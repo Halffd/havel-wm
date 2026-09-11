@@ -56,29 +56,28 @@ struct havel_cpp_server* havel_cpp_server_create(void) {
 
 void havel_cpp_server_destroy(struct havel_cpp_server* server) {
     if (!server) return;
-    
+
     // Delete C-layer objects that were created with new
     if (server->server) {
-        // Delete TextInputManager
+        // TextInputManager: created in havel_cpp_server_init_text_input,
+        // stored typed; Server does not own it.
         if (server->server->textInputManager()) {
             delete server->server->textInputManager();
         }
-        
-        // Delete GestureRecognizer
+
+        // GestureRecognizer: created in havel_cpp_init_gestures; Server
+        // does not own it.
         if (server->server->gestureRecognizer()) {
             delete static_cast<havel::GestureRecognizer*>(server->server->gestureRecognizer());
         }
-        
-        // Delete WindowGroupManager
-        if (server->server->windowGroupManager()) {
-            delete static_cast<havel::WindowGroupManager*>(server->server->windowGroupManager());
-        }
-        
-        // Delete DesktopManager
-        if (server->server->desktopManager()) {
-            delete static_cast<havel::DesktopManager*>(server->server->desktopManager());
-        }
-        
+
+        // WindowGroupManager / DesktopManager are process-wide singletons
+        // (getWindowGroupManager()/getDesktopManager()); their destroy
+        // helpers delete AND null the globals so late accessor calls
+        // lazily recreate instead of dangling.
+        havel::destroyWindowGroupManager();
+        havel::destroyDesktopManager();
+
         server->server->stopIPCServer();
         delete server->server;
     }
@@ -425,24 +424,25 @@ void havel_cpp_process_gesture_button(struct havel_cpp_server* server, int butto
 
 void havel_cpp_init_window_groups(struct havel_cpp_server* server) {
     if (!server || !server->server) return;
-    
-    // Initialize window group manager
-    auto* groupManager = new havel::WindowGroupManager();
-    groupManager->initialize();
-    
-    server->server->setWindowGroupManager(groupManager);
-    
+
+    // Use the process-wide singleton so every consumer (current and
+    // future) sees the same configured instance. Previously this
+    // created a second instance that nothing ever read back.
+    auto& groupManager = havel::getWindowGroupManager();
+
+    server->server->setWindowGroupManager(&groupManager);
+
     // Add default window rules
     havel::WindowRule firefoxRule;
     firefoxRule.appId = "firefox";
     firefoxRule.groupType = havel::GroupType::Tabbed;
-    groupManager->addWindowRule(firefoxRule);
-    
+    groupManager.addWindowRule(firefoxRule);
+
     havel::WindowRule terminalRule;
     terminalRule.appId = "foot";
     terminalRule.groupType = havel::GroupType::SplitH;
-    groupManager->addWindowRule(terminalRule);
-    
+    groupManager.addWindowRule(terminalRule);
+
     LOG_INFO("[Bridge] Window group manager initialized");
 }
 
@@ -463,16 +463,19 @@ void havel_cpp_process_combo_key(struct havel_cpp_server* server, uint32_t keyco
 
 void havel_cpp_init_desktop(struct havel_cpp_server* server) {
     if (!server || !server->server) return;
-    
-    // Initialize desktop manager
-    auto* desktopManager = new havel::DesktopManager();
-    desktopManager->initialize();
-    
-    server->server->setDesktopManager(desktopManager);
-    
+
+    // Use the process-wide singleton so every consumer sees the same
+    // configured instance. Previously this created a second instance
+    // that nothing read back — NASAWallpaper's getDesktopManager()
+    // lazily created a different, never-configured one instead.
+    auto& desktopManager = havel::getDesktopManager();
+    desktopManager.initialize();
+
+    server->server->setDesktopManager(&desktopManager);
+
     // Bind logout shortcut (Ctrl+Alt+Delete)
-    desktopManager->bindLogout(111, (1 << 1) | (1 << 2));  // Ctrl+Alt+Delete
-    
+    desktopManager.bindLogout(111, (1 << 1) | (1 << 2));  // Ctrl+Alt+Delete
+
     LOG_INFO("[Bridge] Desktop manager initialized");
 }
 

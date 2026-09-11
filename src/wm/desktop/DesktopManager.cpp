@@ -962,4 +962,12 @@ void DesktopManager::setNASAWallpaperSlideshow(int intervalSeconds) {
     LOG_INFO("[Desktop] NASA wallpaper slideshow started (%ds)", intervalSeconds);
 }
 
+// Destroy the process-wide singleton (called from havel_cpp_server_destroy).
+// Nulls the global so any post-shutdown accessor call lazily creates a
+// fresh instance instead of dereferencing freed memory.
+void destroyDesktopManager() {
+    delete g_desktopManager;
+    g_desktopManager = nullptr;
+}
+
 } // namespace havel

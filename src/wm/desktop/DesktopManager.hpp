@@ -337,5 +337,7 @@ private:
  * Global desktop manager access
  */
 DesktopManager& getDesktopManager();
+// Destroy (and null) the process-wide singleton; compositor shutdown only.
+void destroyDesktopManager();
 
 } // namespace havel
