@@ -51,9 +51,11 @@
 ## 🟠 HIGH (Important Features Missing)
 
 ### Plugin System
-- [ ] **Plugin settings not loading from config** - `loadConfig()` called but settings ignored
-  - Fixed: `PluginSettings` class exists
-  - Remaining: Integration with `PluginConfig` JSON loader
+- [x] **Plugin settings not loading from config** - `loadConfig()` called but settings ignored
+  - Fixed in `d63baa4`: `loadPluginSettings()` now calls each plugin's virtual
+    `loadConfig()` (reads via PluginConfig::getInstance), the whitelist
+    extraction is gone, and `registerPlugin` loads settings before the plugin
+    enters the enabled set — first boot applies user config.
   - Files: `src/wm/plugins/PluginManager.cpp:loadPluginSettings()`
 
 - [ ] **Plugin event system not used** - `emitEvent()` exists but no plugins use it
