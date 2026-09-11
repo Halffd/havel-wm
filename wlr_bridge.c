@@ -1489,10 +1489,18 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // To use custom rendering, implement wlr_renderer interface and replace
     // wlr_renderer_autocreate() in havel_wlr_create()
 
-    // Commit with zoom transform applied via output state
+    // Commit with zoom transform applied via output state.
+    // The scene MUST be built into the state before committing —
+    // wlr_output_commit_state alone attaches no buffer, which blanks
+    // the output. Previously the zoom path did exactly that.
     if (output->zoom != 1.0f && output->zoom > 0.0f) {
         LOG_DEBUG("[FRAME] %s: committing with zoom %.2f", output->output->name, output->zoom);
-        wlr_output_commit_state(output->output, &state);
+        if (!wlr_scene_output_build_state(output->scene_output, &state, &options)) {
+            LOG_ERROR("[FRAME] %s: scene_output_build_state failed", output->output->name);
+        } else if (!wlr_output_commit_state(output->output, &state)) {
+            LOG_ERROR("[FRAME] %s: output_commit_state failed (zoom=%.2f)",
+                      output->output->name, output->zoom);
+        }
     } else {
         wlr_scene_output_commit(output->scene_output, &options);
     }
