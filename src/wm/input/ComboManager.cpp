@@ -6,12 +6,23 @@
 #include <random>
 #include <cstring>
 #include <sstream>
+#include <chrono>
+
+namespace havel {
+
+// Monotonic milliseconds since process start; shared by all timestamp
+// users in this file (previously hardcoded to 1, which zeroed every
+// cooldown/timeout check: now - lastTriggered was always 0).
+static uint64_t now_ms() {
+    using namespace std::chrono;
+    static const steady_clock::time_point epoch = steady_clock::now();
+    return static_cast<uint64_t>(
+        duration_cast<milliseconds>(steady_clock::now() - epoch).count());
+}
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
 #endif
-
-namespace havel {
 
 // Global combo manager instance
 static ComboManager* g_comboManager = nullptr;
@@ -161,7 +172,7 @@ bool Combo::matches(const ComboInput& input, uint32_t currentModifiers) const {
 void ComboSequence::addInput(const ComboInput& input) {
     inputs.push_back(input);
     if (startTime == 0) {
-        startTime = 1;  // Will be set properly on first input
+        startTime = now_ms();
     }
 }
 
@@ -408,7 +419,7 @@ void ComboManager::processKeyEvent(uint32_t keycode, bool pressed, uint32_t modi
     if (!m_initialized) return;
     
     auto& state = m_inputState;
-    state.lastInputTime = 1;  // Would use actual timestamp
+    state.lastInputTime = now_ms();
     
     // Update modifiers
     state.modifiers = modifiers;
@@ -440,9 +451,9 @@ void ComboManager::processKeyEvent(uint32_t keycode, bool pressed, uint32_t modi
 
 void ComboManager::processMouseButtonEvent(int button, bool pressed) {
     if (!m_initialized) return;
-    
+
     auto& state = m_inputState;
-    state.lastInputTime = 1;
+    state.lastInputTime = now_ms();
     
     if (pressed) {
         state.pressedButtons.push_back(button);
@@ -463,9 +474,9 @@ void ComboManager::processMouseButtonEvent(int button, bool pressed) {
 
 void ComboManager::processMouseWheelEvent(WheelDirection dir, int delta) {
     if (!m_initialized) return;
-    
+
     auto& state = m_inputState;
-    state.lastInputTime = 1;
+    state.lastInputTime = now_ms();
     state.lastWheelDir = dir;
     state.lastWheelDelta = delta;
     
@@ -483,7 +494,7 @@ void ComboManager::processMouseMotionEvent(float x, float y) {
     if (!m_initialized) return;
     
     auto& state = m_inputState;
-    state.lastInputTime = 1;
+    state.lastInputTime = now_ms();
     state.lastMouseX = state.mouseX;
     state.lastMouseY = state.mouseY;
     state.mouseX = x;
@@ -509,7 +520,7 @@ void ComboManager::processGamepadButtonEvent(int padId, int button, bool pressed
     if (!m_initialized) return;
     
     auto& state = m_inputState;
-    state.lastInputTime = 1;
+    state.lastInputTime = now_ms();
     
     // Resize if needed
     if (padId >= static_cast<int>(state.gamepadButtons.size())) {
@@ -533,7 +544,7 @@ void ComboManager::processGamepadAxisEvent(int padId, int axis, float value) {
     if (!m_initialized) return;
     
     auto& state = m_inputState;
-    state.lastInputTime = 1;
+    state.lastInputTime = now_ms();
     
     // Resize if needed
     if (padId >= static_cast<int>(state.gamepadAxes.size())) {
@@ -558,7 +569,7 @@ void ComboManager::processJoystickButtonEvent(int joyId, int button, bool presse
     if (!m_initialized) return;
     
     auto& state = m_inputState;
-    state.lastInputTime = 1;
+    state.lastInputTime = now_ms();
     
     // Resize if needed
     if (joyId >= static_cast<int>(state.joystickButtons.size())) {
@@ -586,7 +597,7 @@ void ComboManager::processJoystickAxisEvent(int joyId, int axis, float value) {
     if (!m_initialized) return;
     
     auto& state = m_inputState;
-    state.lastInputTime = 1;
+    state.lastInputTime = now_ms();
     
     // Resize if needed
     if (joyId >= static_cast<int>(state.joystickAxes.size())) {
@@ -626,7 +637,7 @@ void ComboManager::checkCombos() {
         }
         
         // Check cooldown
-        uint64_t now = 1;  // Would use actual timestamp
+        uint64_t now = now_ms();
         if (combo.cooldown > 0 && (now - combo.lastTriggered) < combo.cooldown) {
             continue;
         }
@@ -706,7 +717,7 @@ bool ComboManager::matchCombo(const Combo& combo) {
 }
 
 void ComboManager::triggerCombo(Combo& combo) {
-    uint64_t now = 1;  // Would use actual timestamp
+    uint64_t now = now_ms();
     
     // Check timeout
     if (combo.timeout > 0 && (now - combo.lastTriggered) < combo.timeout) {

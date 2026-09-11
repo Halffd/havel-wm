@@ -1,6 +1,7 @@
 // Desktop Environment Manager Implementation
 
 #include "DesktopManager.hpp"
+#include <chrono>
 #include "NASAWallpaper.hpp"
 #include <wm/render/OverlayRenderer.hpp>
 #include <wm/render/AppIconLoader.hpp>
@@ -815,8 +816,10 @@ void DesktopManager::processKeyDown(uint32_t keycode, uint32_t modifiers) {
 }
 
 void DesktopManager::updateSlideshow() {
-    uint64_t now = 1;  // Would use actual timestamp
-    
+    using namespace std::chrono;
+    uint64_t now = static_cast<uint64_t>(
+        duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
+
     if (now - m_lastSlideshowChange >= static_cast<uint64_t>(m_config.wallpaper.slideshowInterval * 1000)) {
         if (!m_config.wallpaper.slideshowPaths.empty()) {
             m_currentSlideshowIndex = (m_currentSlideshowIndex + 1) % m_config.wallpaper.slideshowPaths.size();
