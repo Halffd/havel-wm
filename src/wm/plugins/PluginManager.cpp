@@ -35,10 +35,17 @@ void PluginManager::initialize(void* server) {
     for (auto& plugin : m_plugins) {
         // Call preInit hook
         plugin->preInit();
-        
+
         // Initialize plugin
         plugin->init(this);
-        
+
+        // Load plugin config before postInit so hooks see real settings.
+        // Previously config was only loaded on reload_config IPC — first
+        // boot ran every plugin on defaults.
+        if (!m_configPath.empty()) {
+            loadPluginSettings(*plugin);
+        }
+
         // Call postInit hook
         plugin->postInit();
         
@@ -110,6 +117,14 @@ void PluginManager::registerPlugin(std::unique_ptr<Plugin> plugin) {
              plugin->getVersion().c_str(),
              plugin->getInfo().priority);
     
+    // Load config before the plugin enters the enabled set so its init
+    // hooks see real settings. Server registers plugins AFTER
+    // PluginManager::initialize, so the initialize-loop load alone
+    // would miss every built-in plugin on first boot.
+    if (!m_configPath.empty()) {
+        loadPluginSettings(*plugin);
+    }
+
     m_plugins.push_back(std::move(plugin));
     sortPluginsByPriority();
 }
@@ -170,43 +185,16 @@ void PluginManager::sortPluginsByPriority() {
 
 void PluginManager::loadPluginSettings(Plugin& plugin) {
     const std::string& name = plugin.getName();
-    
-    // Create settings object
-    auto& settings = m_pluginSettings[name];
-    
-    // Load from config using PluginConfig
-    std::unordered_map<std::string, std::string> configData;
-    
-    // Get all settings for this plugin from PluginConfig
-    // PluginConfig stores settings as plugin.key = value
-    // We need to extract all keys for this plugin
-    auto& globalConfig = PluginConfig::getInstance();
-    
-    // Common settings that plugins might use
-    const char* commonKeys[] = {
-        "enabled", "keybinding",
-        "scaleFactor", "gridSpacing", "thumbnailWidth", "thumbnailHeight", "maxVisibleWindows", "highlightColor",
-        "backgroundColor", "borderColor", "textColor", "accentColor",
-        "barHeight", "foregroundColor",
-        NULL
-    };
-    
-    for (int i = 0; commonKeys[i] != NULL; i++) {
-        std::string value = globalConfig.getValue(name, commonKeys[i], "");
-        if (!value.empty()) {
-            configData[commonKeys[i]] = value;
-        }
-    }
-    
-    // Load settings into plugin
-    settings.loadFromMap(configData);
-    
+
+    // Let the plugin pull its own keys straight from the global config
+    // (PluginConfig::getInstance().get*Value(name, key, default)), the
+    // pattern ScalePlugin/AltTabPlugin already use. Previously this
+    // extracted a hardcoded 15-key whitelist into PluginSettings that
+    // nothing consumed — plugins with other keys silently got defaults.
+    plugin.loadConfig(m_configPath);
+
     // Notify plugin that settings are loaded
     plugin.onSettingsLoaded();
-    
-    if (!configData.empty()) {
-        LOG_INFO("[PluginManager] Loaded %zu settings for plugin '%s'", configData.size(), name.c_str());
-    }
 }
 
 PluginSettings& PluginManager::getPluginSettings(const std::string& name) {
