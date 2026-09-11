@@ -407,6 +407,24 @@ void PluginManager::closeView(View* view) {
     }
 }
 
+void PluginManager::minimizeView(View* view) {
+    if (!m_server || !view) return;
+    // Same route as closeView: nativeHandle is the C-side wrapper struct,
+    // never the C++ View. (ServerDecorationPlugin previously passed the
+    // C++ View* straight to havel_wlr_minimize_view — wrong type.)
+    if (view->nativeHandle()) {
+        havel_wlr_minimize_view(view->nativeHandle());
+    }
+}
+
+void PluginManager::toggleMaximizeView(View* view) {
+    if (!m_server || !view) return;
+    auto* server = static_cast<Server*>(m_server);
+    if (Window* window = server->coreWindowManager().getWindow(view)) {
+        server->coreWindowManager().toggleMaximize(window);
+    }
+}
+
 std::vector<View*> PluginManager::getAllViews() {
     if (!m_server) return {};
     auto* server = static_cast<Server*>(m_server);

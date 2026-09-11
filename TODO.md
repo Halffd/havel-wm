@@ -37,8 +37,15 @@
   - Suspect: `xdg_handle_request_resize()` not updating geometry during drag
   - Files: `wlr_bridge.c:xdg_handle_request_resize()`
 
-- [ ] **Window minimize/maximize buttons don't work** - ServerDecorationPlugin buttons click but don't act
-  - Partial: Minimize now calls `havel_wlr_minimize_view()` but may not hide
+- [x] **Window minimize/maximize buttons don't work** - ServerDecorationPlugin buttons click but don't act
+  - Fixed: minimize passed the C++ View* straight to the C bridge (which
+    expects the C-side wrapper struct — wrong pointer type, undefined
+    behavior); now routes through new CompositorAPI::minimizeView() ->
+    PluginManager -> nativeHandle -> havel_wlr_minimize_view, same as the
+    close path. maximize previously only set geometry without real window
+    state; now uses CompositorAPI::toggleMaximizeView() ->
+    CoreWindowManager::toggleMaximize.
+  - Remaining: visual verification in a live session
   - Files: `src/wm/plugins/ServerDecorationPlugin.cpp`
 
 ### Rendering

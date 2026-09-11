@@ -155,6 +155,8 @@ public:
     View* getFocusedView() override;
     void focusView(View* view) override;
     void closeView(View* view) override;
+    void minimizeView(View* view) override;
+    void toggleMaximizeView(View* view) override;
 
     // Window enumeration
     std::vector<View*> getAllViews() override;

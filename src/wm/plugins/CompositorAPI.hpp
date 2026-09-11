@@ -26,6 +26,8 @@ public:
     virtual View* getFocusedView() = 0;
     virtual void focusView(View* view) = 0;
     virtual void closeView(View* view) = 0;
+    virtual void minimizeView(View* view) = 0;
+    virtual void toggleMaximizeView(View* view) = 0;
     
     // Window enumeration (for Alt-Tab, Overview, etc.)
     virtual std::vector<View*> getAllViews() = 0;

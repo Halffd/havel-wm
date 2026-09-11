@@ -406,42 +406,31 @@ void ServerDecorationPlugin::handleCloseClick(void* view) {
 void ServerDecorationPlugin::handleMaximizeClick(void* view) {
     if (!view || !m_api) return;
     printf("[ServerDecoration] Maximize button clicked for window %p\n", view);
-    // Toggle maximize by setting geometry to output size
+    // Toggle maximize through the CompositorAPI (real window state), then
+    // mirror the flag in decoration state for rendering.
+    m_api->toggleMaximizeView(static_cast<View*>(view));
     auto it = m_decorations.find(view);
     if (it != m_decorations.end()) {
         it->second.maximized = !it->second.maximized;
-        if (it->second.maximized) {
-            // Save current geometry for restore
-            it->second.view_start_x = it->second.x;
-            it->second.view_start_y = it->second.y;
-            it->second.view_start_w = it->second.width;
-            it->second.view_start_h = it->second.height;
-            // Maximize to fill output
-            m_api->setViewGeometry(static_cast<View*>(view), 0, 0, 
-                                   m_api->getOutputWidth(), m_api->getOutputHeight());
-        } else {
-            // Restore to saved geometry
-            m_api->setViewGeometry(static_cast<View*>(view), 
-                                   it->second.view_start_x, it->second.view_start_y,
-                                   it->second.view_start_w, it->second.view_start_h);
-        }
-        m_api->scheduleRedraw();
     }
+    m_api->scheduleRedraw();
 }
 
 void ServerDecorationPlugin::handleMinimizeClick(void* view) {
     if (!view || !m_api) return;
     printf("[ServerDecoration] Minimize button clicked for window %p\n", view);
-    
-    // Minimize the view using the C bridge
-    havel_wlr_minimize_view(view);
-    
+
+    // Minimize through the CompositorAPI (routes via the view's
+    // nativeHandle). Previously this passed the C++ View* directly to
+    // the C bridge, which expects the C-side wrapper struct.
+    m_api->minimizeView(static_cast<View*>(view));
+
     // Update decoration state
     auto it = m_decorations.find(view);
     if (it != m_decorations.end()) {
         it->second.minimized = true;
     }
-    
+
     m_api->scheduleRedraw();
 }
 
