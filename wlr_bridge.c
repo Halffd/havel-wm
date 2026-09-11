@@ -324,7 +324,17 @@ struct havel_keyboard {
     struct xkb_keymap *keymap;
 };
 
+// View-kind tag: MUST be the first member of every C view wrapper struct.
+// The cpp_impl_view_* callbacks receive an untyped nativeHandle and read
+// this tag before casting, so XWayland views stop being reinterpreted as
+// XDG views (wild-pointer deref on focus/close/fullscreen/minimize).
+enum havel_view_kind {
+    HAVEL_VIEW_XDG = 0x58444756,      // "XDGV"
+    HAVEL_VIEW_XWAYLAND = 0x58574C56, // "XWLV"
+};
+
 struct havel_xdg_view {
+    enum havel_view_kind kind;  // must stay first: tag read before cast
     struct wlr_xdg_surface *xdg_surface;
     struct wlr_scene_tree *scene_tree;
     struct havel_wlr_server *server;
@@ -351,6 +361,7 @@ struct havel_xdg_view {
 };
 
 struct havel_xwayland_view {
+    enum havel_view_kind kind;  // must stay first: tag read before cast
     struct wlr_xwayland_surface *xsurface;
     struct wlr_scene_tree *scene_tree;
     struct havel_wlr_server *server;
@@ -374,99 +385,199 @@ static void xwayland_view_set_position(struct havel_xwayland_view *view, int x, 
 
 static void cpp_impl_view_set_position(void* view, int x, int y) {
     if (!view) return;
-    // View could be either XDG or XWayland - try XDG first
-    struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
-    if (xdg_view->scene_tree) {
-        xdg_view_set_position(xdg_view, x, y);
+
+    // Dispatch on the view-kind tag: scene_tree sits at the same offset in
+    // both structs, but position logic differs (xdg_view_set_position is
+    // XDG-specific; XWayland positions via xsurface).
+    enum havel_view_kind kind = *(enum havel_view_kind*)view;
+    if (kind == HAVEL_VIEW_XDG) {
+        struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
+        if (xdg_view->scene_tree) {
+            xdg_view_set_position(xdg_view, x, y);
+        }
+    } else if (kind == HAVEL_VIEW_XWAYLAND) {
+        struct havel_xwayland_view *xwl = (struct havel_xwayland_view*)view;
+        wlr_xwayland_surface_configure(xwl->xsurface, x, y,
+                                       xwl->xsurface->width, xwl->xsurface->height);
     }
 }
 
 static void cpp_impl_view_set_size(void* view, int w, int h) {
     if (!view) return;
-    struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
-    if (xdg_view->xdg_surface && xdg_view->xdg_surface->toplevel) {
-        wlr_xdg_toplevel_set_size(xdg_view->xdg_surface->toplevel, w, h);
+
+    enum havel_view_kind kind = *(enum havel_view_kind*)view;
+    if (kind == HAVEL_VIEW_XDG) {
+        struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
+        if (xdg_view->xdg_surface && xdg_view->xdg_surface->toplevel) {
+            wlr_xdg_toplevel_set_size(xdg_view->xdg_surface->toplevel, w, h);
+        }
+    } else if (kind == HAVEL_VIEW_XWAYLAND) {
+        struct havel_xwayland_view *xwl = (struct havel_xwayland_view*)view;
+        if (xwl->xsurface) {
+            wlr_xwayland_surface_configure(xwl->xsurface,
+                                           xwl->xsurface->x, xwl->xsurface->y, w, h);
+        }
     }
 }
 
 static void cpp_impl_view_focus(void* view) {
     LOG_INFO("[C] cpp_impl_view_focus: %p", view);
     if (!view) return;
-    struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
-    if (xdg_view->xdg_surface && xdg_view->xdg_surface->surface) {
-        struct wlr_seat *seat = xdg_view->server->seat;
+
+    // View-kind tag is the first member of BOTH wrapper structs (see
+    // havel_view_kind), so it can be read before knowing which struct
+    // this is. XWayland views used to be reinterpreted as XDG views
+    // here — wild pointer deref on focus of any X11 window.
+    enum havel_view_kind kind = *(enum havel_view_kind*)view;
+    struct wlr_surface *surface = NULL;
+    struct havel_wlr_server *view_server = NULL;
+
+    if (kind == HAVEL_VIEW_XDG) {
+        struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
+        if (xdg_view->xdg_surface) {
+            surface = xdg_view->xdg_surface->surface;
+            view_server = xdg_view->server;
+        }
+    } else if (kind == HAVEL_VIEW_XWAYLAND) {
+        struct havel_xwayland_view *xwl = (struct havel_xwayland_view*)view;
+        if (xwl->xsurface) {
+            surface = xwl->xsurface->surface;
+            view_server = xwl->server;
+        }
+    }
+
+    if (surface && view_server) {
+        struct wlr_seat *seat = view_server->seat;
         struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
         LOG_INFO("[C] Calling wlr_seat_keyboard_notify_enter");
         if (keyboard) {
-            wlr_seat_keyboard_notify_enter(seat, xdg_view->xdg_surface->surface,
+            wlr_seat_keyboard_notify_enter(seat, surface,
                 keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
             LOG_INFO("[C] wlr_seat_keyboard_notify_enter complete");
         } else {
             LOG_WARN("[C] No keyboard available");
         }
     } else {
-        LOG_WARN("[C] Invalid xdg_surface or surface");
+        LOG_WARN("[C] Could not resolve surface for focus");
     }
 }
 
 static void cpp_impl_view_raise(void* view) {
     LOG_INFO("[C] cpp_impl_view_raise: %p", view);
-    if (!view || !((struct havel_xdg_view*)view)->scene_tree) {
+    if (!view) return;
+
+    // scene_tree sits at the same offset in both wrapper structs (after the
+    // kind tag + surface pointer), but resolve through the right struct for
+    // clarity and future-proofing.
+    enum havel_view_kind kind = *(enum havel_view_kind*)view;
+    struct wlr_scene_tree *scene_tree = NULL;
+
+    if (kind == HAVEL_VIEW_XDG) {
+        scene_tree = ((struct havel_xdg_view*)view)->scene_tree;
+    } else if (kind == HAVEL_VIEW_XWAYLAND) {
+        scene_tree = ((struct havel_xwayland_view*)view)->scene_tree;
+    }
+
+    if (!scene_tree) {
         LOG_WARN("[C] Invalid view or scene_tree");
         return;
     }
-    struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
     LOG_INFO("[C] Calling wlr_scene_node_raise_to_top");
-    wlr_scene_node_raise_to_top(&xdg_view->scene_tree->node);
+    wlr_scene_node_raise_to_top(&scene_tree->node);
     LOG_INFO("[C] wlr_scene_node_raise_to_top complete");
 }
 
 static void cpp_impl_view_get_geometry(void* view, int* x, int* y, int* w, int* h) {
     if (!view) return;
-    struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
-    
-    // Get position from scene node (single source of truth)
-    if (xdg_view->scene_tree) {
-        if (x) *x = xdg_view->scene_tree->node.x;
-        if (y) *y = xdg_view->scene_tree->node.y;
-    } else {
-        if (x) *x = 0;
-        if (y) *y = 0;
+
+    enum havel_view_kind kind = *(enum havel_view_kind*)view;
+    if (x) *x = 0;
+    if (y) *y = 0;
+    if (w) *w = 0;
+    if (h) *h = 0;
+
+    struct wlr_scene_tree *scene_tree = NULL;
+
+    if (kind == HAVEL_VIEW_XDG) {
+        struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
+
+        // Get position from scene node (single source of truth)
+        scene_tree = xdg_view->scene_tree;
+
+        // Get size from XDG surface geometry
+        if (xdg_view->xdg_surface && xdg_view->xdg_surface->surface) {
+            struct wlr_box geo = xdg_view->xdg_surface->current.geometry;
+            if (w) *w = geo.width;
+            if (h) *h = geo.height;
+        }
+    } else if (kind == HAVEL_VIEW_XWAYLAND) {
+        struct havel_xwayland_view *xwl = (struct havel_xwayland_view*)view;
+
+        scene_tree = xwl->scene_tree;
+
+        // XWayland surface has no xdg geometry; use the surface's current size
+        if (xwl->xsurface) {
+            if (w) *w = xwl->xsurface->width;
+            if (h) *h = xwl->xsurface->height;
+        }
     }
-    
-    // Get size from XDG surface geometry
-    if (xdg_view->xdg_surface && xdg_view->xdg_surface->surface) {
-        struct wlr_box geo = xdg_view->xdg_surface->current.geometry;
-        if (w) *w = geo.width;
-        if (h) *h = geo.height;
-    } else {
-        if (w) *w = 0;
-        if (h) *h = 0;
+
+    if (scene_tree) {
+        if (x) *x = scene_tree->node.x;
+        if (y) *y = scene_tree->node.y;
     }
 }
 
 static void cpp_impl_view_close(void* view) {
     if (!view) return;
-    struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
-    if (xdg_view->xdg_surface && xdg_view->xdg_surface->toplevel) {
-        wlr_xdg_toplevel_send_close(xdg_view->xdg_surface->toplevel);
+
+    enum havel_view_kind kind = *(enum havel_view_kind*)view;
+    if (kind == HAVEL_VIEW_XDG) {
+        struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
+        if (xdg_view->xdg_surface && xdg_view->xdg_surface->toplevel) {
+            wlr_xdg_toplevel_send_close(xdg_view->xdg_surface->toplevel);
+        }
+    } else if (kind == HAVEL_VIEW_XWAYLAND) {
+        struct havel_xwayland_view *xwl = (struct havel_xwayland_view*)view;
+        if (xwl->xsurface) {
+            wlr_xwayland_surface_close(xwl->xsurface);
+        }
     }
 }
 
 static void cpp_impl_view_set_fullscreen(void* view, bool fullscreen) {
     if (!view) return;
-    struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
-    if (xdg_view->xdg_surface && xdg_view->xdg_surface->toplevel) {
-        wlr_xdg_toplevel_set_fullscreen(xdg_view->xdg_surface->toplevel, fullscreen);
+
+    enum havel_view_kind kind = *(enum havel_view_kind*)view;
+    if (kind == HAVEL_VIEW_XDG) {
+        struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
+        if (xdg_view->xdg_surface && xdg_view->xdg_surface->toplevel) {
+            wlr_xdg_toplevel_set_fullscreen(xdg_view->xdg_surface->toplevel, fullscreen);
+        }
+    } else if (kind == HAVEL_VIEW_XWAYLAND) {
+        struct havel_xwayland_view *xwl = (struct havel_xwayland_view*)view;
+        if (xwl->xsurface) {
+            wlr_xwayland_surface_set_fullscreen(xwl->xsurface, fullscreen);
+        }
     }
 }
 
 static void cpp_impl_view_minimize(void* view) {
     if (!view) return;
-    struct havel_xdg_view *xdg_view = (struct havel_xdg_view*)view;
-    // Hide the scene node to minimize (doesn't unmap, just hides)
-    if (xdg_view->scene_tree) {
-        wlr_scene_node_set_enabled(&xdg_view->scene_tree->node, false);
+
+    // Hide the scene node to minimize (doesn't unmap, just hides).
+    // scene_tree is at the same offset in both wrapper structs.
+    enum havel_view_kind kind = *(enum havel_view_kind*)view;
+    struct wlr_scene_tree *scene_tree = NULL;
+
+    if (kind == HAVEL_VIEW_XDG) {
+        scene_tree = ((struct havel_xdg_view*)view)->scene_tree;
+    } else if (kind == HAVEL_VIEW_XWAYLAND) {
+        scene_tree = ((struct havel_xwayland_view*)view)->scene_tree;
+    }
+
+    if (scene_tree) {
+        wlr_scene_node_set_enabled(&scene_tree->node, false);
     }
 }
 
@@ -912,6 +1023,7 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
     }
 
     struct havel_xdg_view *view = calloc(1, sizeof(*view));
+    view->kind = HAVEL_VIEW_XDG;
     view->server = server;
     view->xdg_surface = xdg_surface;
     xdg_surface->data = view;
@@ -1072,6 +1184,7 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
     }
 
     struct havel_xwayland_view *view = calloc(1, sizeof(*view));
+    view->kind = HAVEL_VIEW_XWAYLAND;
     view->server = server;
     view->xsurface = xsurface;
     xsurface->data = view;
@@ -2761,16 +2874,28 @@ void havel_wlr_set_zoom_for_output_simple(havel_wlr_server_t *server, int output
 
 #include <wlr/render/gles2.h>
 
+// Resolve the wlr_surface from either wrapper struct via the kind tag.
+static struct wlr_surface* view_any_surface(void* c_view) {
+    if (!c_view) return NULL;
+    enum havel_view_kind kind = *(enum havel_view_kind*)c_view;
+    if (kind == HAVEL_VIEW_XDG) {
+        struct havel_xdg_view* view = (struct havel_xdg_view*)c_view;
+        return view->xdg_surface ? view->xdg_surface->surface : NULL;
+    }
+    if (kind == HAVEL_VIEW_XWAYLAND) {
+        struct havel_xwayland_view* view = (struct havel_xwayland_view*)c_view;
+        return view->xsurface ? view->xsurface->surface : NULL;
+    }
+    return NULL;
+}
+
 uint32_t havel_get_view_texture_id(void* c_view) {
-    struct havel_xdg_view* view = (struct havel_xdg_view*)c_view;
-    if (!view) return 0;
-    
-    struct wlr_surface* surface = view->xdg_surface->surface;
+    struct wlr_surface* surface = view_any_surface(c_view);
     if (!surface || !wlr_surface_has_buffer(surface)) return 0;
-    
+
     struct wlr_texture* texture = wlr_surface_get_texture(surface);
     if (!texture) return 0;
-    
+
     // Get GL texture ID from wlr_gles2_texture
     struct wlr_gles2_texture_attribs attribs;
     wlr_gles2_texture_get_attribs(texture, &attribs);
@@ -2778,15 +2903,13 @@ uint32_t havel_get_view_texture_id(void* c_view) {
 }
 
 int havel_get_view_texture_width(void* c_view) {
-    struct havel_xdg_view* view = (struct havel_xdg_view*)c_view;
-    if (!view) return 0;
-    return view->xdg_surface->surface->current.width;
+    struct wlr_surface* surface = view_any_surface(c_view);
+    return surface ? surface->current.width : 0;
 }
 
 int havel_get_view_texture_height(void* c_view) {
-    struct havel_xdg_view* view = (struct havel_xdg_view*)c_view;
-    if (!view) return 0;
-    return view->xdg_surface->surface->current.height;
+    struct wlr_surface* surface = view_any_surface(c_view);
+    return surface ? surface->current.height : 0;
 }
 
 // ============================================================================
@@ -2950,37 +3073,38 @@ void havel_wlr_raise_view(void* c_view) {
 // Returns non-zero if texture capture succeeded (actual GL texture requires Vulkan-GLES interop)
 uint32_t havel_wlr_capture_view_texture(void* c_view) {
     if (!c_view) return 0;
-    
-    struct havel_xdg_view *view = (struct havel_xdg_view*)c_view;
-    
-    if (!view->scene_tree || !view->xdg_surface) return 0;
-    
+
+    // Resolve via the kind tag — the same nativeHandle carries either
+    // wrapper struct, and the old unconditional havel_xdg_view* cast
+    // crashed on XWayland views before reaching the stub return.
+    enum havel_view_kind kind = *(enum havel_view_kind*)c_view;
+    struct wlr_scene_tree *scene_tree = NULL;
+    if (kind == HAVEL_VIEW_XDG) {
+        struct havel_xdg_view *view = (struct havel_xdg_view*)c_view;
+        scene_tree = view->scene_tree;
+    } else if (kind == HAVEL_VIEW_XWAYLAND) {
+        struct havel_xwayland_view *view = (struct havel_xwayland_view*)c_view;
+        scene_tree = view->scene_tree;
+    }
+    if (!scene_tree) return 0;
+
     // Get the scene surface from the scene tree
     struct wlr_scene_surface *scene_surface = NULL;
-    
+
     // Walk the scene tree to find the surface
-    struct wlr_scene_node *node = &view->scene_tree->node;
+    struct wlr_scene_node *node = &scene_tree->node;
     if (node->type == WLR_SCENE_NODE_BUFFER) {
         struct wlr_scene_buffer *scene_buffer = wlr_scene_buffer_from_node(node);
         scene_surface = wlr_scene_surface_try_from_buffer(scene_buffer);
     }
-    
+
     if (!scene_surface) return 0;
-    
+
     // Get the underlying wlr_surface
     struct wlr_surface *surface = scene_surface->surface;
     if (!surface || !surface->buffer) return 0;
-    
-    // Get Vulkan renderer from server
-    // Note: This requires access to the Vulkan renderer which is in the C++ layer
-    // For now, return 0 to indicate texture capture not fully implemented
-    // Alt-Tab will use fallback colored rectangles
-    
-    // In production: 
-    // 1. Get Vulkan renderer from server->renderer (if using Vulkan)
-    // 2. Call wlr_buffer_import_as_vulkan(renderer, surface->buffer, &texture)
-    // 3. Convert Vulkan texture to GL texture
-    // 4. Store texture ID in view
-    
-    return 0;  // Not implemented - needs Vulkan renderer access
+
+    // Texture capture not fully implemented (needs renderer access from the
+    // C++ layer); Alt-Tab uses fallback colored rectangles.
+    return 0;
 }

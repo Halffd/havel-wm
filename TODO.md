@@ -21,6 +21,16 @@
 - [ ] **Close window crashes compositor (SIGIOT)**
   - Suspect: Use-after-free in view destroy handling
   - Suspect: C++ View destroyed while C still holds pointer
+  - Root cause found (XWayland case, fixed): every cpp_impl_view_*
+    callback in wlr_bridge.c cast the untyped nativeHandle to
+    havel_xdg_view* unconditionally, but XWayland views are
+    havel_xwayland_view — closing/focusing/fullscreening any X11 window
+    dereferenced a reinterpreted struct (garbage ->toplevel pointer
+    into wlr_xdg_toplevel_send_close). fixed with a havel_view_kind
+    tag (first member of both wrapper structs) + per-kind dispatch;
+    close/fullscreen/geometry now call the wlr_xwayland_surface APIs.
+    the XDG path suspects above may still apply for XDG windows — needs
+    the live-session crash repro to confirm.
   - Files: `wlr_bridge.c:xdg_view_handle_destroy()`, `src/wm/core/Server.cpp:onViewDestroyed()`
 
 - [ ] **Window resize not working** - Can move but not resize windows
