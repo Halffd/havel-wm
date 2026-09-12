@@ -6,7 +6,6 @@
 #include <wm/Animator.hpp>
 #include <wm/bridge.h>
 #include <wm/DisplaySettings.hpp>
-#include <wm/OverlayController.hpp>
 #include <wm/render/OverlayRenderer.hpp>
 #include <wm/plugins/PluginManager.hpp>
 #include <input/KeybindingManager.hpp>
@@ -129,30 +128,8 @@ public:
     void toggleGrayscale();
     void toggleNegative();
 
-    // Alt-Tab overlay
-    void showAltTab(bool reverse = false);
-    void hideAltTab();
-    void altTabNext();
-    void altTabPrevious();
-    void altTabSelect();
-    void altTabCancel();
-    bool isAltTabVisible() const;
-
-    // Workspace Overview
-    void showOverview();
-    void hideOverview();
-    void overviewNavigate(int dx, int dy);
-    void overviewSelect();
-    bool isOverviewVisible() const;
-
-    // App Launcher
-    void showLauncher();
-    void hideLauncher();
-    void launcherInput(char key);
-    void launcherBackspace();
-    void launcherNavigate(int dy);
-    void launcherSelect();
-    bool isLauncherVisible() const;
+    // (Alt-tab, workspace overview and app launcher overlays are owned by
+    // their plugins: AltTabPlugin, OverviewPlugin, AppLauncherPlugin.)
 
     // Plugin management
     PluginManager& pluginManager() { return m_pluginManager; }
@@ -240,10 +217,8 @@ private:
     // Text Input (IME)
     TextInputManager* m_textInputManager = nullptr;
 
-    // Overlays
-    // Overlay UI state machines (alt-tab, overview, launcher), extracted
-    // from Server in phase 3. Public overlay methods below forward to it.
-    OverlayController m_overlays;
+    // Overlay UIs (alt-tab, overview, launcher) are plugin-owned:
+    // AltTabPlugin, OverviewPlugin, AppLauncherPlugin.
     PluginManager m_pluginManager;
     
     // IPC server for external tool communication

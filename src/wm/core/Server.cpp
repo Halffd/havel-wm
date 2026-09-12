@@ -26,31 +26,6 @@ Server::Server() {
         m_workspaces[i] = std::make_unique<Workspace>(i);
     }
 
-    // Wire overlay controller callbacks into the rest of the compositor
-    m_overlays.collectWindows = [this]() {
-        std::vector<OverlayController::WindowDesc> result;
-        for (const auto& win : m_windowManager.getAllWindows()) {
-            OverlayController::WindowDesc desc;
-            desc.id = win.id;
-            desc.appId = win.appId;
-            desc.title = win.title;
-            desc.isFocused = hasFlag(win.flags, WindowFlags::Focused);
-            result.push_back(std::move(desc));
-        }
-        return result;
-    };
-    m_overlays.focusWindow = [this](uint64_t windowId) {
-        m_coreWindowManager.focusWindow(windowId);
-    };
-    m_overlays.switchWorkspace = [this](uint32_t wsId) {
-        setActiveWorkspace(wsId);
-    };
-    m_overlays.spawnApp = [](const std::string& exec) {
-        if (g_server_spawn) {
-            g_server_spawn(exec.c_str());
-        }
-    };
-
     // Attach the shell/IPC window projection to the real window store
     // and route its mutations back into the compositor (phase 4).
     WindowManager::ServerActions actions;
@@ -1005,98 +980,6 @@ void Server::toggleGrayscale() {
 
 void Server::toggleNegative() {
     m_displaySettings.toggleNegative();
-}
-
-// ============================================================================
-// Alt-Tab Overlay (forwards to OverlayController, extracted phase 3)
-// ============================================================================
-
-void Server::showAltTab(bool reverse) {
-    m_overlays.showAltTab(reverse);
-}
-
-void Server::hideAltTab() {
-    m_overlays.hideAltTab();
-}
-
-void Server::altTabNext() {
-    m_overlays.altTabNext();
-}
-
-void Server::altTabPrevious() {
-    m_overlays.altTabPrevious();
-}
-
-void Server::altTabSelect() {
-    m_overlays.altTabSelect();
-}
-
-void Server::altTabCancel() {
-    m_overlays.altTabCancel();
-}
-
-bool Server::isAltTabVisible() const {
-    return m_overlays.isAltTabVisible();
-}
-
-// ============================================================================
-// Workspace Overview (forwards to OverlayController)
-// ============================================================================
-
-void Server::showOverview() {
-    m_overlays.showOverview(m_activeWorkspace, WORKSPACE_COUNT);
-    // Overview v1: the overlay itself provides the workspace switching UI
-    // (grid layout of live views pending scene graph extension)
-    LOG_INFO("Overview shown (grid layout pending scene graph extension)");
-}
-
-void Server::hideOverview() {
-    m_overlays.hideOverview();
-    LOG_INFO("Overview hidden");
-}
-
-void Server::overviewNavigate(int dx, int dy) {
-    m_overlays.overviewNavigate(dx, dy);
-}
-
-void Server::overviewSelect() {
-    m_overlays.overviewSelect();
-}
-
-bool Server::isOverviewVisible() const {
-    return m_overlays.isOverviewVisible();
-}
-
-// ============================================================================
-// App Launcher (forwards to OverlayController)
-// ============================================================================
-
-void Server::showLauncher() {
-    m_overlays.showLauncher();
-}
-
-void Server::hideLauncher() {
-    m_overlays.hideLauncher();
-}
-
-void Server::launcherInput(char key) {
-    m_overlays.launcherInput(key);
-}
-
-void Server::launcherBackspace() {
-    m_overlays.launcherBackspace();
-}
-
-void Server::launcherNavigate(int dy) {
-    m_overlays.launcherNavigate(dy);
-}
-
-void Server::launcherSelect() {
-    m_overlays.launcherSelect();
-}
-
-bool Server::isLauncherVisible() const {
-    return m_overlays.isLauncherVisible();
 }
 
 // ============================================================================

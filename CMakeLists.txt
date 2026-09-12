@@ -144,7 +144,6 @@ set(WM_CORE_SOURCES
     src/wm/core/Focus.cpp
     src/wm/core/Server.cpp
     src/wm/core/DisplaySettings.cpp
-    src/wm/core/OverlayController.cpp
     src/wm/core/bridge.cpp
     src/wm/core/Animation.cpp
     src/wm/core/Animator.cpp
@@ -188,9 +187,6 @@ set(WM_CORE_SOURCES
     src/wm/input/ComboManager.cpp
     src/wm/input/ComboManager.hpp
     src/wm/overlay/OverlayScene.cpp
-    src/wm/overlay/AltTabOverlay.cpp
-    src/wm/overlay/OverviewOverlay.cpp
-    src/wm/overlay/AppLauncherOverlay.cpp
     src/wm/desktop/DesktopManager.cpp
     src/wm/desktop/DesktopManager.hpp
     src/wm/desktop/NASAWallpaper.cpp
