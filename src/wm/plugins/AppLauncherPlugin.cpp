@@ -6,6 +6,7 @@
 #include <wm/render/OverlayRenderer.hpp>
 #include <wm/bridge.h>
 #include <input/TextInputManager.hpp>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -78,7 +79,7 @@ public:
         constexpr uint32_t MOD_LOGO = 1 << 6;
 
         // Meta+Space toggles launcher
-        if (event.pressed && (event.modifiers & MOD_LOGO) && event.keycode == 57) {
+        if (event.pressed && (event.modifiers & MOD_LOGO) && event.keysym == XKB_KEY_space) {
             toggleLauncher();
             return true;
         }
@@ -86,24 +87,25 @@ public:
         if (!m_visible) return false;
         if (!event.pressed) return false;
 
-        switch (event.keycode) {
-            case 111:  // Escape - close
+        switch (event.keysym) {
+            case XKB_KEY_Escape:  // Escape - close
                 hideLauncher();
                 return true;
 
-            case 28:   // Enter - launch
+            case XKB_KEY_Return:  // Enter - launch
+            case XKB_KEY_KP_Enter:
                 launchSelected();
                 return true;
 
-            case 103:  // Up
+            case XKB_KEY_Up:  // Up
                 navigate(-1);
                 return true;
 
-            case 108:  // Down
+            case XKB_KEY_Down:  // Down
                 navigate(1);
                 return true;
 
-            case 14:   // Backspace
+            case XKB_KEY_BackSpace:  // Backspace
                 handleBackspace();
                 return true;
         }
@@ -118,23 +120,23 @@ public:
 
         // Handle special keys via keysym
         switch (event.keysym) {
-            case 0xFF09:  // Tab
+            case XKB_KEY_Tab:  // Tab
                 handleCharInput("\t");
                 return true;
-            case 0xFF0D:  // Enter
+            case XKB_KEY_Return:  // Enter
                 handleCharInput("\n");
                 return true;
-            case 0xFF1B:  // Escape - close launcher
+            case XKB_KEY_Escape:  // Escape - close launcher
                 if (m_visible) {
                     toggleLauncher();
                 }
                 return true;
 
             // Handle additional special keysyms
-            case 0xFF08:  // Backspace
+            case XKB_KEY_BackSpace:  // Backspace
                 handleBackspace();
                 return true;
-            case 0xFFFF:  // Delete
+            case XKB_KEY_Delete:  // Delete
                 // Could implement delete handling
                 return true;
         }

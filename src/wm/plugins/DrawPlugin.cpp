@@ -4,6 +4,7 @@
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 #include <vector>
 #include <cstdint>
@@ -102,13 +103,13 @@ public:
 
     bool onKey(const KeyEvent& event) override {
         constexpr uint32_t MOD_LOGO = 1 << 6;
-        constexpr uint32_t MOD_SHIFT = 1 << 1;
+        constexpr uint32_t MOD_SHIFT = 1 << 0;
 
         if (!event.pressed) return false;
         if (!(event.modifiers & MOD_LOGO)) return false;
 
         // Toggle draw mode: Meta+Shift+D
-        if ((event.modifiers & MOD_SHIFT) && event.keycode == 32) {  // D
+        if ((event.modifiers & MOD_SHIFT) && event.keysym == XKB_KEY_d) {
             toggleDrawMode();
             return true;
         }
@@ -117,44 +118,44 @@ public:
         if (!m_enabled) return false;
 
         // Change color: Meta+Shift+C
-        if ((event.modifiers & MOD_SHIFT) && event.keycode == 46) {  // C
+        if ((event.modifiers & MOD_SHIFT) && event.keysym == XKB_KEY_c) {
             cycleColor();
             return true;
         }
 
         // Change width: Meta+Shift+W
-        if ((event.modifiers & MOD_SHIFT) && event.keycode == 47) {  // W
+        if ((event.modifiers & MOD_SHIFT) && event.keysym == XKB_KEY_w) {
             cycleWidth();
             return true;
         }
 
         // Undo: Meta+Shift+Z
-        if ((event.modifiers & MOD_SHIFT) && event.keycode == 44) {  // Z
+        if ((event.modifiers & MOD_SHIFT) && event.keysym == XKB_KEY_z) {
             undo();
             return true;
         }
 
         // Redo: Meta+Shift+Y
-        if ((event.modifiers & MOD_SHIFT) && event.keycode == 45) {  // Y
+        if ((event.modifiers & MOD_SHIFT) && event.keysym == XKB_KEY_y) {
             redo();
             return true;
         }
 
         // Clear all: Meta+Shift+X
-        if ((event.modifiers & MOD_SHIFT) && event.keycode == 53) {  // X
+        if ((event.modifiers & MOD_SHIFT) && event.keysym == XKB_KEY_x) {
             clearAll();
             return true;
         }
 
         // Toggle fade: Meta+Shift+F
-        if ((event.modifiers & MOD_SHIFT) && event.keycode == 48) {  // F
+        if ((event.modifiers & MOD_SHIFT) && event.keysym == XKB_KEY_f) {
             m_fadeEnabled = !m_fadeEnabled;
             printf("[DrawPlugin] Fade %s\n", m_fadeEnabled ? "enabled" : "disabled");
             return true;
         }
 
         // Exit draw mode: Escape
-        if (event.keycode == 111) {
+        if (event.keysym == XKB_KEY_Escape) {
             setDrawMode(false);
             return true;
         }

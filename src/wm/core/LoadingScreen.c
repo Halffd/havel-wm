@@ -4,6 +4,8 @@
 #include <Logger.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_output.h>
+#include <wayland-util.h>
+#include <wayland-server-core.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -29,6 +31,7 @@ static struct {
     
     // Timer
     struct wl_event_source* timer_source;
+    struct wl_event_loop* event_loop;
     struct wlr_scene* scene;
 } g_loading_screen = {0};
 
@@ -70,10 +73,15 @@ static int get_random_tip_index(void) {
     return (int)(seed % (uint32_t)tip_count);
 }
 
-void loading_screen_init(struct wlr_scene_tree* parent) {
+void loading_screen_init(struct wlr_scene_tree* parent, struct wl_event_loop* loop) {
     if (!parent) {
         LOG_ERROR("[LoadingScreen] No parent scene tree provided");
         return;
+    }
+
+    g_loading_screen.event_loop = loop;
+    if (!loop) {
+        LOG_WARN("[LoadingScreen] No event loop - auto-hide timer disabled");
     }
     
     LOG_INFO("[LoadingScreen] Initializing...");
@@ -215,8 +223,23 @@ void loading_screen_set_config(struct LoadingScreenConfig* config) {
     memcpy(&g_loading_screen.config, config, sizeof(struct LoadingScreenConfig));
 }
 
+static int loading_screen_timer_cb(void* data) {
+    (void)data;
+    if (g_loading_screen.visible) {
+        LOG_INFO("[LoadingScreen] Auto-hide timeout reached");
+        loading_screen_hide();
+    }
+    // One-shot: source removed in loading_screen_hide/stop_timer
+    return 0;
+}
+
 void loading_screen_start_timer(void) {
     if (g_loading_screen.config.timeout_ms <= 0) {
+        return;
+    }
+    
+    if (!g_loading_screen.event_loop) {
+        LOG_WARN("[LoadingScreen] No event loop, cannot start auto-hide timer");
         return;
     }
     
@@ -224,22 +247,24 @@ void loading_screen_start_timer(void) {
         loading_screen_stop_timer();
     }
     
-    // Note: In real implementation, would use wl_event_loop_add_timer
-    // For now, this is a placeholder
+    g_loading_screen.timer_source = wl_event_loop_add_timer(
+        g_loading_screen.event_loop, loading_screen_timer_cb, NULL);
+    if (!g_loading_screen.timer_source) {
+        LOG_ERROR("[LoadingScreen] Failed to create auto-hide timer");
+        return;
+    }
+    wl_event_source_timer_update(g_loading_screen.timer_source,
+                                 g_loading_screen.config.timeout_ms);
+    
     LOG_DEBUG("[LoadingScreen] Timer started for %dms", 
               g_loading_screen.config.timeout_ms);
 }
 
 void loading_screen_stop_timer(void) {
     if (g_loading_screen.timer_source) {
-        // wl_event_source_remove(g_loading_screen.timer_source);
+        wl_event_source_remove(g_loading_screen.timer_source);
         g_loading_screen.timer_source = NULL;
     }
-}
-
-void loading_screen_update(void) {
-    // This would be called per-frame to update any animations
-    // For now, it's a placeholder
 }
 
 void loading_screen_destroy(void) {

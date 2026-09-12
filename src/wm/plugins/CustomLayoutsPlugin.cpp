@@ -3,6 +3,7 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 #include <vector>
 #include <cmath>
@@ -56,38 +57,39 @@ public:
 
     bool onKey(const KeyEvent& event) override {
         constexpr uint32_t MOD_LOGO = 1 << 6;
-        constexpr uint32_t MOD_SHIFT = 1 << 1;
+        constexpr uint32_t MOD_SHIFT = 1 << 0;
 
         if (!event.pressed) return false;
         if (!(event.modifiers & MOD_LOGO)) return false;
 
         // Layout switching
-        switch (event.keycode) {
-            case 20:  // T - Master-stack
+        switch (event.keysym) {
+            case XKB_KEY_t:  // T - Master-stack
                 setLayout(Layout::MASTER_STACK);
                 return true;
 
-            case 36:  // H - Horizontal
+            case XKB_KEY_h:  // H - Horizontal
                 setLayout(Layout::HORIZONTAL);
                 return true;
 
-            case 47:  // V - Vertical
+            case XKB_KEY_v:  // V - Vertical
                 setLayout(Layout::VERTICAL);
                 return true;
 
-            case 43:  // G - Grid
+            case XKB_KEY_g:  // G - Grid
                 setLayout(Layout::GRID);
                 return true;
 
-            case 50:  // M - Monocle
+            case XKB_KEY_m:  // M - Monocle
                 setLayout(Layout::MONOCLE);
                 return true;
 
-            case 28:  // Enter - Swap master with current
+            case XKB_KEY_Return:  // Enter - Swap master with current
+            case XKB_KEY_KP_Enter:
                 swapMaster();
                 return true;
 
-            case 38:  // L - Increase master count
+            case XKB_KEY_l:  // L - Increase master count
                 if (event.modifiers & MOD_SHIFT) {
                     decreaseMasterCount();
                 } else {

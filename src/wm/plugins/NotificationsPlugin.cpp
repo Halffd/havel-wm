@@ -5,6 +5,7 @@
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
 #include <wm/core/NotificationDaemon.hpp>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -185,13 +186,13 @@ public:
 
     bool onKey(const KeyEvent& event) override {
         constexpr uint32_t MOD_LOGO = 1 << 6;
-        constexpr uint32_t MOD_SHIFT = 1 << 1;
+        constexpr uint32_t MOD_SHIFT = 1 << 0;
 
         if (!event.pressed) return false;
         if (!(event.modifiers & MOD_LOGO)) return false;
 
         // Meta+N shows test notification
-        if (event.keycode == 39) {  // N
+        if (event.keysym == XKB_KEY_n) {
             if (event.modifiers & MOD_SHIFT) {
                 clearAll();
             } else {

@@ -1865,6 +1865,25 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
     havel_cpp_process_combo_key(server->cpp_server, event->keycode, false,
                                  keyboard->keyboard->modifiers.depressed);
 
+    // Forward release to C++ layer too (push-to-zoom end, alt-tab
+    // select-on-alt-release depend on it). Releases are never "consumed"
+    // for seat purposes: the matching press was already swallowed, so the
+    // client never saw a press and must not see an orphan release.
+    const uint32_t keycode = event->keycode + 8;
+    xkb_keysym_t keysym = 0;
+    char key_char = 0;
+    char utf8_buffer[8] = {0};
+    if (keyboard->xkb_state) {
+        keysym = xkb_state_key_get_one_sym(keyboard->xkb_state, keycode);
+        int len = xkb_keysym_to_utf8(keysym, utf8_buffer, sizeof(utf8_buffer));
+        if (len == 1 && utf8_buffer[0] >= 32 && utf8_buffer[0] <= 126) {
+            key_char = utf8_buffer[0];
+        }
+    }
+    (void)havel_cpp_on_key(server->cpp_server, keycode, false,
+                            keyboard->keyboard->modifiers.depressed,
+                            keysym, key_char, utf8_buffer);
+
     wlr_seat_keyboard_notify_key(server->seat, event->time_msec, event->keycode, event->state);
 }
 
@@ -2361,7 +2380,7 @@ havel_wlr_server_t* havel_wlr_create(void) {
     LOG_INFO("[Overlay] Overlay layer created (ENABLED for testing)");
 
     // Initialize loading screen (before outputs are created)
-    loading_screen_init(server->overlay_layer);
+    loading_screen_init(server->overlay_layer, wl_display_get_event_loop(server->display));
     
     // Show loading screen
     if (loading_screen_get_config()->enabled) {

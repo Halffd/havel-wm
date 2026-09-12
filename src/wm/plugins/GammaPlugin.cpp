@@ -3,6 +3,7 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 #include <cmath>
 
@@ -60,37 +61,37 @@ public:
         if (!(event.modifiers & MOD_LOGO)) return false;
         
         // Gamma adjustment
-        if (event.keycode == 104) {  // PageUp
+        if (event.keysym == XKB_KEY_Page_Up) {
             adjustGamma(+0.1f);
             return true;
         }
-        if (event.keycode == 105) {  // PageDown
+        if (event.keysym == XKB_KEY_Page_Down) {
             adjustGamma(-0.1f);
             return true;
         }
         
         // Temperature adjustment
-        if (event.keycode == 102) {  // Home
+        if (event.keysym == XKB_KEY_Home) {
             adjustTemperature(+100);
             return true;
         }
-        if (event.keycode == 107) {  // End
+        if (event.keysym == XKB_KEY_End) {
             adjustTemperature(-100);
             return true;
         }
         
         // Brightness adjustment
-        if (event.keycode == 110) {  // Insert
+        if (event.keysym == XKB_KEY_Insert) {
             adjustBrightness(+0.1f);
             return true;
         }
-        if (event.keycode == 111) {  // Delete
+        if (event.keysym == XKB_KEY_Delete) {
             adjustBrightness(-0.1f);
             return true;
         }
         
         // Night mode toggle (Meta+N)
-        if (event.keycode == 39) {  // N
+        if (event.keysym == XKB_KEY_n) {
             toggleNightMode();
             return true;
         }

@@ -5,6 +5,7 @@
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
 #include <wm/View.hpp>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -116,7 +117,7 @@ public:
         constexpr uint32_t MOD_LOGO = 1 << 6;
 
         // Meta+W toggles overview
-        if (event.pressed && (event.modifiers & MOD_LOGO) && event.keycode == 32) {
+        if (event.pressed && (event.modifiers & MOD_LOGO) && event.keysym == XKB_KEY_w) {
             toggle();
             return true;
         }
@@ -124,32 +125,33 @@ public:
         if (!m_visible) return false;
         if (!event.pressed) return false;
 
-        switch (event.keycode) {
-            case 111:  // Escape - cancel
+        switch (event.keysym) {
+            case XKB_KEY_Escape:  // Escape - cancel
                 hide();
                 return true;
 
-            case 28:   // Enter - select
+            case XKB_KEY_Return:  // Enter - select
+            case XKB_KEY_KP_Enter:
                 select();
                 return true;
 
-            case 103:  // Up
+            case XKB_KEY_Up:  // Up
                 navigate(0, -1);
                 return true;
 
-            case 108:  // Down
+            case XKB_KEY_Down:  // Down
                 navigate(0, 1);
                 return true;
 
-            case 105:  // Left
+            case XKB_KEY_Left:  // Left
                 navigate(-1, 0);
                 return true;
 
-            case 106:  // Right
+            case XKB_KEY_Right:  // Right
                 navigate(1, 0);
                 return true;
 
-            case 57:   // Space - toggle between workspace and window selection
+            case XKB_KEY_space:  // Space - toggle between workspace and window selection
                 toggleSelectionLevel();
                 return true;
         }

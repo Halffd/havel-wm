@@ -4,6 +4,7 @@
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 #include <cstring>
 
@@ -53,7 +54,7 @@ public:
         if (!event.pressed) return false;
         
         // Meta+Z toggles window snap
-        if ((event.modifiers & MOD_LOGO) && event.keycode == 36) {
+        if ((event.modifiers & MOD_LOGO) && event.keysym == XKB_KEY_z) {
             m_enabled = !m_enabled;
             printf("[WindowSnap] %s\n", m_enabled ? "enabled" : "disabled");
             return true;
@@ -64,17 +65,17 @@ public:
             View* view = m_api->getFocusedView();
             if (!view) return false;
             
-            switch (event.keycode) {
-                case 105:  // Meta+Right - Snap right half
+            switch (event.keysym) {
+                case XKB_KEY_Right:  // Meta+Right - Snap right half
                     snapRight(view);
                     return true;
-                case 106:  // Meta+Left - Snap left half
+                case XKB_KEY_Left:  // Meta+Left - Snap left half
                     snapLeft(view);
                     return true;
-                case 103:  // Meta+Up - Maximize
+                case XKB_KEY_Up:  // Meta+Up - Maximize
                     snapMaximize(view);
                     return true;
-                case 108:  // Meta+Down - Restore
+                case XKB_KEY_Down:  // Meta+Down - Restore
                     snapRestore(view);
                     return true;
             }

@@ -7,6 +7,7 @@
 #include "../input/ComboManager.hpp"
 #include "../desktop/DesktopManager.hpp"
 #include <Logger.h>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdint>
 #include <unistd.h>
 #include <string>
@@ -474,7 +475,7 @@ void havel_cpp_init_desktop(struct havel_cpp_server* server) {
     server->server->setDesktopManager(&desktopManager);
 
     // Bind logout shortcut (Ctrl+Alt+Delete)
-    desktopManager.bindLogout(111, (1 << 1) | (1 << 2));  // Ctrl+Alt+Delete
+    desktopManager.bindLogout(XKB_KEY_Delete, (1 << 0) | (1 << 2) | (1 << 3));  // Shift=bit0, Ctrl=bit2, Alt=bit3
 
     LOG_INFO("[Bridge] Desktop manager initialized");
 }

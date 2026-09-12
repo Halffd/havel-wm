@@ -1,6 +1,7 @@
 // Example plugin - demonstrates plugin system capabilities
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 
 namespace havel {
@@ -52,7 +53,7 @@ public:
 
         if (keyEvent.pressed &&
             (keyEvent.modifiers & MOD_LOGO) &&
-            keyEvent.keycode == 39) {  // X key
+            keyEvent.keysym == XKB_KEY_x) {
 
             printf("[ExamplePlugin] Meta+X consumed by plugin!\n");
 

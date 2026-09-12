@@ -3,6 +3,7 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 
 namespace havel {
@@ -67,7 +68,7 @@ public:
 
     bool onKey(const KeyEvent& event) override {
         constexpr uint32_t MOD_LOGO = 1 << 6;
-        constexpr uint32_t MOD_SHIFT = 1 << 1;
+        constexpr uint32_t MOD_SHIFT = 1 << 0;
         constexpr uint32_t MOD_CTRL = 1 << 2;
 
         if (!(event.modifiers & MOD_LOGO)) return false;
@@ -77,37 +78,37 @@ public:
         int targetOutput = (event.modifiers & MOD_SHIFT) ? 1 : 0;
         const char* targetName = targetOutput == 0 ? "primary" : "secondary";
 
-        // Zoom in: Plus key (keycode 21) - PROPORTIONAL
-        if (event.keycode == 21 && event.pressed) {
+        // Zoom in: Plus key - PROPORTIONAL
+        if (event.keysym == XKB_KEY_plus && event.pressed) {
             zoomInProportional(targetOutput);
-            printf("[ZoomPlugin] Zoom %s: %.2f\n", 
+            printf("[ZoomPlugin] Zoom %s: %.2f\n",
                    targetName, m_zoomLevels[targetOutput]);
             return true;
         }
 
-        // Zoom out: Minus key (keycode 20) - PROPORTIONAL
-        if (event.keycode == 20 && event.pressed) {
+        // Zoom out: Minus key - PROPORTIONAL
+        if (event.keysym == XKB_KEY_minus && event.pressed) {
             zoomOutProportional(targetOutput);
-            printf("[ZoomPlugin] Zoom %s: %.2f\n", 
+            printf("[ZoomPlugin] Zoom %s: %.2f\n",
                    targetName, m_zoomLevels[targetOutput]);
             return true;
         }
 
-        // Reset zoom: Zero key (keycode 11)
-        if (event.keycode == 11 && event.pressed) {
+        // Reset zoom: Zero key
+        if (event.keysym == XKB_KEY_0 && event.pressed) {
             resetZoom(targetOutput);
             printf("[ZoomPlugin] Zoom %s reset to 1.0\n", targetName);
             return true;
         }
 
-        // Toggle zoom: Z key (keycode 44)
-        if (event.keycode == 44 && event.pressed) {
+        // Toggle zoom: Z key
+        if (event.keysym == XKB_KEY_z && event.pressed) {
             toggleZoom(targetOutput);
             return true;
         }
 
-        // Push-to-zoom: Space key (keycode 57)
-        if (event.keycode == 57) {
+        // Push-to-zoom: Space key
+        if (event.keysym == XKB_KEY_space) {
             if (event.pressed) {
                 pushZoomStart(targetOutput);
             } else {

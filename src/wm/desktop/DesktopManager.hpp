@@ -235,7 +235,7 @@ public:
     bool isShowingDesktop() const { return m_showingDesktop; }
     
     // Logout bindings
-    void bindLogout(uint32_t keycode, uint32_t modifiers);
+    void bindLogout(uint32_t keysym, uint32_t modifiers);
     void triggerLogout();
     
     // Rendering
@@ -249,7 +249,7 @@ public:
     void processMouseMove(int x, int y);
     void processMouseButton(int button, bool pressed, int x, int y);
     void processMouseWheel(int delta, int x, int y);
-    void processKeyDown(uint32_t keycode, uint32_t modifiers);
+    void processKeyDown(uint32_t keysym, uint32_t modifiers);
     
     // Callbacks
     using IconCallback = std::function<void(DesktopIcon*)>;
@@ -302,9 +302,9 @@ private:
     };
     std::vector<TaskbarItem> m_taskbarItems;
     
-    // Logout bindings
+    // Logout bindings (keysym-based)
     struct LogoutBinding {
-        uint32_t keycode;
+        uint32_t keysym;
         uint32_t modifiers;
     };
     std::vector<LogoutBinding> m_logoutBindings;

@@ -6,6 +6,7 @@
 #include <wm/render/OverlayRenderer.hpp>
 #include <wm/render/AppIconLoader.hpp>
 #include <Logger.h>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -597,13 +598,13 @@ void DesktopManager::restoreWindows() {
     // Would signal window manager to restore windows
 }
 
-void DesktopManager::bindLogout(uint32_t keycode, uint32_t modifiers) {
+void DesktopManager::bindLogout(uint32_t keysym, uint32_t modifiers) {
     LogoutBinding binding;
-    binding.keycode = keycode;
+    binding.keysym = keysym;
     binding.modifiers = modifiers;
     m_logoutBindings.push_back(binding);
     
-    LOG_INFO("[DesktopManager] Logout binding: key=%u, mods=%u", keycode, modifiers);
+    LOG_INFO("[DesktopManager] Logout binding: keysym=0x%x, mods=%u", keysym, modifiers);
 }
 
 void DesktopManager::triggerLogout() {
@@ -795,17 +796,17 @@ void DesktopManager::processMouseWheel(int delta, int x, int y) {
     (void)y;
 }
 
-void DesktopManager::processKeyDown(uint32_t keycode, uint32_t modifiers) {
+void DesktopManager::processKeyDown(uint32_t keysym, uint32_t modifiers) {
     // Check logout bindings
     for (const auto& binding : m_logoutBindings) {
-        if (keycode == binding.keycode && modifiers == binding.modifiers) {
+        if (keysym == binding.keysym && modifiers == binding.modifiers) {
             triggerLogout();
             return;
         }
     }
     
     // Desktop shortcuts
-    if (keycode == 39 && (modifiers & (1 << 6))) {  // Meta+D
+    if (keysym == XKB_KEY_d && (modifiers & (1 << 6))) {  // Meta+D
         // Show desktop
         if (m_showingDesktop) {
             restoreWindows();

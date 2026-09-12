@@ -11,6 +11,7 @@ extern "C" {
 
 // Forward declare wlroots types (opaque pointers)
 struct wlr_scene_tree;
+struct wl_event_loop;
 
 // Loading screen configuration
 struct LoadingScreenConfig {
@@ -21,8 +22,8 @@ struct LoadingScreenConfig {
     bool show_tips;
 };
 
-// Initialize loading screen
-void loading_screen_init(struct wlr_scene_tree* parent);
+// Initialize loading screen. The event loop owns the auto-hide timer.
+void loading_screen_init(struct wlr_scene_tree* parent, struct wl_event_loop* loop);
 
 // Show loading screen
 void loading_screen_show(void);
@@ -49,9 +50,6 @@ void loading_screen_set_config(struct LoadingScreenConfig* config);
 // Auto-hide timer
 void loading_screen_start_timer(void);
 void loading_screen_stop_timer(void);
-
-// Render/update (called per-frame)
-void loading_screen_update(void);
 
 // Cleanup
 void loading_screen_destroy(void);

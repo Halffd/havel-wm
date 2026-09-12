@@ -7,6 +7,7 @@
 #include <wm/render/OverlayRenderer.hpp>
 #include <wm/render/AppIconLoader.hpp>
 #include <wm/View.hpp>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
@@ -105,7 +106,7 @@ public:
         }
         
         // Alt+Tab or Alt+Shift+Tab
-    if (alt && event.keycode == 23 && event.pressed) {
+    if (alt && event.keysym == XKB_KEY_Tab && event.pressed) {
       if (!m_visible) {
         m_reverse = shift;
         show();
@@ -122,12 +123,13 @@ public:
         if (!m_visible) return false;
         if (!event.pressed) return false;
         
-  switch (event.keycode) {
-    case 111: // Escape
+  switch (event.keysym) {
+    case XKB_KEY_Escape: // Escape
       hide();
       return true;
 
-    case 28: // Enter
+    case XKB_KEY_Return: // Enter
+    case XKB_KEY_KP_Enter:
       select();
                 return true;
         }

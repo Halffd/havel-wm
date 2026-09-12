@@ -5,6 +5,7 @@
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/plugins/PluginConfig.hpp>
 #include <wm/render/OverlayRenderer.hpp>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 #include <vector>
 #include <cmath>
@@ -103,7 +104,7 @@ public:
         if (!m_active) {
             // Meta+S to toggle scale overview
             constexpr uint32_t MOD_LOGO = 1 << 6;
-            if (event.pressed && (event.modifiers & MOD_LOGO) && event.keycode == 31) {
+            if (event.pressed && (event.modifiers & MOD_LOGO) && event.keysym == XKB_KEY_s) {
                 beginScale();
                 return true;
             }
@@ -113,44 +114,45 @@ public:
         // Navigation while scale is active
         if (!event.pressed) return false;
 
-        switch (event.keycode) {
-            case 111:  // Escape - cancel
+        switch (event.keysym) {
+            case XKB_KEY_Escape:  // Escape - cancel
                 endScale();
                 return true;
 
-            case 28:   // Enter - select
+            case XKB_KEY_Return:  // Enter - select
+            case XKB_KEY_KP_Enter:
                 selectFocused();
                 return true;
 
-            case 103:  // Up arrow
+            case XKB_KEY_Up:  // Up arrow
                 moveSelection(0, -1);
                 return true;
 
-            case 108:  // Down arrow
+            case XKB_KEY_Down:  // Down arrow
                 moveSelection(0, 1);
                 return true;
 
-            case 105:  // Left arrow
+            case XKB_KEY_Left:  // Left arrow
                 moveSelection(-1, 0);
                 return true;
 
-            case 106:  // Right arrow
+            case XKB_KEY_Right:  // Right arrow
                 moveSelection(1, 0);
                 return true;
 
-            case 35:   // H - left
+            case XKB_KEY_h:  // H - left
                 moveSelection(-1, 0);
                 return true;
 
-            case 38:   // L - right
+            case XKB_KEY_l:  // L - right
                 moveSelection(1, 0);
                 return true;
 
-            case 30:   // J - down
+            case XKB_KEY_j:  // J - down
                 moveSelection(0, 1);
                 return true;
 
-            case 31:   // K - up
+            case XKB_KEY_k:  // K - up
                 moveSelection(0, -1);
                 return true;
         }

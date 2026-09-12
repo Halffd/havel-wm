@@ -9,10 +9,13 @@ namespace havel {
 
 /**
  * Keybinding entry
+ *
+ * Keys are matched by XKB keysym (layout-aware), not evdev keycode.
+ * Keysyms come from xkbcommon-keysyms.h (XKB_KEY_*).
  */
 struct Keybinding {
     uint32_t modifiers = 0;  // Mod1=Alt, Mod4=Meta, Shift, Ctrl
-    uint32_t keycode = 0;
+    uint32_t keysym = 0;     // XKB keysym this binding triggers on
     std::string name;
     std::function<void()> callback;
     bool consumed = false;
@@ -32,14 +35,14 @@ public:
     ~KeybindingManager();
     
     // Register a keybinding
-    bool registerKeybinding(uint32_t modifiers, uint32_t keycode, 
+    bool registerKeybinding(uint32_t modifiers, uint32_t keysym,
                             const char* name, std::function<void()> callback);
     
     // Unregister a keybinding
     void unregisterKeybinding(const char* name);
     
     // Handle key event - returns true if consumed
-    bool handleKey(uint32_t keycode, bool pressed, uint32_t modifiers);
+    bool handleKey(uint32_t keysym, bool pressed, uint32_t modifiers);
     
     // List all registered bindings (for debugging)
     void listBindings() const;

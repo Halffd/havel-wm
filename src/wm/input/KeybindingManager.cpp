@@ -9,11 +9,11 @@ KeybindingManager::KeybindingManager() = default;
 
 KeybindingManager::~KeybindingManager() = default;
 
-bool KeybindingManager::registerKeybinding(uint32_t modifiers, uint32_t keycode,
+bool KeybindingManager::registerKeybinding(uint32_t modifiers, uint32_t keysym,
                                             const char* name, std::function<void()> callback) {
     // Check for duplicates
     for (const auto& binding : m_bindings) {
-        if (binding.modifiers == modifiers && binding.keycode == keycode) {
+        if (binding.modifiers == modifiers && binding.keysym == keysym) {
             LOG_WARN("[Keybinding] Conflict: %s already bound to %s",
                      name, binding.name.c_str());
             return false;
@@ -22,14 +22,14 @@ bool KeybindingManager::registerKeybinding(uint32_t modifiers, uint32_t keycode,
     
     Keybinding binding;
     binding.modifiers = modifiers;
-    binding.keycode = keycode;
+    binding.keysym = keysym;
     binding.name = name;
     binding.callback = callback;
     binding.consumed = false;
     
     m_bindings.push_back(std::move(binding));
-    LOG_DEBUG("[Keybinding] Registered: %s (mod=0x%x, key=%u)", 
-              name, modifiers, keycode);
+    LOG_DEBUG("[Keybinding] Registered: %s (mod=0x%x, keysym=0x%x)", 
+              name, modifiers, keysym);
     return true;
 }
 
@@ -43,14 +43,14 @@ void KeybindingManager::unregisterKeybinding(const char* name) {
     }
 }
 
-bool KeybindingManager::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers) {
+bool KeybindingManager::handleKey(uint32_t keysym, bool pressed, uint32_t modifiers) {
     if (!pressed) return false;
 
-    LOG_INFO("[Keybinding] Check: keycode=%u mods=0x%x (bindings=%zu)", keycode, modifiers, m_bindings.size());
+    LOG_DEBUG("[Keybinding] Check: keysym=0x%x mods=0x%x (bindings=%zu)", keysym, modifiers, m_bindings.size());
     
     for (auto& binding : m_bindings) {
-        if (binding.modifiers == modifiers && binding.keycode == keycode) {
-            LOG_INFO("[Keybinding] TRIGGERED: %s (mod=0x%x key=%u)", binding.name.c_str(), binding.modifiers, binding.keycode);
+        if (binding.modifiers == modifiers && binding.keysym == keysym) {
+            LOG_INFO("[Keybinding] TRIGGERED: %s (mod=0x%x keysym=0x%x)", binding.name.c_str(), binding.modifiers, binding.keysym);
             binding.callback();
             return true;
         }
@@ -62,7 +62,7 @@ bool KeybindingManager::handleKey(uint32_t keycode, bool pressed, uint32_t modif
 void KeybindingManager::listBindings() const {
     printf("[KeybindingManager] Registered bindings (%zu):\n", m_bindings.size());
     for (const auto& b : m_bindings) {
-        printf("  - %s (mod=0x%x, key=%u)\n", b.name.c_str(), b.modifiers, b.keycode);
+        printf("  - %s (mod=0x%x, keysym=0x%x)\n", b.name.c_str(), b.modifiers, b.keysym);
     }
 }
 

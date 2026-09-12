@@ -4,6 +4,7 @@
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 #include <cstdint>
 #include <chrono>
@@ -106,7 +107,7 @@ public:
         if (!event.pressed) return false;
         
         // Meta+C toggles hot corners
-        if ((event.modifiers & MOD_LOGO) && event.keycode == 34) {
+        if ((event.modifiers & MOD_LOGO) && event.keysym == XKB_KEY_c) {
             m_enabled = !m_enabled;
             printf("[HotCorners] %s\n", m_enabled ? "enabled" : "disabled");
             return true;
@@ -114,11 +115,11 @@ public:
         
         // Manual trigger shortcuts
         if ((event.modifiers & MOD_LOGO)) {
-            switch (event.keycode) {
-                case 32:  // Meta+W - Trigger top-left (overview)
+            switch (event.keysym) {
+                case XKB_KEY_w:  // Meta+W - Trigger top-left (overview)
                     triggerAction(ACTION_OVERVIEW);
                     return true;
-                case 33:  // Meta+E - Trigger top-right (windows)
+                case XKB_KEY_e:  // Meta+E - Trigger top-right (windows)
                     triggerAction(ACTION_WINDOWS);
                     return true;
             }

@@ -7,6 +7,7 @@
 #include "scene/SceneGraph.hpp"
 #include <nlohmann/json.hpp>
 #include <Logger.h>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <algorithm>
 #include <cstdlib>
 #include <unistd.h>
@@ -430,14 +431,13 @@ void Server::onViewDestroyed(View* view) {
 }
 
 bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char, const char* utf8) {
-    if (!pressed) return false;
-
-    // First, check registered keybindings (highest priority)
-    if (m_keybindingManager.handleKey(keycode, pressed, modifiers)) {
+    // Keybindings are press-only
+    if (pressed && m_keybindingManager.handleKey(keysym, pressed, modifiers)) {
         return true;
     }
 
-    // Then, give plugins a chance to handle the key
+    // Then, give plugins a chance to handle the key (presses and releases;
+    // plugins that track press state need release events too)
     KeyEvent event;
     event.keycode = keycode;
     event.modifiers = modifiers;
@@ -1272,91 +1272,91 @@ void Server::registerKeybindings() {
 
     // Ctrl+Meta+F4: Quit compositor
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_CTRL | KeybindingManager::MOD_LOGO, 111,
+        KeybindingManager::MOD_CTRL | KeybindingManager::MOD_LOGO, XKB_KEY_F4,
         "quit", [this]() { quit(); }
     );
 
     // Ctrl+Meta+Return: Show rofi
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_CTRL | KeybindingManager::MOD_LOGO, 28,
+        KeybindingManager::MOD_CTRL | KeybindingManager::MOD_LOGO, XKB_KEY_Return,
         "show_rofi", [this]() { spawnRofi(); }
     );
 
     // Meta+Return: Spawn terminal
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, 28,
+        KeybindingManager::MOD_LOGO, XKB_KEY_Return,
         "spawn_terminal", [this]() { spawnTerminal(); }
     );
 
     // Meta+Tab: Workspace switch forward
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, 23,
+        KeybindingManager::MOD_LOGO, XKB_KEY_Tab,
         "workspace_next", [this]() { workspaceStep(false); }
     );
 
     // Meta+Shift+Tab: Workspace switch backward
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 23,
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, XKB_KEY_Tab,
         "workspace_prev", [this]() { workspaceStep(true); }
     );
 
     // Meta+PgUp: Workspace switch backward
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, 104,
+        KeybindingManager::MOD_LOGO, XKB_KEY_Page_Up,
         "workspace_prev_pgup", [this]() { workspaceStep(false); }
     );
 
     // Meta+PgDn: Workspace switch forward
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, 105,
+        KeybindingManager::MOD_LOGO, XKB_KEY_Page_Down,
         "workspace_next_pgdn", [this]() { workspaceStep(true); }
     );
 
     // Meta+W: Show workspace overview
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, 32,
+        KeybindingManager::MOD_LOGO, XKB_KEY_w,
         "show_overview", [this]() { showOverview(); }
     );
 
     // Meta+D: Show app launcher
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, 33,
+        KeybindingManager::MOD_LOGO, XKB_KEY_d,
         "show_launcher", [this]() { showLauncher(); }
     );
 
     // Meta+Y: Toggle tiling
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, 21,
+        KeybindingManager::MOD_LOGO, XKB_KEY_y,
         "toggle_tiling", [this]() { workspaceToggleTiling(); }
     );
 
     // Meta+G: Toggle grayscale
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, 34,
+        KeybindingManager::MOD_LOGO, XKB_KEY_g,
         "toggle_grayscale", [this]() { toggleGrayscale(); }
     );
 
     // Meta+N: Toggle negative
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, 39,
+        KeybindingManager::MOD_LOGO, XKB_KEY_n,
         "toggle_negative", [this]() { toggleNegative(); }
     );
 
     // Meta+Shift+Q: Close focused window
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 16,
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, XKB_KEY_q,
         "close_window", [this]() { closeFocusedWindow(); }
     );
 
     // Meta+F: Toggle fullscreen
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, 35,
+        KeybindingManager::MOD_LOGO, XKB_KEY_f,
         "toggle_fullscreen", [this]() { toggleFullscreen(); }
     );
 
     // Meta+Shift+S: Print scene graph tree (debug)
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 31,
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, XKB_KEY_s,
         "scene_graph_print", [this]() {
             if (m_sceneGraph) {
                 printf("\n=== Scene Graph Tree ===\n");
@@ -1370,7 +1370,7 @@ void Server::registerKeybindings() {
 
     // Meta+Shift+L: Save scene graph layout
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 38,
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, XKB_KEY_l,
         "scene_graph_save", [this]() {
             if (m_sceneGraph) {
                 const char* home = getenv("HOME");
@@ -1387,7 +1387,7 @@ void Server::registerKeybindings() {
 
     // Meta+Shift+G: Print scene graph update (debug)
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 34,
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, XKB_KEY_g,
         "scene_graph_update", [this]() {
             if (m_sceneGraph) {
                 scene_graph_update(m_sceneGraph);
@@ -1398,25 +1398,25 @@ void Server::registerKeybindings() {
 
     // Meta+Space: Toggle floating
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, 57,
+        KeybindingManager::MOD_LOGO, XKB_KEY_space,
         "toggle_floating", [this]() { toggleFloating(); }
     );
 
     // Meta+Shift+F: Toggle always on top
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 35,
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, XKB_KEY_f,
         "toggle_always_on_top", [this]() { toggleAlwaysOnTop(); }
     );
 
     // Meta+0: Minimize window
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, 11,
+        KeybindingManager::MOD_LOGO, XKB_KEY_0,
         "minimize_window", [this]() { minimizeWindow(); }
     );
 
     // Meta+Shift+G: Gamma night mode
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 34,
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, XKB_KEY_g,
         "gamma_night_mode", [this]() {
             // Toggle gamma plugin to night mode (3500K)
             setTemperature(3500);
@@ -1426,7 +1426,7 @@ void Server::registerKeybindings() {
 
     // Meta+Shift+R: Reload configuration (hot-reload)
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 19,
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, XKB_KEY_r,
         "reload_config", [this]() {
             LOG_INFO("Reloading configuration...");
             m_pluginManager.reloadConfig();
@@ -1436,7 +1436,7 @@ void Server::registerKeybindings() {
     // Meta+1 through Meta+9: Direct workspace switch
     for (uint32_t i = 0; i < 9; i++) {
         m_keybindingManager.registerKeybinding(
-            KeybindingManager::MOD_LOGO, 10 + i,
+            KeybindingManager::MOD_LOGO, XKB_KEY_1 + i,
             ("workspace_" + std::to_string(i + 1)).c_str(),
             [this, i]() { workspaceStepTo(i); }
         );
@@ -1444,14 +1444,14 @@ void Server::registerKeybindings() {
 
     // Meta+0: Workspace 10
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, 19,
+        KeybindingManager::MOD_LOGO, XKB_KEY_0,
         "workspace_10", [this]() { workspaceStepTo(9); }
     );
 
     // Meta+Shift+1 through Meta+Shift+9: Move window to workspace
     for (uint32_t i = 0; i < 9; i++) {
         m_keybindingManager.registerKeybinding(
-            KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 10 + i,
+            KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, XKB_KEY_1 + i,
             ("move_to_workspace_" + std::to_string(i + 1)).c_str(),
             [this, i]() { moveViewToWorkspace(i); }
         );
@@ -1459,7 +1459,7 @@ void Server::registerKeybindings() {
 
     // Meta+Shift+0: Move window to workspace 10
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, 19,
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, XKB_KEY_0,
         "move_to_workspace_10", [this]() { moveViewToWorkspace(9); }
     );
     

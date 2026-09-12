@@ -4,6 +4,7 @@
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/render/OverlayRenderer.hpp>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 #include <vector>
 #include <chrono>
@@ -132,19 +133,19 @@ public:
 
     bool onKey(const KeyEvent& event) override {
         constexpr uint32_t MOD_LOGO = 1 << 6;
-        constexpr uint32_t MOD_SHIFT = 1 << 1;
+        constexpr uint32_t MOD_SHIFT = 1 << 0;
 
         if (!event.pressed) return false;
         if (!(event.modifiers & MOD_LOGO)) return false;
 
         // Toggle FPS overlay: Meta+Shift+F
-        if ((event.modifiers & MOD_SHIFT) && event.keycode == 48) {  // F
+        if ((event.modifiers & MOD_SHIFT) && event.keysym == XKB_KEY_f) {
             toggleOverlay();
             return true;
         }
 
         // Toggle graph: Meta+F
-        if (event.keycode == 48) {  // F
+        if (event.keysym == XKB_KEY_f) {
             if (m_enabled) {
                 m_showGraph = !m_showGraph;
                 printf("[FPSPlugin] Graph %s\n", m_showGraph ? "shown" : "hidden");

@@ -3,6 +3,7 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 #include <string>
 
@@ -60,7 +61,7 @@ public:
         constexpr uint32_t MOD_LOGO = 1 << 6;
         
         // Meta+W cycles wallpaper colors
-        if (event.pressed && (event.modifiers & MOD_LOGO) && event.keycode == 32) {
+        if (event.pressed && (event.modifiers & MOD_LOGO) && event.keysym == XKB_KEY_w) {
             cycleColor();
             return true;
         }
