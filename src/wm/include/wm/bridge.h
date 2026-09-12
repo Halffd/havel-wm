@@ -82,9 +82,6 @@ void havel_cpp_set_brightness(struct havel_cpp_server* server, float brightness)
 void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int height);
 void* havel_cpp_get_plugin_manager(struct havel_cpp_server* server);
 
-// Alt-Tab window selection
-void havel_cpp_alt_tab_select(struct havel_cpp_server* server, int index);
-
 // Application spawning (for App Launcher)
 void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command);
 

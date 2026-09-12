@@ -56,46 +56,46 @@ public:
     
     bool onKey(const KeyEvent& event) override {
         constexpr uint32_t MOD_LOGO = 1 << 6;
-        
+
         if (!event.pressed) return false;
         if (!(event.modifiers & MOD_LOGO)) return false;
-        
-        // Gamma adjustment
-        if (event.keysym == XKB_KEY_Page_Up) {
-            adjustGamma(+0.1f);
-            return true;
+
+        // Night mode toggle: Meta+Shift+N. (Meta+N is the documented
+        // NotificationsPlugin test-notification binding; Meta+PgUp/PgDn
+        // are Server workspace bindings, which previously shadowed the
+        // gamma adjustments here entirely.)
+        if (event.modifiers & (1 << 0)) {  // Shift
+            if (event.keysym == XKB_KEY_n) {
+                toggleNightMode();
+                return true;
+            }
+            // Gamma/temperature/brightness step adjustments
+            if (event.keysym == XKB_KEY_Page_Up) {
+                adjustGamma(+0.1f);
+                return true;
+            }
+            if (event.keysym == XKB_KEY_Page_Down) {
+                adjustGamma(-0.1f);
+                return true;
+            }
+            if (event.keysym == XKB_KEY_Home) {
+                adjustTemperature(+100);
+                return true;
+            }
+            if (event.keysym == XKB_KEY_End) {
+                adjustTemperature(-100);
+                return true;
+            }
+            if (event.keysym == XKB_KEY_Insert) {
+                adjustBrightness(+0.1f);
+                return true;
+            }
+            if (event.keysym == XKB_KEY_Delete) {
+                adjustBrightness(-0.1f);
+                return true;
+            }
         }
-        if (event.keysym == XKB_KEY_Page_Down) {
-            adjustGamma(-0.1f);
-            return true;
-        }
-        
-        // Temperature adjustment
-        if (event.keysym == XKB_KEY_Home) {
-            adjustTemperature(+100);
-            return true;
-        }
-        if (event.keysym == XKB_KEY_End) {
-            adjustTemperature(-100);
-            return true;
-        }
-        
-        // Brightness adjustment
-        if (event.keysym == XKB_KEY_Insert) {
-            adjustBrightness(+0.1f);
-            return true;
-        }
-        if (event.keysym == XKB_KEY_Delete) {
-            adjustBrightness(-0.1f);
-            return true;
-        }
-        
-        // Night mode toggle (Meta+N)
-        if (event.keysym == XKB_KEY_n) {
-            toggleNightMode();
-            return true;
-        }
-        
+
         return false;
     }
     

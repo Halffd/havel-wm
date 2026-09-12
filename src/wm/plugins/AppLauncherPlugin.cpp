@@ -78,8 +78,8 @@ public:
     bool onKey(const KeyEvent& event) override {
         constexpr uint32_t MOD_LOGO = 1 << 6;
 
-        // Meta+Space toggles launcher
-        if (event.pressed && (event.modifiers & MOD_LOGO) && event.keysym == XKB_KEY_space) {
+        // Meta+D toggles launcher (documented default keybinding)
+        if (event.pressed && (event.modifiers & MOD_LOGO) && event.keysym == XKB_KEY_d) {
             toggleLauncher();
             return true;
         }

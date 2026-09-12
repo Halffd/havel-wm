@@ -138,17 +138,15 @@ public:
         if (!event.pressed) return false;
         if (!(event.modifiers & MOD_LOGO)) return false;
 
-        // Toggle FPS overlay: Meta+Shift+F
+        // Toggle FPS overlay: Meta+Shift+F (documented keybinding).
+        // Meta+F is Server fullscreen; the graph toggle rides on
+        // Meta+Shift+F while the overlay is enabled.
         if ((event.modifiers & MOD_SHIFT) && event.keysym == XKB_KEY_f) {
-            toggleOverlay();
-            return true;
-        }
-
-        // Toggle graph: Meta+F
-        if (event.keysym == XKB_KEY_f) {
             if (m_enabled) {
                 m_showGraph = !m_showGraph;
                 printf("[FPSPlugin] Graph %s\n", m_showGraph ? "shown" : "hidden");
+            } else {
+                toggleOverlay();
             }
             return true;
         }

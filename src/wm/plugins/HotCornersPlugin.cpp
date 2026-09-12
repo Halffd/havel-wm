@@ -106,23 +106,13 @@ public:
         
         if (!event.pressed) return false;
         
-        // Meta+C toggles hot corners
+        // Meta+C toggles hot corners. Corner actions fire on pointer
+        // position only; the old Meta+W/Meta+E manual triggers collided
+        // with OverviewPlugin's documented Meta+W binding.
         if ((event.modifiers & MOD_LOGO) && event.keysym == XKB_KEY_c) {
             m_enabled = !m_enabled;
             printf("[HotCorners] %s\n", m_enabled ? "enabled" : "disabled");
             return true;
-        }
-        
-        // Manual trigger shortcuts
-        if ((event.modifiers & MOD_LOGO)) {
-            switch (event.keysym) {
-                case XKB_KEY_w:  // Meta+W - Trigger top-left (overview)
-                    triggerAction(ACTION_OVERVIEW);
-                    return true;
-                case XKB_KEY_e:  // Meta+E - Trigger top-right (windows)
-                    triggerAction(ACTION_WINDOWS);
-                    return true;
-            }
         }
         
         return false;

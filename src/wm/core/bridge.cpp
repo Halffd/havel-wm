@@ -351,24 +351,6 @@ void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command
     free(cmd_copy);
 }
 
-void havel_cpp_alt_tab_select(struct havel_cpp_server* server, int index) {
-    if (!server || !server->server) return;
-
-    // Get all views and focus the selected one
-    auto& pluginManager = server->server->pluginManager();
-    auto views = pluginManager.getAllViews();
-
-    if (index >= 0 && index < static_cast<int>(views.size())) {
-        havel::View* selectedView = views[index];
-        if (selectedView) {
-            LOG_INFO("[AltTab] Focusing selected window: %s - %s",
-                     selectedView->appId().c_str(),
-                     selectedView->title().c_str());
-            pluginManager.focusView(selectedView);
-        }
-    }
-}
-
 void havel_cpp_init_gestures(struct havel_cpp_server* server) {
     if (!server || !server->server) return;
     

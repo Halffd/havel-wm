@@ -1312,17 +1312,10 @@ void Server::registerKeybindings() {
         "workspace_next_pgdn", [this]() { workspaceStep(true); }
     );
 
-    // Meta+W: Show workspace overview
-    m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, XKB_KEY_w,
-        "show_overview", [this]() { showOverview(); }
-    );
-
-    // Meta+D: Show app launcher
-    m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, XKB_KEY_d,
-        "show_launcher", [this]() { showLauncher(); }
-    );
+    // Meta+W / Meta+D are owned by OverviewPlugin / AppLauncherPlugin:
+    // the plugin implementations are the driven, complete UIs. The Server
+    // overlay-controller variants had no navigation/Escape path (undrivable
+    // once shown), so their keybindings only shadowed the plugins.
 
     // Meta+Y: Toggle tiling
     m_keybindingManager.registerKeybinding(
@@ -1330,17 +1323,9 @@ void Server::registerKeybindings() {
         "toggle_tiling", [this]() { workspaceToggleTiling(); }
     );
 
-    // Meta+G: Toggle grayscale
-    m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, XKB_KEY_g,
-        "toggle_grayscale", [this]() { toggleGrayscale(); }
-    );
-
-    // Meta+N: Toggle negative
-    m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, XKB_KEY_n,
-        "toggle_negative", [this]() { toggleNegative(); }
-    );
+    // Meta+G is owned by CustomLayoutsPlugin (grid layout): the grayscale
+    // flag it toggled here was state-only — no renderer consumed it.
+    // Meta+N is owned by GammaPlugin (night mode): same state-only story.
 
     // Meta+Shift+Q: Close focused window
     m_keybindingManager.registerKeybinding(
@@ -1402,26 +1387,18 @@ void Server::registerKeybindings() {
         "toggle_floating", [this]() { toggleFloating(); }
     );
 
-    // Meta+Shift+F: Toggle always on top
-    m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, XKB_KEY_f,
-        "toggle_always_on_top", [this]() { toggleAlwaysOnTop(); }
-    );
-
     // Meta+0: Minimize window
     m_keybindingManager.registerKeybinding(
         KeybindingManager::MOD_LOGO, XKB_KEY_0,
         "minimize_window", [this]() { minimizeWindow(); }
     );
 
-    // Meta+Shift+G: Gamma night mode
+    // Meta+Shift+V: Toggle always on top. Meta+Shift+F is the documented
+    // FPS-overlay binding (owned by FPSPlugin); previously this binding
+    // silently shadowed it.
     m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, XKB_KEY_g,
-        "gamma_night_mode", [this]() {
-            // Toggle gamma plugin to night mode (3500K)
-            setTemperature(3500);
-            LOG_INFO("Night mode enabled (3500K)");
-        }
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, XKB_KEY_v,
+        "toggle_always_on_top", [this]() { toggleAlwaysOnTop(); }
     );
 
     // Meta+Shift+R: Reload configuration (hot-reload)

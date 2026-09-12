@@ -1633,98 +1633,8 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 // ============================================================================
 // Overlay Rendering (Scene Graph Based)
 // ============================================================================
-
-// Simple Alt-Tab overlay state
-static struct {
-    struct wlr_scene_rect *background;
-    struct wlr_scene_rect *box;
-    struct wlr_scene_rect *highlight;  // Highlight bar for selection
-    bool visible;
-    int selected_index;
-} alt_tab_overlay = {0};
-
-static void alt_tab_init(void) {
-    if (alt_tab_overlay.background) return;  // Already initialized
-    
-    // Create semi-transparent dark background (full screen)
-    alt_tab_overlay.background = wlr_scene_rect_create(
-        server->overlay_layer, 1, 1, (float[4]){0.0f, 0.0f, 0.0f, 0.7f});
-    
-    // Create centered box (400x200)
-    alt_tab_overlay.box = wlr_scene_rect_create(
-        server->overlay_layer, 400, 200, (float[4]){0.2f, 0.2f, 0.3f, 0.95f});
-    
-    // Create highlight bar (shows selected window)
-    alt_tab_overlay.highlight = wlr_scene_rect_create(
-        server->overlay_layer, 360, 40, (float[4]){0.4f, 0.4f, 0.5f, 0.8f});
-    
-    alt_tab_overlay.visible = false;
-    alt_tab_overlay.selected_index = 0;
-    LOG_INFO("[Overlay] Alt-Tab overlay initialized");
-}
-
-static void alt_tab_show(int screen_width, int screen_height) {
-    if (!alt_tab_overlay.background) alt_tab_init();
-    
-    // Size background to screen
-    wlr_scene_rect_set_size(alt_tab_overlay.background, screen_width, screen_height);
-    
-    // Center the box
-    int box_x = (screen_width - 400) / 2;
-    int box_y = (screen_height - 200) / 2;
-    wlr_scene_node_set_position(&alt_tab_overlay.box->node, box_x, box_y);
-    
-    // Position highlight bar
-    wlr_scene_node_set_position(&alt_tab_overlay.highlight->node, box_x + 20, box_y + 60);
-    
-    wlr_scene_node_set_enabled(&alt_tab_overlay.background->node, true);
-    wlr_scene_node_set_enabled(&alt_tab_overlay.box->node, true);
-    wlr_scene_node_set_enabled(&alt_tab_overlay.highlight->node, true);
-    alt_tab_overlay.visible = true;
-    alt_tab_overlay.selected_index = 0;
-    
-    LOG_INFO("[Overlay] Alt-Tab shown (%dx%d)", screen_width, screen_height);
-}
-
-static void alt_tab_hide(void) {
-    if (!alt_tab_overlay.visible) return;
-    
-    wlr_scene_node_set_enabled(&alt_tab_overlay.background->node, false);
-    wlr_scene_node_set_enabled(&alt_tab_overlay.box->node, false);
-    wlr_scene_node_set_enabled(&alt_tab_overlay.highlight->node, false);
-    alt_tab_overlay.visible = false;
-    
-    LOG_INFO("[Overlay] Alt-Tab hidden");
-}
-
-static void alt_tab_cycle(void) {
-    if (!alt_tab_overlay.visible) return;
-    
-    // Cycle selected index
-    alt_tab_overlay.selected_index = (alt_tab_overlay.selected_index + 1) % 10;
-    
-    // Update highlight position (3 windows visible, 50px each including spacing)
-    int box_x = alt_tab_overlay.box->node.x;
-    int box_y = alt_tab_overlay.box->node.y;
-    int new_y = box_y + 60 + (alt_tab_overlay.selected_index * 50);
-    wlr_scene_node_set_position(&alt_tab_overlay.highlight->node, box_x + 20, new_y);
-    
-    LOG_DEBUG("[AltTab] Cycle to index %d", alt_tab_overlay.selected_index);
-}
-
-static void alt_tab_select(void) {
-    if (!alt_tab_overlay.visible) return;
-
-    LOG_INFO("[AltTab] Select window at index %d", alt_tab_overlay.selected_index);
-    
-    // Focus selected window via C++ layer
-    // The C++ Server class handles the actual focus logic
-    if (server->cpp_server) {
-        havel_cpp_alt_tab_select(server->cpp_server, alt_tab_overlay.selected_index);
-    }
-    
-    alt_tab_hide();
-}
+// (Alt-Tab overlay removed: AltTabPlugin in the C++ layer owns window
+// switching end-to-end. See keyboard_handle_key for the dispatch note.)
 
 // ============================================================================
 // Input Handlers
@@ -1827,27 +1737,11 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
             return;  // Consume the event, don't forward
         }
 
-        // Alt+Tab Overlay
-        if (alt_pressed && keysym == XKB_KEY_Tab && !ctrl_pressed) {
-            if (alt_tab_overlay.visible) {
-                alt_tab_cycle();
-            } else {
-                alt_tab_show(1920, 1080);
-            }
-            return;  // Consume the event
-        }
-
-        // Enter selects window
-        if (alt_tab_overlay.visible && (keysym == XKB_KEY_Return || keysym == XKB_KEY_KP_Enter)) {
-            alt_tab_select();
-            return;  // Consume the event
-        }
-
-        // Escape hides Alt-Tab
-        if (alt_tab_overlay.visible && keysym == XKB_KEY_Escape) {
-            alt_tab_hide();
-            return;  // Consume the event
-        }
+        // Alt+Tab window switching is owned by AltTabPlugin in the C++
+        // layer (thumbnails, alt-release select). Previously this C-side
+        // 3-rect overlay intercepted Alt+Tab before the C++ dispatch and
+        // shadowed the plugin completely; it was removed so the plugin
+        // receives the keys through havel_cpp_on_key below.
 
         // Forward to C++ layer for keybindings/plugins
         LOG_INFO("[KEY] Pressed: keycode=%u keysym=0x%x mods=0x%x char='%c'", keycode, keysym, modifiers, key_char ? key_char : ' ');

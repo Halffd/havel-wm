@@ -37,14 +37,14 @@ static struct {
 
 // Tips to show during loading
 static const char* loading_tips[] = {
-    "Tip: Press Meta+Space to open the app launcher",
-    "Tip: Use Meta+Tab to switch between windows",
+    "Tip: Press Meta+D to open the app launcher",
+    "Tip: Use Meta+Tab to switch between workspaces",
     "Tip: Meta+W shows the workspace overview",
     "Tip: Right-click on desktop for context menu",
     "Tip: Drag files to the taskbar to pin apps",
     "Tip: Use Meta+Enter to open a terminal",
-    "Tip: Meta+Q closes the focused window",
-    "Tip: Meta+Shift+Q quits the compositor",
+    "Tip: Meta+Shift+Q closes the focused window",
+    "Tip: Ctrl+Meta+F4 quits the compositor",
     "Tip: Use Alt+Tab for classic window switching",
     "Tip: Meta+1-9 switches to workspace 1-9",
     "Tip: Drag window edges to resize",

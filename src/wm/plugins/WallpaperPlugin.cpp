@@ -58,14 +58,9 @@ public:
     }
     
     bool onKey(const KeyEvent& event) override {
-        constexpr uint32_t MOD_LOGO = 1 << 6;
-        
-        // Meta+W cycles wallpaper colors
-        if (event.pressed && (event.modifiers & MOD_LOGO) && event.keysym == XKB_KEY_w) {
-            cycleColor();
-            return true;
-        }
-        
+        // Wallpaper colors cycle via IPC/config only; Meta+W is owned by
+        // OverviewPlugin (documented keybinding).
+        (void)event;
         return false;
     }
     
