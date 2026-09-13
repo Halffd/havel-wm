@@ -103,11 +103,6 @@ void havel_wlr_set_gamma_for_output(havel_wlr_server_t* server, int output_index
 void havel_wlr_set_temperature_for_output(havel_wlr_server_t* server, int output_index, int kelvin);
 void havel_wlr_set_brightness_for_output(havel_wlr_server_t* server, int output_index, float brightness);
 
-// Texture access for Alt-Tab thumbnails (called from C++ PluginManager)
-uint32_t havel_get_view_texture_id(void* c_view);
-int havel_get_view_texture_width(void* c_view);
-int havel_get_view_texture_height(void* c_view);
-
 // Callback registration (called from C during initialization)
 void havel_cpp_register_view_callbacks(
     cpp_view_set_position_fn set_position,

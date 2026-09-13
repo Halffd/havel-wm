@@ -15,12 +15,9 @@ pkg_check_modules(WLROOTS REQUIRED wlroots-0.20)
 pkg_check_modules(XKB REQUIRED xkbcommon)
 pkg_check_modules(PIXMAN REQUIRED pixman-1)
 pkg_check_modules(FMT REQUIRED fmt)
-pkg_check_modules(GLES2 REQUIRED glesv2)
-pkg_check_modules(EGL REQUIRED egl)
 pkg_check_modules(FREETYPE REQUIRED freetype2)
 pkg_check_modules(PNG REQUIRED libpng)
 pkg_check_modules(CURL REQUIRED libcurl)
-pkg_check_modules(VULKAN REQUIRED vulkan)
 
 # Find nlohmann/json for JSON parsing
 find_package(nlohmann_json CONFIG REQUIRED)
@@ -239,17 +236,11 @@ target_include_directories(wlr_bridge PUBLIC
 target_include_directories(wlr_bridge PRIVATE
     ${WLROOTS_INCLUDE_DIRS}
     ${PROTOCOL_HEADERS_DIR}
-    ${VULKAN_INCLUDE_DIRS}
-    ${GLES2_INCLUDE_DIRS}
-    ${EGL_INCLUDE_DIRS}
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
 )
 target_compile_definitions(wlr_bridge PRIVATE WLR_USE_UNSTABLE)
 target_link_libraries(wlr_bridge
     ${WLROOTS_LIBRARIES}
-    ${VULKAN_LIBRARIES}
-    ${GLES2_LIBRARIES}
-    ${EGL_LIBRARIES}
     dl
 )
 set_target_properties(wlr_bridge PROPERTIES
@@ -280,8 +271,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${XKB_INCLUDE_DIRS}
     ${PIXMAN_INCLUDE_DIRS}
     ${FMT_INCLUDE_DIRS}
-    ${GLES2_INCLUDE_DIRS}
-    ${EGL_INCLUDE_DIRS}
     ${FREETYPE_INCLUDE_DIRS}
     ${PNG_INCLUDE_DIRS}
     ${CURL_INCLUDE_DIRS}
@@ -298,8 +287,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${XKB_LIBRARIES}
     ${PIXMAN_LIBRARIES}
     ${FMT_LIBRARIES}
-    ${GLES2_LIBRARIES}
-    ${EGL_LIBRARIES}
     ${FREETYPE_LIBRARIES}
     ${PNG_LIBRARIES}
     ${CURL_LIBRARIES}
@@ -314,8 +301,6 @@ target_link_directories(${PROJECT_NAME} PRIVATE
     ${XKB_LIBRARY_DIRS}
     ${PIXMAN_LIBRARY_DIRS}
     ${FMT_LIBRARY_DIRS}
-    ${GLES2_LIBRARY_DIRS}
-    ${EGL_LIBRARY_DIRS}
 )
 
 # Compiler flags

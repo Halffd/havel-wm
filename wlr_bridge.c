@@ -2770,8 +2770,6 @@ void havel_wlr_set_zoom_for_output_simple(havel_wlr_server_t *server, int output
 // Texture Access for Alt-Tab Thumbnails
 // ============================================================================
 
-#include <wlr/render/gles2.h>
-
 // Resolve the wlr_surface from either wrapper struct via the kind tag.
 static struct wlr_surface* view_any_surface(void* c_view) {
     if (!c_view) return NULL;
@@ -2785,29 +2783,6 @@ static struct wlr_surface* view_any_surface(void* c_view) {
         return view->xsurface ? view->xsurface->surface : NULL;
     }
     return NULL;
-}
-
-uint32_t havel_get_view_texture_id(void* c_view) {
-    struct wlr_surface* surface = view_any_surface(c_view);
-    if (!surface || !wlr_surface_has_buffer(surface)) return 0;
-
-    struct wlr_texture* texture = wlr_surface_get_texture(surface);
-    if (!texture) return 0;
-
-    // Get GL texture ID from wlr_gles2_texture
-    struct wlr_gles2_texture_attribs attribs;
-    wlr_gles2_texture_get_attribs(texture, &attribs);
-    return attribs.tex;
-}
-
-int havel_get_view_texture_width(void* c_view) {
-    struct wlr_surface* surface = view_any_surface(c_view);
-    return surface ? surface->current.width : 0;
-}
-
-int havel_get_view_texture_height(void* c_view) {
-    struct wlr_surface* surface = view_any_surface(c_view);
-    return surface ? surface->current.height : 0;
 }
 
 // ============================================================================
