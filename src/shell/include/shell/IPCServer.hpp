@@ -39,6 +39,7 @@ public:
 
     // Event types for subscriptions
     enum class EventType {
+        None = 0,
         WindowCreated,
         WindowDestroyed,
         WindowFocused,
@@ -140,6 +141,9 @@ private:
     std::vector<int> m_clientFds;
     std::vector<std::string> m_clientBuffers;  // One buffer per client
     std::unordered_map<int, std::unordered_set<EventType>> m_clientSubscriptions;
+    // Requesting client during processMessage dispatch (subscribe/
+    // unsubscribe are per-client). Single-threaded frame loop: no race.
+    int m_dispatchingFd = -1;
 
     struct CommandHandler {
         std::string name;

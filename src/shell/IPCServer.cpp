@@ -187,7 +187,10 @@ void IPCServer::processEvents() {
         printf("[IPC] Client connected (fd=%d, total=%zu)\n", clientFd, m_clientFds.size());
     }
 
-    // Process messages from all clients
+    // Phase 1: read from all clients and extract complete messages into
+    // LOCAL copies. No dispatch here, so references into the vectors are
+    // safe within this phase.
+    std::vector<std::pair<int, std::string>> pending;
     for (size_t i = 0; i < m_clientFds.size(); ) {
         int clientFd = m_clientFds[i];
         if (clientFd < 0) {
@@ -201,19 +204,19 @@ void IPCServer::processEvents() {
         // Read data
         char buffer[4096];
         ssize_t n = read(clientFd, buffer, sizeof(buffer) - 1);
-        
+
         if (n > 0) {
             buffer[n] = '\0';
             m_clientBuffers[i] += std::string(buffer);
 
-            // Process complete messages (newline-delimited)
+            // Extract all complete messages (newline-delimited)
             std::string& buf = m_clientBuffers[i];
             size_t pos;
             while ((pos = buf.find('\n')) != std::string::npos) {
-                std::string msg = buf.substr(0, pos);
+                pending.emplace_back(clientFd, buf.substr(0, pos));
                 buf.erase(0, pos + 1);
-                processMessage(clientFd, msg);
             }
+            i++;
         } else if (n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
             // Client disconnected or error
             printf("[IPC] Client disconnected (fd=%d)\n", clientFd);
@@ -222,18 +225,33 @@ void IPCServer::processEvents() {
             m_clientBuffers.erase(m_clientBuffers.begin() + i);
             m_clientSubscriptions.erase(clientFd);
             continue;
+        } else {
+            i++;  // EAGAIN - nothing to read
         }
+    }
 
-        i++;
+    // Phase 2: dispatch. processMessage can mutate the client vectors
+    // (broadcastEvent closes clients on write failure), which is why no
+    // references may be held across these calls - ASAN caught exactly
+    // this as a heap-use-after-free (buf.find on a freed buffer).
+    // Writes to a since-closed fd just fail; harmless.
+    for (const auto& [fd, msg] : pending) {
+        processMessage(fd, msg);
     }
 }
 
 void IPCServer::processMessage(int clientFd, const std::string& msg) {
     if (msg.empty()) return;
 
+    // Track the requesting client for per-client commands (subscribe/
+    // unsubscribe). The frame loop is single-threaded, so a plain member
+    // is race-free; it is cleared after every dispatch.
+    m_dispatchingFd = clientFd;
+
     // Check if it's a JSON-RPC request
     if (msg.find('{') != std::string::npos && msg.find('"') != std::string::npos) {
         std::string response = processJsonRequest(msg);
+        m_dispatchingFd = -1;
         if (clientFd >= 0) {
             write(clientFd, response.c_str(), response.size());
         }
@@ -254,10 +272,12 @@ void IPCServer::processMessage(int clientFd, const std::string& msg) {
 
     if (it != m_commands.end()) {
         std::string response = it->callback(args);
+        m_dispatchingFd = -1;
         if (clientFd >= 0) {
             write(clientFd, response.c_str(), response.size());
         }
     } else {
+        m_dispatchingFd = -1;
         std::string response = "ERROR Unknown command: " + cmd + "\n";
         if (clientFd >= 0) {
             write(clientFd, response.c_str(), response.size());
@@ -668,49 +688,106 @@ std::string IPCServer::handlePing() {
     return j.dump();
 }
 
+// Map an event name from subscribe params to an EventType. Returns
+// All for the special "all" name, None if unrecognized.
+static IPCServer::EventType eventTypeFromName(const std::string& name) {
+    using ET = IPCServer::EventType;
+    if (name == "all") return ET::All;
+    if (name == "window_created") return ET::WindowCreated;
+    if (name == "window_destroyed") return ET::WindowDestroyed;
+    if (name == "window_focused") return ET::WindowFocused;
+    if (name == "window_title_changed") return ET::WindowTitleChanged;
+    if (name == "window_moved") return ET::WindowMoved;
+    if (name == "window_resized") return ET::WindowResized;
+    if (name == "workspace_changed") return ET::WorkspaceChanged;
+    return ET::None;
+}
+
 std::string IPCServer::handleSubscribe(const std::string& args) {
-    // params: {"events": ["window_created", "workspace_changed"]}
+    // Subscribe the REQUESTING client only (m_dispatchingFd, set by
+    // processMessage). Previously this looped over every connected
+    // client, so one client's subscribe made all clients receive
+    // broadcasts - visible live as responses desync'd by event frames
+    // arriving on sockets that never subscribed.
+    if (m_dispatchingFd < 0) {
+        return "{\"error\":\"subscribe: no requesting client\"}";
+    }
+    auto& subs = m_clientSubscriptions[m_dispatchingFd];
+
     json j;
+    bool parsed = false;
     try {
         j = json::parse(args);
+        parsed = true;
     } catch (...) {
-        // If parsing fails, subscribe to all events
-        for (int clientFd : m_clientFds) {
-            m_clientSubscriptions[clientFd].insert(EventType::All);
+        parsed = false;
+    }
+
+    // No/invalid params or {"event": "all"} style: subscribe to everything
+    if (!parsed || !j.is_object() || !j.contains("events")) {
+        if (parsed && j.is_object() && j.contains("event") && j["event"].is_string()) {
+            EventType t = eventTypeFromName(j["event"].get<std::string>());
+            if (t != EventType::None) {
+                subs.insert(t);
+                return "{\"subscribed\":true}";
+            }
         }
+        subs.insert(EventType::All);
         return "{\"subscribed\":true}";
     }
-    
-    // Subscribe to all events for any connected client
-    for (int clientFd : m_clientFds) {
-        m_clientSubscriptions[clientFd].insert(EventType::All);
-        
-        // Parse specific events if provided
-        if (j.contains("events") && j["events"].is_array()) {
-            for (const auto& event : j["events"]) {
-                std::string eventName = event.get<std::string>();
-                if (eventName == "window_created") {
-                    m_clientSubscriptions[clientFd].insert(EventType::WindowCreated);
-                } else if (eventName == "window_destroyed") {
-                    m_clientSubscriptions[clientFd].insert(EventType::WindowDestroyed);
-                } else if (eventName == "window_focused") {
-                    m_clientSubscriptions[clientFd].insert(EventType::WindowFocused);
-                } else if (eventName == "window_title_changed") {
-                    m_clientSubscriptions[clientFd].insert(EventType::WindowTitleChanged);
-                } else if (eventName == "window_moved") {
-                    m_clientSubscriptions[clientFd].insert(EventType::WindowMoved);
-                } else if (eventName == "window_resized") {
-                    m_clientSubscriptions[clientFd].insert(EventType::WindowResized);
-                } else if (eventName == "workspace_changed") {
-                    m_clientSubscriptions[clientFd].insert(EventType::WorkspaceChanged);
-                }
-            }
+
+    if (!j["events"].is_array()) {
+        return "{\"error\":\"subscribe: events must be an array\"}";
+    }
+    for (const auto& event : j["events"]) {
+        if (!event.is_string()) continue;
+        EventType t = eventTypeFromName(event.get<std::string>());
+        if (t != EventType::None) {
+            subs.insert(t);
         }
     }
     return "{\"subscribed\":true}";
 }
 
 std::string IPCServer::handleUnsubscribe(const std::string& args) {
+    // Only the requesting client (see handleSubscribe)
+    if (m_dispatchingFd < 0) {
+        return "{\"error\":\"unsubscribe: no requesting client\"}";
+    }
+    auto it = m_clientSubscriptions.find(m_dispatchingFd);
+    if (it == m_clientSubscriptions.end()) {
+        return "{\"unsubscribed\":true}";  // nothing to remove
+    }
+
+    json j;
+    bool parsed = false;
+    try {
+        j = json::parse(args);
+        parsed = true;
+    } catch (...) {
+        parsed = false;
+    }
+
+    if (!parsed || !j.is_object() || (!j.contains("events") && !j.contains("event"))) {
+        // Unsubscribe from everything
+        m_clientSubscriptions.erase(it);
+        return "{\"unsubscribed\":true}";
+    }
+
+    std::vector<std::string> names;
+    if (j.contains("events") && j["events"].is_array()) {
+        for (const auto& e : j["events"]) {
+            if (e.is_string()) names.push_back(e.get<std::string>());
+        }
+    } else if (j.contains("event") && j["event"].is_string()) {
+        names.push_back(j["event"].get<std::string>());
+    }
+    for (const auto& name : names) {
+        EventType t = eventTypeFromName(name);
+        if (t != EventType::None) {
+            it->second.erase(t);
+        }
+    }
     return "{\"unsubscribed\":true}";
 }
 
