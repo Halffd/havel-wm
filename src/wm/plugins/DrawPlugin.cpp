@@ -3,6 +3,7 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <wm/plugins/PluginConfig.hpp>
 #include <wm/render/OverlayRenderer.hpp>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
@@ -98,24 +99,34 @@ public:
 
     void loadConfig(const std::string& configPath) override {
         (void)configPath;
+        // Configurable toggle binding (default Meta+Shift+D)
+        auto& config = PluginConfig::getInstance();
+        uint32_t mods = 0, sym = 0;
+        if (config.getKeybindingParsed("draw", &mods, &sym)) {
+            m_bindingMods = mods;
+            m_bindingKeysym = sym;
+            printf("[DrawPlugin] Toggle binding from config: mods=0x%x keysym=0x%x\n",
+                   mods, sym);
+        }
         printf("[DrawPlugin] Config loaded\n");
     }
 
     bool onKey(const KeyEvent& event) override {
-        constexpr uint32_t MOD_LOGO = 1 << 6;
         constexpr uint32_t MOD_SHIFT = 1 << 0;
+        constexpr uint32_t MOD_LOGO = 1 << 6;
 
         if (!event.pressed) return false;
-        if (!(event.modifiers & MOD_LOGO)) return false;
 
-        // Toggle draw mode: Meta+Shift+D
-        if ((event.modifiers & MOD_SHIFT) && event.keysym == XKB_KEY_d) {
+        // Configurable toggle binding (default Meta+Shift+D); exact match
+        if (event.modifiers == m_bindingMods &&
+            event.keysym == m_bindingKeysym) {
             toggleDrawMode();
             return true;
         }
 
         // Only process other keys when in draw mode
         if (!m_enabled) return false;
+        if (!(event.modifiers & MOD_LOGO)) return false;
 
         // Change color: Meta+Shift+C
         if ((event.modifiers & MOD_SHIFT) && event.keysym == XKB_KEY_c) {
@@ -254,6 +265,9 @@ private:
     std::vector<Stroke> m_undoStack;
     std::vector<Stroke> m_redoStack;
     int m_currentStroke = -1;
+    // Toggle binding (overridable via config "keybinding", default Meta+Shift+D)
+    uint32_t m_bindingMods = (1u << 6) | (1u << 0);  // Meta+Shift
+    uint32_t m_bindingKeysym = XKB_KEY_d;
     
     float m_currentColor[3];
     float m_currentWidth;

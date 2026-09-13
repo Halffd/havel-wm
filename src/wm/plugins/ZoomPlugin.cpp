@@ -3,6 +3,7 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <wm/plugins/PluginConfig.hpp>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 
@@ -63,16 +64,25 @@ public:
 
     void loadConfig(const std::string& configPath) override {
         (void)configPath;
+        // Configurable binding (default Meta+Ctrl+Z): the modifiers from
+        // the spec become the gate; the keysym becomes the toggle key.
+        // Plus/minus/0/space remain fixed family members behind that gate.
+        auto& config = PluginConfig::getInstance();
+        uint32_t mods = 0, sym = 0;
+        if (config.getKeybindingParsed("zoom", &mods, &sym)) {
+            m_gateMods = mods;
+            m_toggleKeysym = sym;
+            printf("[ZoomPlugin] Binding from config: gate mods=0x%x toggle keysym=0x%x\n",
+                   mods, sym);
+        }
         printf("[ZoomPlugin] Config loaded\n");
     }
 
     bool onKey(const KeyEvent& event) override {
-        constexpr uint32_t MOD_LOGO = 1 << 6;
         constexpr uint32_t MOD_SHIFT = 1 << 0;
-        constexpr uint32_t MOD_CTRL = 1 << 2;
 
-        if (!(event.modifiers & MOD_LOGO)) return false;
-        if (!(event.modifiers & MOD_CTRL)) return false;
+        // Gate: configured modifier set (default Meta+Ctrl)
+        if ((event.modifiers & m_gateMods) != m_gateMods) return false;
 
         // Select which monitor
         int targetOutput = (event.modifiers & MOD_SHIFT) ? 1 : 0;
@@ -101,8 +111,8 @@ public:
             return true;
         }
 
-        // Toggle zoom: Z key
-        if (event.keysym == XKB_KEY_z && event.pressed) {
+        // Toggle zoom: configured toggle key (default Z)
+        if (event.keysym == m_toggleKeysym && event.pressed) {
             toggleZoom(targetOutput);
             return true;
         }
@@ -122,7 +132,12 @@ public:
 
 private:
     CompositorAPI* m_api = nullptr;
-    
+
+    // Binding (overridable via config "keybinding", default Meta+Ctrl+Z):
+    // gate modifiers + toggle keysym; plus/minus/0/space are fixed family
+    uint32_t m_gateMods = (1u << 6) | (1u << 2);  // Meta+Ctrl
+    uint32_t m_toggleKeysym = XKB_KEY_z;
+
     // Current zoom levels
     float m_zoomLevels[2];  // [0] = primary, [1] = secondary
     

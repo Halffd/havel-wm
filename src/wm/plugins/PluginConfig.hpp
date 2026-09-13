@@ -7,6 +7,9 @@
 #include <sstream>
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
+#include <xkbcommon/xkbcommon.h>
+#include <xkbcommon/xkbcommon-keysyms.h>
 
 namespace havel {
 
@@ -100,6 +103,26 @@ public:
         return getValue(pluginName, "keybinding", "");
     }
 
+    // Parsed keybinding: modifier mask + XKB keysym.
+    // Modifier mask bits (xkbcommon convention, matches the bits the
+    // compositor reports): Shift=0x1, CapsLock=0x2, Ctrl=0x4, Alt=0x8,
+    // Mod2=0x10, Mod3=0x20, Meta/Logo=0x40, Mod5=0x80.
+    // Accepts "Meta"/"Super"/"Logo" for the logo key, "Control"/"Ctrl",
+    // "Alt", "Shift", and any single keysym name via xkbcommon
+    // (xkb_keysym_from_name, case-insensitive): "Meta+Shift+W",
+    // "Alt+Tab", "Meta+D", "Meta+Return".
+    // Returns false if any token is unrecognized.
+    bool getKeybindingParsed(const std::string& pluginName,
+                            uint32_t* modifiers, uint32_t* keysym) const {
+        std::string spec = getKeybinding(pluginName);
+        if (spec.empty()) return false;
+        return parseKeybindingSpec(spec, modifiers, keysym);
+    }
+
+    // Parse an arbitrary "Mods+Key" spec (no config lookup).
+    static bool parseKeybindingSpec(const std::string& spec,
+                                    uint32_t* modifiers, uint32_t* keysym);
+
     bool isEmpty() const {
         return m_plugins.empty();
     }
@@ -179,5 +202,58 @@ private:
     // plugin_name -> (key -> value)
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> m_plugins;
 };
+
+// Parsed keybinding spec, shared by plugins that honor config bindings.
+inline bool PluginConfig::parseKeybindingSpec(const std::string& spec,
+                                              uint32_t* modifiers, uint32_t* keysym) {
+    if (spec.empty() || !modifiers || !keysym) return false;
+
+    *modifiers = 0;
+    *keysym = 0;
+
+    // Tokenize on '+'
+    std::string token;
+    std::string key;
+    size_t pos = 0;
+    auto next = [&](std::string* out) -> bool {
+        if (pos >= spec.size()) return false;
+        size_t plus = spec.find('+', pos);
+        if (plus == std::string::npos) {
+            *out = spec.substr(pos);
+            pos = spec.size();
+        } else {
+            *out = spec.substr(pos, plus - pos);
+            pos = plus + 1;
+        }
+        return !out->empty();
+    };
+
+    while (next(&token)) {
+        // Lowercase compare for modifiers
+        std::string lower = token;
+        for (char& c : lower) c = (char)tolower((unsigned char)c);
+
+        if (lower == "shift") { *modifiers |= 1u << 0; }
+        else if (lower == "capslock" || lower == "lock") { *modifiers |= 1u << 1; }
+        else if (lower == "ctrl" || lower == "control") { *modifiers |= 1u << 2; }
+        else if (lower == "alt" || lower == "mod1") { *modifiers |= 1u << 3; }
+        else if (lower == "meta" || lower == "super" || lower == "logo" || lower == "win") { *modifiers |= 1u << 6; }
+        else {
+            // Final token: the keysym
+            if (!key.empty()) return false;  // two non-modifier tokens
+            key = token;
+        }
+    }
+
+    if (key.empty()) return false;
+
+    // Keysym lookup, case-insensitive so "w" and "W", "return", "tab",
+    // "escape", "page_up" etc. all resolve. XKB_KEY_NoSymbol (0) = fail.
+    xkb_keysym_t sym = xkb_keysym_from_name(key.c_str(), XKB_KEYSYM_CASE_INSENSITIVE);
+    if (sym == XKB_KEY_NoSymbol) return false;
+
+    *keysym = (uint32_t)sym;
+    return true;
+}
 
 } // namespace havel

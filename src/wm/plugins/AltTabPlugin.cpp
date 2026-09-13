@@ -90,28 +90,36 @@ public:
         
         printf("[AltTab] Config loaded (thumbnail=%dx%d, max=%d)\n",
                m_thumbnailWidth, m_thumbnailHeight, m_maxVisibleWindows);
-    }
-    
-    bool onKey(const KeyEvent& event) override {
-        constexpr uint32_t MOD_ALT = 1 << 3;
-        constexpr uint32_t MOD_SHIFT = 1 << 0;
-        
-        bool alt = (event.modifiers & MOD_ALT) != 0;
-        bool shift = (event.modifiers & MOD_SHIFT) != 0;
-        
-    // Alt released
-    if (!event.pressed && !alt && m_visible) {
-      select();
-      return true;
+
+        // Configurable trigger binding (default Alt+Tab): the cycle keysym
+        // is the keysym from the spec; the Alt modifier is derived from it.
+        uint32_t mods = 0, sym = 0;
+        if (config.getKeybindingParsed("alt_tab", &mods, &sym)) {
+            m_triggerMods = mods;
+            m_triggerKeysym = sym;
+            m_selectOnModRelease = (mods & (1u << 3)) != 0;  // Alt in spec
+            printf("[AltTab] Trigger binding from config: mods=0x%x keysym=0x%x\n",
+                   mods, sym);
         }
-        
-        // Alt+Tab or Alt+Shift+Tab
-    if (alt && event.keysym == XKB_KEY_Tab && event.pressed) {
-      if (!m_visible) {
-        m_reverse = shift;
-        show();
-      } else {
-        if (shift) {
+    }
+
+    bool onKey(const KeyEvent& event) override {
+        bool triggerModHeld = (event.modifiers & m_triggerMods) != 0;
+        bool triggerModOnly = (event.modifiers == m_triggerMods);
+
+        // Trigger modifier released -> select current
+        if (!event.pressed && !triggerModHeld && m_selectOnModRelease && m_visible) {
+            select();
+            return true;
+        }
+
+        // Trigger binding press (Alt+Tab / Alt+Shift+Tab by default)
+        if (triggerModHeld && event.keysym == m_triggerKeysym && event.pressed) {
+            if (!m_visible) {
+                m_reverse = !triggerModOnly;  // extra modifier = reverse
+                show();
+            } else {
+                if (!triggerModOnly) {
                     navigate(-1);
                 } else {
                     navigate(1);
@@ -157,6 +165,10 @@ private:
     int m_selectedIndex;
     bool m_reverse;
     std::vector<WindowEntry> m_windows;
+    // Trigger binding (overridable via config "keybinding", default Alt+Tab)
+    uint32_t m_triggerMods = 1u << 3;   // Mod1 (Alt)
+    uint32_t m_triggerKeysym = XKB_KEY_Tab;
+    bool m_selectOnModRelease = true;   // select when the trigger mod lifts
     
   // Customizable settings
   int m_thumbnailWidth;

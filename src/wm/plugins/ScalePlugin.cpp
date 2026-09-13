@@ -64,20 +64,29 @@ public:
     void loadConfig(const std::string& configPath) override {
         // Load plugin-specific settings from PluginConfig
         auto& config = PluginConfig::getInstance();
-        
+
         // Customizable settings
         m_scaleFactor = config.getFloatValue("scale", "scaleFactor", 0.75f);
         m_gridSpacing = config.getIntValue("scale", "gridSpacing", 40);
         m_thumbnailWidth = config.getIntValue("scale", "thumbnailWidth", 500);
         m_thumbnailHeight = config.getIntValue("scale", "thumbnailHeight", 375);
         m_maxVisibleWindows = config.getIntValue("scale", "maxVisibleWindows", 5);
-        
+
         // Highlight color (format: "R,G,B,A" where each is 0.0-1.0)
         std::string highlightColor = config.getValue("scale", "highlightColor", "0.0,1.0,1.0,1.0");
-        sscanf(highlightColor.c_str(), "%f,%f,%f,%f", 
-               &m_highlightColor[0], &m_highlightColor[1], 
+        sscanf(highlightColor.c_str(), "%f,%f,%f,%f",
+               &m_highlightColor[0], &m_highlightColor[1],
                &m_highlightColor[2], &m_highlightColor[3]);
-        
+
+        // Configurable toggle binding (default Meta+S)
+        uint32_t mods = 0, sym = 0;
+        if (config.getKeybindingParsed("scale", &mods, &sym)) {
+            m_bindingMods = mods;
+            m_bindingKeysym = sym;
+            printf("[ScalePlugin] Toggle binding from config: mods=0x%x keysym=0x%x\n",
+                   mods, sym);
+        }
+
         printf("[ScalePlugin] Config loaded (scale=%.2f, spacing=%d, thumbnail=%dx%d)\n",
                m_scaleFactor, m_gridSpacing, m_thumbnailWidth, m_thumbnailHeight);
     }
@@ -102,9 +111,10 @@ public:
 
     bool onKey(const KeyEvent& event) override {
         if (!m_active) {
-            // Meta+S to toggle scale overview
-            constexpr uint32_t MOD_LOGO = 1 << 6;
-            if (event.pressed && (event.modifiers & MOD_LOGO) && event.keysym == XKB_KEY_s) {
+            // Configurable toggle binding (default Meta+S); exact modifier
+            // match so stray held modifiers don't shadow or trigger it
+            if (event.pressed && event.modifiers == m_bindingMods &&
+                event.keysym == m_bindingKeysym) {
                 beginScale();
                 return true;
             }
@@ -166,6 +176,9 @@ private:
     int m_selectedIndex;
     float m_scaleFactor;
     int m_gap;
+    // Toggle binding (overridable via config "keybinding", default Meta+S)
+    uint32_t m_bindingMods = 1u << 6;  // Mod4 (Meta/Logo)
+    uint32_t m_bindingKeysym = XKB_KEY_s;
     std::vector<ScaleSlot> m_slots;
     int m_gridCols;
     int m_gridRows;

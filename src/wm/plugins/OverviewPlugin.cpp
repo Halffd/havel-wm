@@ -3,6 +3,7 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <wm/plugins/PluginConfig.hpp>
 #include <wm/render/OverlayRenderer.hpp>
 #include <wm/View.hpp>
 #include <xkbcommon/xkbcommon-keysyms.h>
@@ -79,6 +80,15 @@ public:
     
     void loadConfig(const std::string& configPath) override {
         (void)configPath;
+        // Configurable toggle binding (default Meta+W)
+        auto& config = PluginConfig::getInstance();
+        uint32_t mods = 0, sym = 0;
+        if (config.getKeybindingParsed("overview", &mods, &sym)) {
+            m_bindingMods = mods;
+            m_bindingKeysym = sym;
+            printf("[Overview] Toggle binding from config: mods=0x%x keysym=0x%x\n",
+                   mods, sym);
+        }
         printf("[Overview] Config loaded\n");
     }
     
@@ -114,10 +124,9 @@ public:
     }
     
     bool onKey(const KeyEvent& event) override {
-        constexpr uint32_t MOD_LOGO = 1 << 6;
-
-        // Meta+W toggles overview
-        if (event.pressed && (event.modifiers & MOD_LOGO) && event.keysym == XKB_KEY_w) {
+        // Configurable toggle binding (default Meta+W); exact modifier match
+        if (event.pressed && event.modifiers == m_bindingMods &&
+            event.keysym == m_bindingKeysym) {
             toggle();
             return true;
         }
@@ -164,6 +173,9 @@ private:
     bool m_visible;
     int m_selectedWorkspace;
     int m_selectedWindow;
+    // Toggle binding (overridable via config "keybinding", default Meta+W)
+    uint32_t m_bindingMods = 1u << 6;  // Mod4 (Meta/Logo)
+    uint32_t m_bindingKeysym = XKB_KEY_w;
     std::vector<OverviewWorkspace> m_workspaces;
     int m_gridCols = 3;
     int m_gridRows = 4;

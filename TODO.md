@@ -192,18 +192,18 @@
   - Would need: Shader or wlroots integration
   - Files: N/A
 
-- [ ] **Blur behind transparent windows** - Kawase blur exists but may not auto-apply
-  - Files: `src/wm/plugins/BlurPlugin.cpp`
+- [ ] **Blur behind transparent windows** - No blur plugin exists
+  (BlurPlugin.cpp never existed; the old factory declaration was removed
+  2026-09. Kawase blur would need a scene-compatible implementation)
+  - Files: N/A
 
 ### Plugins
-- [ ] **Wobbly windows plugin** - Commented out in CMakeLists
-  - Files: `src/wm/plugins/WobblyWindowsPlugin.cpp`
-
-- [ ] **Destroy on close effect** - Commented out
-  - Files: `src/wm/plugins/DestroyOnClosePlugin.cpp`
-
-- [ ] **Spring on spawn effect** - Commented out
-  - Files: `src/wm/plugins/SpringOnSpawnPlugin.cpp`
+- [x] ~~**Wobbly windows plugin**~~ REMOVED 2026-09 - GL-coupled (VBO/shader
+  animation), unbuildable since the scene-graph migration; delete recorded here
+- [x] ~~**Destroy on close effect**~~ REMOVED 2026-09 - GL particle members,
+  same story
+- [x] ~~**Spring on spawn effect**~~ REMOVED 2026-09 - same story; re-derive
+  from the scene API if wanted (see OverlayRenderer for the pattern)
 
 - [ ] **Magic lamp effect** - Minimize animation (like macOS)
   - Files: Not created

@@ -3,6 +3,7 @@
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <wm/plugins/PluginConfig.hpp>
 #include <wm/render/OverlayRenderer.hpp>
 #include <wm/bridge.h>
 #include <input/TextInputManager.hpp>
@@ -70,16 +71,23 @@ public:
     }
 
     void loadConfig(const std::string& configPath) override {
-        // Would load custom search paths, favorites, etc.
         (void)configPath;
+        // Configurable toggle binding (default Meta+D)
+        auto& config = PluginConfig::getInstance();
+        uint32_t mods = 0, sym = 0;
+        if (config.getKeybindingParsed("app_launcher", &mods, &sym)) {
+            m_bindingMods = mods;
+            m_bindingKeysym = sym;
+            printf("[AppLauncher] Toggle binding from config: mods=0x%x keysym=0x%x\n",
+                   mods, sym);
+        }
         printf("[AppLauncher] Config loaded\n");
     }
 
     bool onKey(const KeyEvent& event) override {
-        constexpr uint32_t MOD_LOGO = 1 << 6;
-
-        // Meta+D toggles launcher (documented default keybinding)
-        if (event.pressed && (event.modifiers & MOD_LOGO) && event.keysym == XKB_KEY_d) {
+        // Configurable toggle binding (default Meta+D); exact modifier match
+        if (event.pressed && event.modifiers == m_bindingMods &&
+            event.keysym == m_bindingKeysym) {
             toggleLauncher();
             return true;
         }
@@ -148,6 +156,9 @@ private:
     CompositorAPI* m_api = nullptr;
     bool m_visible;
     int m_selectedIndex;
+    // Toggle binding (overridable via config "keybinding", default Meta+D)
+    uint32_t m_bindingMods = 1u << 6;  // Mod4 (Meta/Logo)
+    uint32_t m_bindingKeysym = XKB_KEY_d;
     std::string m_searchText;
     std::vector<DesktopEntry> m_entries;
     std::vector<DesktopEntry> m_filtered;

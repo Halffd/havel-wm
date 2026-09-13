@@ -192,7 +192,6 @@ set(WM_CORE_SOURCES
     src/wm/desktop/FileManager.hpp
     src/wm/plugins/PluginManager.cpp
     src/wm/plugins/Plugin.cpp
-    src/wm/plugins/ExamplePlugin.cpp
     src/wm/plugins/ScalePlugin.cpp
     src/wm/plugins/WallpaperPlugin.cpp
     src/wm/plugins/NotificationsPlugin.cpp
@@ -208,10 +207,6 @@ set(WM_CORE_SOURCES
     src/wm/plugins/FPSPlugin.cpp
     src/wm/plugins/ZoomPlugin.cpp
     src/wm/plugins/WorkspaceInfoBar.cpp
-    # Animation plugins (WIP - need interface adjustments)
-    # src/wm/plugins/WobblyWindowsPlugin.cpp
-    # src/wm/plugins/DestroyOnClosePlugin.cpp
-    # src/wm/plugins/SpringOnSpawnPlugin.cpp
 )
 
 # Scene graph test executable
@@ -227,6 +222,15 @@ target_include_directories(test-scene-graph PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
 )
 target_link_libraries(test-scene-graph PRIVATE m)
+
+# Keybinding parser test executable
+add_executable(test-keybinding tests/test_keybinding.cpp)
+target_include_directories(test-keybinding PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
+)
+target_link_libraries(test-keybinding PRIVATE xkbcommon)
 
 # Shell/panel sources (Phase 1 - window manager integration)
 set(SHELL_SOURCES

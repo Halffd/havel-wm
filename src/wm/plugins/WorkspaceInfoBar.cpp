@@ -1,5 +1,6 @@
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
+#include <wm/plugins/PluginConfig.hpp>
 #include <wm/render/OverlayRenderer.hpp>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
@@ -43,6 +44,15 @@ public:
 
     void loadConfig(const std::string& configPath) override {
         (void)configPath;
+        // Configurable toggle binding (default Meta+Shift+B)
+        auto& config = PluginConfig::getInstance();
+        uint32_t mods = 0, sym = 0;
+        if (config.getKeybindingParsed("workspace_info_bar", &mods, &sym)) {
+            m_bindingMods = mods;
+            m_bindingKeysym = sym;
+            printf("[WorkspaceInfoBar] Toggle binding from config: mods=0x%x keysym=0x%x\n",
+                   mods, sym);
+        }
         printf("[WorkspaceInfoBar] Config loaded\n");
     }
 
@@ -79,14 +89,11 @@ public:
     }
 
     bool onKey(const KeyEvent& event) override {
-        constexpr uint32_t MOD_LOGO = 1 << 6;
-        constexpr uint32_t MOD_SHIFT = 1 << 0;
-
         if (!event.pressed) return false;
-        if (!(event.modifiers & MOD_LOGO)) return false;
 
-        // Meta+Shift+B: Toggle bar visibility
-        if ((event.modifiers & MOD_SHIFT) && event.keysym == XKB_KEY_b) {
+        // Configurable toggle binding (default Meta+Shift+B); exact match
+        if (event.modifiers == m_bindingMods &&
+            event.keysym == m_bindingKeysym) {
             m_visible = !m_visible;
             printf("[WorkspaceInfoBar] %s\n", m_visible ? "shown" : "hidden");
             return true;
@@ -98,6 +105,9 @@ public:
 private:
     CompositorAPI* m_api = nullptr;
     bool m_visible;
+    // Toggle binding (overridable via config "keybinding", default Meta+Shift+B)
+    uint32_t m_bindingMods = (1u << 6) | (1u << 0);  // Meta+Shift
+    uint32_t m_bindingKeysym = XKB_KEY_b;
     int m_barHeight;
     Color m_bgColor;
     Color m_fgColor;

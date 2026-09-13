@@ -1,7 +1,7 @@
 {
   "scale": {
     "enabled": true,
-    "keybinding": "Meta+W",
+    "keybinding": "Meta+S",
     "scaleFactor": 0.75,
     "gridSpacing": 40,
     "thumbnailWidth": 500,
@@ -77,7 +77,7 @@
   
   "draw": {
     "enabled": true,
-    "keybinding": "Meta+Shift+F",
+    "keybinding": "Meta+Shift+D",
     "brushSize": 5,
     "brushColor": "1.0,1.0,1.0,1.0"
   },
@@ -124,7 +124,7 @@
   
   "overview": {
     "enabled": true,
-    "keybinding": "Meta+Space",
+    "keybinding": "Meta+W",
     "workspaceCount": 10,
     "thumbnailScale": 0.3
   }
