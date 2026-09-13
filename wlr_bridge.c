@@ -1532,6 +1532,16 @@ static void output_frame(struct wl_listener *listener, void *data) {
     wlr_output_schedule_frame(output->output);
 }
 
+// The scene graph (or backend logic) damaged the output and wants a new
+// frame committed. DRM chains frames via page-flip after a present, but
+// the headless backend never self-schedules - without this hook its
+// frame loop runs once and stalls.
+static void output_needs_frame(struct wl_listener *listener, void *data) {
+    struct havel_output *output = wl_container_of(listener, output, needs_frame);
+    (void)data;
+    wlr_output_schedule_frame(output->output);
+}
+
 static void output_destroy(struct wl_listener *listener, void *data) {
     struct havel_output *output = wl_container_of(listener, output, destroy);
 
@@ -1615,6 +1625,9 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     output->frame.notify = output_frame;
     wl_signal_add(&wlr_output->events.frame, &output->frame);
     LOG_INFO("[OUTPUT] Frame handler installed for %s", wlr_output->name);
+
+    output->needs_frame.notify = output_needs_frame;
+    wl_signal_add(&wlr_output->events.needs_frame, &output->needs_frame);
 
     output->destroy.notify = output_destroy;
     wl_signal_add(&wlr_output->events.destroy, &output->destroy);
