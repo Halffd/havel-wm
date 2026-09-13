@@ -49,15 +49,25 @@
   - Files: `src/wm/plugins/ServerDecorationPlugin.cpp`
 
 ### Rendering
-- [ ] **Alt-Tab thumbnails not rendering** - Overlay shows but no window thumbnails
-  - Fixed: Plugin overlay rendering now passes `OverlayRenderer*`
-  - Remaining: `getViewTextureId()` returns 0 (stubbed)
-  - Files: `src/wm/plugins/AltTabPlugin.cpp`, `src/wm/plugins/PluginManager.cpp`
+- [ ] **Alt-Tab thumbnails not rendering** - Overlay draws (scene-backed
+  since f9119a2), but window thumbnails are placeholder rects
+  - The GL overlay path could never render (no context on the wlroots
+    0.20 frame path); replaced with the scene-graph renderer 2026-09
+  - Remaining: real view capture. `havel_wlr_capture_view_texture` is an
+    honest 0-returning stub (GL texture capture has no wlroots 0.20
+    API). Would need a scene-based capture (e.g. render view subtree to
+    a CPU wlr_buffer, same technique as SceneText) — icons already work
+    this way via CPU pixels.
+  - Files: `wlr_bridge.c:havel_wlr_capture_view_texture()`, `src/wm/plugins/AltTabPlugin.cpp`
 
-- [ ] **Plugins not visible** - WorkspaceInfoBar, FPS, etc. don't render
-  - Fixed: `PluginManager::renderOverlays()` now passes renderer
-  - Remaining: Plugins may be checking for null or renderer not initialized
-  - Files: `src/wm/plugins/PluginManager.cpp`, `src/wm/core/bridge.cpp`
+- [x] ~~**Plugins not visible** - WorkspaceInfoBar, FPS, etc. don't render~~
+  FIXED 2026-09 (f9119a2) - the overlay renderer issued raw GLES2 calls
+  outside any render pass (structurally impossible under wlroots 0.20);
+  rewritten on the scene graph: rects via wlr_scene_rect, text via
+  FreeType->CPU buffers, icons via pixel blits. composites through the
+  same build_state path as windows.
+  - Remaining: live-session pixel verification
+  - Files: `src/wm/render/OverlayRenderer.cpp`
 
 - [ ] **Per-monitor workspace support** - All monitors show same workspace
   - Suspect: Single `server->scene` shared across outputs
@@ -85,14 +95,18 @@
   - Files: `src/wm/plugins/PluginManager.cpp:reloadConfig()`
 
 ### Keybindings
-- [ ] **Keybindings not working** - Meta+Return, Meta+D, etc. don't trigger
-  - Debug logging added but root cause unknown
-  - Suspect: `KeybindingManager::handleKey()` not matching modifiers
-  - Suspect: Modifier mask mismatch (XKB vs wlroots)
+- [x] ~~**Keybindings not working**~~ FIXED 2026-09 (commit 69d23d1) - root
+  cause found: the bridge passes keycode+8 (xkb convention) but every
+  keycode literal was raw evdev, so most bindings fired on the wrong
+  physical key or never; six plugins also defined MOD_SHIFT as 1<<1
+  which is CapsLock. all matching is keysym-based now (layout-aware).
+  Remaining risk is live-session verification only.
   - Files: `src/wm/input/KeybindingManager.cpp`, `wlr_bridge.c:keyboard_handle_key()`
 
-- [ ] **No keybinding configuration** - Hardcoded in `Server::registerKeybindings()`
-  - Should load from `plugins.json` or `config.hv`
+- [ ] **Server keybindings not configurable** - plugin toggle bindings are
+  configurable via `plugins.json` "keybinding" (since 08fb7b8), but the
+  ~30 Server-level bindings (workspace switch, fullscreen, etc.) remain
+  hardcoded in `Server::registerKeybindings()`
   - Files: `src/wm/core/Server.cpp`
 
 ### Window Management
@@ -174,9 +188,9 @@
 - [ ] **No memory tracking** - Can't detect leaks
   - Files: N/A
 
-- [ ] **PipeWire uses memcpy** - Not zero-copy DMA-BUF
-  - Note: Works fine, just not optimal
-  - Files: `src/wm/core/PipeWireStream.cpp:204`
+- [x] ~~**PipeWire uses memcpy**~~ REMOVED 2026-09 - PipeWireStream never
+  ran (see screen-capture removal); screencopy protocol replaced it. If a
+  PipeWire path is ever wanted, xdg-desktop-portal-wlr is the supported route.
 
 ---
 
@@ -185,7 +199,7 @@
 ### Visual Polish
 - [ ] **Animations** - Window open/close, workspace switch animations
   - `Animator` class exists but may not be used
-  - Files: `src/wm/Animator.hpp`, `src/wm/core/Server.cpp`
+  - Files: `src/wm/include/wm/Animator.hpp`, `src/wm/core/Server.cpp`
 
 - [ ] **Drop shadows** - Windows don't cast shadows
   - Would need: Shadow rendering pass or wlroots integration
@@ -253,7 +267,8 @@
 
 ### Advanced Features
 - [ ] **Remote desktop** - RDP/VNC server
-  - Would need: PipeWire remote or custom implementation
+  - Would need: custom implementation (or wayvnc, which builds on the
+    wlr protocols the compositor already creates)
   - Files: N/A
 
 - [ ] **Color management** - ICC profiles, color calibration
@@ -353,22 +368,28 @@
 - ✅ Keybinding system exists
 - ✅ Configuration loading works
 
-### What's NOT Working
-- ❌ Window buffers not updating (content black)
-- ❌ Input events not consumed (escape to other WMs)
-- ❌ Window close crashes
-- ❌ Plugin textures not available (thumbnails)
-- ❌ Keybindings not triggering
+### What's NOT Working (2026-09 update)
+- ❌ Window buffers not updating (content black) — live-session diagnosis
+  pending; loading-screen stub (auto-hide) and overlay GL path both
+  eliminated as suspects this cycle
+- ❌ Input events not consumed (escape to other WMs) — keysym dispatch is
+  correct by construction now; needs live confirmation
+- ❌ Window close crashes — XWayland kind-tag fix landed; XDG path still
+  needs live-session repro
+- ❌ Plugin textures not available (thumbnails) — needs scene-based
+  capture (see Rendering section)
+- ✅ Keybindings triggering — keycode/keysym mismatch root-caused and
+  fixed (69d23d1); one-owner-per-key deconflicted (002d6af); plugin
+  bindings configurable (08fb7b8)
 
-### Root Cause Hypothesis
-The core issue is **event flow**:
-1. Windows map but buffers don't commit → no content
-2. Keys press but events not consumed → escape to X11
-3. Windows destroy but pointers not cleared → crash
-
-Fix event flow, and 80% of critical issues resolve.
+### Root Cause Hypothesis (2026-09 status)
+The original "event flow" hypothesis was half right: keys DID flow, but
+every keycode literal was written in the wrong convention (raw evdev vs
+the bridge's xkb keycode+8) so handlers matched the wrong keys. That is
+fixed. Window buffers are the remaining live-session question.
 
 ---
 
 **This TODO list is auto-generated from code analysis, TODO.md, and debugging sessions.**
-**Last updated:** 2026-03-29
+**Last updated:** 2026-09 (post 2026-09 audit: keysym input, scene overlays,
+dead-layer removal; see git log 69d23d1..9da2c16)

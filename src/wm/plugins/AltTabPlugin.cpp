@@ -24,9 +24,7 @@ struct WindowEntry {
     uint32_t workspace = 0;
     bool isFocused = false;
     int x = 0, y = 0, w = 0, h = 0;
-    uint32_t textureId = 0;   // OpenGL texture ID for thumbnail
-    int textureWidth = 0;
-    int textureHeight = 0;
+    uint32_t textureId = 0;   // View capture handle (0 = no thumbnail, placeholder drawn)
     uint32_t iconTextureId = 0;  // AppIconLoader handle (CPU pixel data)
     int iconSize = 32;  // Icon display size
 };
@@ -234,8 +232,6 @@ private:
       entry.title = m_api->getViewTitle(view);
 
       entry.textureId = m_api->getViewTextureId(view);
-            entry.textureWidth = m_api->getViewTextureWidth(view);
-            entry.textureHeight = m_api->getViewTextureHeight(view);
 
       entry.iconTextureId = havel::AppIconLoader::getInstance()->loadIcon(entry.appId);
             entry.iconSize = havel::AppIconLoader::getInstance()->getIconSize();
