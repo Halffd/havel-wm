@@ -1429,7 +1429,7 @@ static void output_frame(struct wl_listener *listener, void *data) {
     server->current_fps = fps;
     server->frame_count++;
 
-    // DEBUG: log the first frame and every 600th after (~10s at 60fps)
+    // Frame heartbeat: first frame and every 600th after (~10s at 60fps)
     static int frame_count = 0;
     frame_count++;
     if (frame_count == 1 || frame_count % 600 == 0) {
@@ -1557,6 +1557,7 @@ static void output_destroy(struct wl_listener *listener, void *data) {
     }
 
     wl_list_remove(&output->frame.link);
+    wl_list_remove(&output->needs_frame.link);
     wl_list_remove(&output->destroy.link);
     wl_list_remove(&output->link);
     free(output);
