@@ -56,6 +56,7 @@ static uint64_t get_monotonic_time_ms(void) {
 #include <wlr/types/wlr_idle_inhibit_v1.h>
 #include <wlr/types/wlr_idle_notify_v1.h>
 #include <wlr/types/wlr_virtual_pointer_v1.h>
+#include <wlr/types/wlr_virtual_keyboard_v1.h>
 #include <wlr/types/wlr_data_control_v1.h>
 #include <wlr/types/wlr_input_method_v2.h>
 #include <wlr/types/wlr_text_input_v3.h>
@@ -198,6 +199,9 @@ struct havel_wlr_server {
     // Virtual pointer v1 (remote desktop)
     struct wlr_virtual_pointer_manager_v1 *virtual_pointer_manager;
 
+    // Virtual keyboard v1 (input injection for tests/remote control)
+    struct wlr_virtual_keyboard_manager_v1 *virtual_keyboard_manager;
+
     // Data control v1 (clipboard management)
     struct wlr_data_control_manager_v1 *data_control_manager;
 
@@ -236,6 +240,7 @@ struct havel_wlr_server {
 
     struct wl_listener new_output;
     struct wl_listener new_input;
+    struct wl_listener new_virtual_keyboard;
 
     struct wl_listener cursor_motion;
     struct wl_listener cursor_motion_absolute;
@@ -1742,7 +1747,20 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
 
     if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
         const uint32_t keycode = event->keycode + 8;
-        uint32_t modifiers = keyboard->keyboard->modifiers.depressed;
+        // Read modifiers from OUR xkb_state (updated above). wlroots's
+        // keyboard->modifiers only refreshes on wlr_keyboard_notify_key,
+        // which virtual keyboards never receive - so wlroots's copy stays
+        // zero for injected keys (observed live: Meta held, mods=0).
+        uint32_t modifiers = 0;
+        if (keyboard->xkb_state) {
+            xkb_mod_mask_t depressed = xkb_state_serialize_mods(
+                keyboard->xkb_state, XKB_STATE_MODS_DEPRESSED);
+            // xkb modifier bits: Shift=0 CapsLock=1 Ctrl=2 Alt=3 Mod2=4
+            // Mod3=5 Mod4(Meta)=6 Mod5=7 - same layout the C++ layer uses
+            modifiers = (uint32_t)depressed;
+        } else {
+            modifiers = keyboard->keyboard->modifiers.depressed;
+        }
 
         // Get keysym from XKB state (layout-aware)
         xkb_keysym_t keysym = 0;
@@ -1855,8 +1873,15 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
             key_char = utf8_buffer[0];
         }
     }
+    // Same modifier source as the press path (our xkb_state - wlroots's
+    // copy never updates for injected keys)
+    uint32_t rel_modifiers = 0;
+    if (keyboard->xkb_state) {
+        rel_modifiers = (uint32_t)xkb_state_serialize_mods(
+            keyboard->xkb_state, XKB_STATE_MODS_DEPRESSED);
+    }
     (void)havel_cpp_on_key(server->cpp_server, keycode, false,
-                            keyboard->keyboard->modifiers.depressed,
+                            rel_modifiers,
                             keysym, key_char, utf8_buffer);
 
     wlr_seat_keyboard_notify_key(server->seat, event->time_msec, event->keycode, event->state);
@@ -1928,9 +1953,32 @@ static void server_new_pointer(struct havel_wlr_server *server, struct wlr_input
     wlr_cursor_attach_input_device(server->cursor, device);
 }
 
+// A client created a virtual keyboard (zwp_virtual_keyboard_v1). These
+// do NOT arrive through backend->events.new_input (that path is for
+// session devices) - the manager emits its own signal. Route through
+// the same server_new_keyboard path so injected keys drive the normal
+// dispatch chain.
+static void server_new_virtual_keyboard(struct wl_listener *listener, void *data) {
+    struct havel_wlr_server *server =
+        wl_container_of(listener, server, new_virtual_keyboard);
+    struct wlr_virtual_keyboard_v1 *vk = data;
+
+    LOG_INFO("[Input] New virtual keyboard (client-injected)");
+    struct wlr_input_device *device = &vk->keyboard.base;
+
+    // The client keymap arrives via the protocol AFTER creation (the
+    // zwp_virtual_keyboard_v1.keymap request); by the time keys flow,
+    // the keyboard->events.key signal fires regardless. Attach through
+    // the same path as physical keyboards.
+    server_new_keyboard(server, device);
+}
+
 static void server_new_input(struct wl_listener *listener, void *data) {
     struct havel_wlr_server *server = wl_container_of(listener, server, new_input);
     struct wlr_input_device *device = data;
+
+    LOG_INFO("[Input] New input device: %s (type=%d)",
+             device->name ? device->name : "(unnamed)", (int)device->type);
 
     switch (device->type) {
     case WLR_INPUT_DEVICE_KEYBOARD:
@@ -2440,6 +2488,18 @@ havel_wlr_server_t* havel_wlr_create(void) {
     server->virtual_pointer_manager = wlr_virtual_pointer_manager_v1_create(server->display);
     if (server->virtual_pointer_manager) {
         LOG_INFO("[Virtual Pointer] virtual_pointer_manager_v1 created (remote desktop)");
+    }
+
+    // Create virtual keyboard manager v1 (input injection - lets test
+    // clients drive the full key dispatch chain; also the remote-desktop
+    // path). Virtual keyboards surface via the manager's own signal,
+    // not backend new_input.
+    server->virtual_keyboard_manager = wlr_virtual_keyboard_manager_v1_create(server->display);
+    if (server->virtual_keyboard_manager) {
+        server->new_virtual_keyboard.notify = server_new_virtual_keyboard;
+        wl_signal_add(&server->virtual_keyboard_manager->events.new_virtual_keyboard,
+                      &server->new_virtual_keyboard);
+        LOG_INFO("[Virtual Keyboard] virtual_keyboard_manager_v1 created (input injection)");
     }
 
     // Create data control manager v1 (clipboard management)
