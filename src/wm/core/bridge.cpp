@@ -490,12 +490,12 @@ void havel_cpp_process_desktop_motion(struct havel_cpp_server* server, int x, in
     }
 }
 
-void havel_cpp_process_desktop_key(struct havel_cpp_server* server, uint32_t keycode, uint32_t modifiers) {
+void havel_cpp_process_desktop_key(struct havel_cpp_server* server, uint32_t keysym, uint32_t modifiers) {
     if (!server || !server->server) return;
-    
+
     auto* desktopManager = static_cast<havel::DesktopManager*>(server->server->desktopManager());
     if (desktopManager) {
-        desktopManager->processKeyDown(keycode, modifiers);
+        desktopManager->processKeyDown(keysym, modifiers);
     }
 }
 

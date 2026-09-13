@@ -172,7 +172,6 @@ set(WM_CORE_SOURCES
     src/wm/render/render_c_wrappers.c
     src/wm/render/OverlayRenderer.cpp
     src/wm/render/OverlayRenderer.hpp
-    src/wm/render/OverlayRendering.cpp
     src/wm/render/AppIconLoader.cpp
     src/wm/input/InputManager.cpp
     src/wm/input/KeybindingManager.cpp
@@ -184,7 +183,6 @@ set(WM_CORE_SOURCES
     src/wm/input/InputDeviceManager.hpp
     src/wm/input/ComboManager.cpp
     src/wm/input/ComboManager.hpp
-    src/wm/overlay/OverlayScene.cpp
     src/wm/desktop/DesktopManager.cpp
     src/wm/desktop/DesktopManager.hpp
     src/wm/desktop/NASAWallpaper.cpp

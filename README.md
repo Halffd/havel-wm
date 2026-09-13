@@ -119,12 +119,14 @@ Select "Havel WM" from the Wayland session menu.
 | `Meta+Return` | Spawn terminal (alacritty, falls back to foot) |
 | `Meta+D` | App launcher |
 | `Meta+W` | Workspace overview |
-| `Meta+Tab` | Alt-Tab window switcher |
+| `Meta+Tab` | Switch to next workspace |
+| `Alt+Tab` | Window switcher (thumbnails) |
 | `Meta+Shift+Q` | Close focused window |
 | `Meta+1-9` | Switch to workspace 1-9 |
 | `Meta+Shift+1-9` | Move window to workspace |
 | `Meta+F` | Toggle fullscreen |
 | `Meta+Shift+F` | Toggle FPS overlay |
+| `Ctrl+Meta+F4` | Quit compositor |
 | `Ctrl+Alt+F1-F12` | Switch VT |
 
 ### Configuration
@@ -135,7 +137,7 @@ Create `~/.config/havel-wm/plugins.json`:
 {
   "scale": {
     "enabled": true,
-    "keybinding": "Meta+W",
+    "keybinding": "Meta+S",
     "scaleFactor": 0.75
   },
   "alt_tab": {

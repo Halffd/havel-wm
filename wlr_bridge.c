@@ -1748,6 +1748,13 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
         bool consumed = havel_cpp_on_key(server->cpp_server, keycode, true, modifiers, keysym, key_char, utf8_buffer);
         LOG_INFO("[KEY] Consumed=%d", consumed);
 
+        // Desktop manager (logout binding, show-desktop) sees keys the
+        // keybindings/plugins did not consume, keysym-based like the
+        // C++ layer (it previously never received keys at all).
+        if (!consumed) {
+            havel_cpp_process_desktop_key(server->cpp_server, keysym, modifiers);
+        }
+
         // Only forward to seat if not consumed by compositor
         if (!consumed) {
             wlr_seat_keyboard_notify_key(server->seat, event->time_msec, event->keycode, event->state);
