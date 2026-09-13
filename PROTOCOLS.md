@@ -243,25 +243,25 @@ wlrctl output HDMI-A-1 dpms on
 
 ## Screen Capture Protocols
 
-### ✅ xdg-desktop-portal
-**Status:** Implemented  
-**Purpose:** Secure screen sharing
+### ❌ xdg-desktop-portal
+**Status:** NOT implemented (2026-09 cleanup)
 
-- Browser screen sharing
-- PipeWire integration
-- User consent dialogs
+- The old C++ D-Bus portal code (DesktopPortal.cpp) was never
+  instantiated: its bridge calls were commented out, so it never ran.
+  Removed 2026-09.
+- For browser screen sharing, run `xdg-desktop-portal-wlr`, which
+  implements the portal over standard wlr protocols (screencopy below).
 
-**Used by:** Firefox, Chrome, OBS
+**Used by:** Firefox, Chrome (via xdg-desktop-portal-wlr)
 
 ---
 
 ### ✅ wlr-screencopy-unstable-v1
-**Status:** Available  
+**Status:** Available (protocol created by the compositor)
 **Purpose:** Screen capture
 
 - Screenshots
 - Screen recording
-- Remote desktop
 
 **Tools:** `grim`, `slurp`, `wf-recorder`
 
@@ -377,7 +377,7 @@ echo '{"method":"subscribe","params":{"events":["window_created"]}}' | \
 | **Data** | wl_data_device | ✅ | Clipboard |
 | **Data** | wlr-primary-selection-v1 | ✅ | Primary selection |
 | **Activation** | xdg-activation-v1 | ✅ | Focus requests |
-| **Capture** | xdg-desktop-portal | ✅ | Screen sharing |
+| **Capture** | wlr-screencopy-v1 | ✅ | Screenshots/recording (grim, wf-recorder) |
 | **Notification** | org.freedesktop.Notifications | ✅ | D-Bus notifications |
 | **IPC** | Havel IPC | ✅ | JSON-RPC control |
 | **Input** | wlr-virtual-pointer-v1 | ✅ NEW | Remote desktop |

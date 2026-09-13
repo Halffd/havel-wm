@@ -156,10 +156,6 @@ public:
     void setTemperature(int kelvin);
     void setBrightness(float brightness);
 
-    // Screen capture (PipeWire/screencopy)
-    void* screenCapture() const { return m_screenCapture; }
-    void setScreenCapture(void* capture) { m_screenCapture = capture; }
-
     // Gesture recognition
     void* gestureRecognizer() const { return m_gestureRecognizer; }
     void setGestureRecognizer(void* recognizer) { m_gestureRecognizer = recognizer; }
@@ -241,9 +237,6 @@ private:
     float m_bgColorR = 0.1f;
     float m_bgColorG = 0.1f;
     float m_bgColorB = 0.15f;
-
-    // Screen capture (PipeWire)
-    void* m_screenCapture = nullptr;
 
     // Gesture recognition
     void* m_gestureRecognizer = nullptr;

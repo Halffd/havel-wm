@@ -85,11 +85,6 @@ void havel_cpp_server_destroy(struct havel_cpp_server* server) {
     delete server;
 }
 
-void* havel_cpp_server_get_native_handle(struct havel_cpp_server* server) {
-    if (!server) return nullptr;
-    return server->server->nativeHandle();
-}
-
 void havel_cpp_server_set_native_handle(struct havel_cpp_server* server, void* handle) {
     if (!server) return;
     server->nativeHandle = handle;
@@ -182,11 +177,6 @@ void havel_cpp_set_output_geometry(struct havel_cpp_server* server, uint32_t wor
     server->server->setOutputGeometry(workspace_id, geom);
 }
 
-void havel_cpp_set_active_workspace(struct havel_cpp_server* server, uint32_t workspace_id) {
-    if (!server) return;
-    // Workspace switching is handled by Server::setActiveWorkspace
-}
-
 void havel_cpp_update_animations(struct havel_cpp_server* server) {
     if (!server) return;
     server->server->updateAnimations();
@@ -208,76 +198,6 @@ void havel_cpp_dispatch_output_frame(struct havel_cpp_server* server, void* outp
 void havel_cpp_get_background_color(struct havel_cpp_server* server, float* r, float* g, float* b) {
     if (!server) return;
     server->server->getBackgroundColor(r, g, b);
-}
-
-void havel_cpp_set_gamma(struct havel_cpp_server* server, float gamma) {
-    if (!server) return;
-    server->server->setGamma(gamma);
-    // Apply to all outputs via C layer
-    if (server->nativeHandle) {
-        havel_wlr_set_gamma((havel_wlr_server_t*)server->nativeHandle, gamma);
-    }
-}
-
-void havel_cpp_set_temperature(struct havel_cpp_server* server, int kelvin) {
-    if (!server) return;
-    server->server->setTemperature(kelvin);
-    // Apply to all outputs via C layer
-    if (server->nativeHandle) {
-        havel_wlr_set_temperature((havel_wlr_server_t*)server->nativeHandle, kelvin);
-    }
-}
-
-void havel_cpp_set_brightness(struct havel_cpp_server* server, float brightness) {
-    if (!server) return;
-    server->server->setBrightness(brightness);
-    // Apply to all outputs via C layer
-    if (server->nativeHandle) {
-        havel_wlr_set_brightness((havel_wlr_server_t*)server->nativeHandle, brightness);
-    }
-}
-
-// Per-monitor control
-void havel_cpp_set_gamma_for_output(struct havel_cpp_server* server, int output_index, float gamma) {
-    if (!server) return;
-    server->server->setGamma(gamma);  // Also update global for new outputs
-    if (server->nativeHandle) {
-        havel_wlr_set_gamma_for_output((havel_wlr_server_t*)server->nativeHandle, output_index, gamma);
-    }
-}
-
-void havel_cpp_set_temperature_for_output(struct havel_cpp_server* server, int output_index, int kelvin) {
-    if (!server) return;
-    server->server->setTemperature(kelvin);
-    if (server->nativeHandle) {
-        havel_wlr_set_temperature_for_output((havel_wlr_server_t*)server->nativeHandle, output_index, kelvin);
-    }
-}
-
-void havel_cpp_set_brightness_for_output(struct havel_cpp_server* server, int output_index, float brightness) {
-    if (!server) return;
-    server->server->setBrightness(brightness);
-    if (server->nativeHandle) {
-        havel_wlr_set_brightness_for_output((havel_wlr_server_t*)server->nativeHandle, output_index, brightness);
-    }
-}
-
-// Per-monitor zoom with cursor-centered zoom
-void havel_cpp_set_zoom_for_output(struct havel_cpp_server* server, int output_index, float zoom,
-                                    double cursor_x, double cursor_y) {
-    if (!server) return;
-    if (server->nativeHandle) {
-        havel_wlr_set_zoom_for_output((havel_wlr_server_t*)server->nativeHandle, 
-                                       output_index, zoom, (float)cursor_x, (float)cursor_y);
-    }
-}
-
-// Wrapper without cursor position
-void havel_cpp_set_zoom_for_output_simple(struct havel_cpp_server* server, int output_index, float zoom) {
-    if (!server) return;
-    if (server->nativeHandle) {
-        havel_wlr_set_zoom_for_output_simple((havel_wlr_server_t*)server->nativeHandle, output_index, zoom);
-    }
 }
 
 void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int height) {
@@ -308,11 +228,6 @@ void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int hei
     (void)height;
 }
 
-void* havel_cpp_get_plugin_manager(struct havel_cpp_server* server) {
-    if (!server || !server->server) return nullptr;
-    return &server->server->pluginManager();
-}
-
 void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command) {
     if (!server || !command) return;
 
@@ -322,7 +237,7 @@ void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command
         LOG_ERROR("[Spawn] strdup failed");
         return;
     }
-    
+
     char* argv[64];
     int argc = 0;
     char* token = strtok(cmd_copy, " \t\n");
@@ -331,7 +246,7 @@ void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command
         token = strtok(NULL, " \t\n");
     }
     argv[argc] = NULL;
-    
+
     if (argc == 0) {
         free(cmd_copy);
         return;
@@ -429,11 +344,6 @@ void havel_cpp_init_window_groups(struct havel_cpp_server* server) {
     LOG_INFO("[Bridge] Window group manager initialized");
 }
 
-void* havel_cpp_get_window_group_manager(struct havel_cpp_server* server) {
-    if (!server || !server->server) return nullptr;
-    return server->server->windowGroupManager();
-}
-
 void havel_cpp_process_combo_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers) {
     if (!server || !server->server) return;
     
@@ -460,11 +370,6 @@ void havel_cpp_init_desktop(struct havel_cpp_server* server) {
     desktopManager.bindLogout(XKB_KEY_Delete, (1 << 0) | (1 << 2) | (1 << 3));  // Shift=bit0, Ctrl=bit2, Alt=bit3
 
     LOG_INFO("[Bridge] Desktop manager initialized");
-}
-
-void* havel_cpp_get_desktop_manager(struct havel_cpp_server* server) {
-    if (!server || !server->server) return nullptr;
-    return server->server->desktopManager();
 }
 
 void* havel_cpp_get_scene_graph(struct havel_cpp_server* server) {

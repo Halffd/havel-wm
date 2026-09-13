@@ -230,7 +230,7 @@ See `src/wm/plugins/Plugin.hpp` for the plugin interface.
 | xdg-decoration-v1 | ✅ |
 | text-input-v3 | ✅ |
 | xdg-activation-v1 | ✅ |
-| xdg-desktop-portal | ✅ |
+| wlr-screencopy-v1 | ✅ |
 | org.freedesktop.Notifications | ✅ |
 
 See `PROTOCOLS.md` for complete documentation.
@@ -271,10 +271,10 @@ bash tests/run_tests.sh
 
 ```
 src/wm/
-├── core/         # C++ compositor logic (Server, window managers, overlays)
-├── include/wm/   # Public headers (Server, DisplaySettings, OverlayController)
-├── plugins/      # 15 built-in plugins
-├── render/       # GLES2 overlay path (windows are rendered by wlroots/wlr_scene)
+├── core/         # C++ compositor logic (Server, window managers, bridge)
+├── include/wm/   # Public headers (Server, DisplaySettings)
+├── plugins/      # 14 built-in plugins
+├── render/       # Scene-graph overlay renderer + icon loader
 ├── overlay/      # Overlay UI (Alt-Tab, Overview, App Launcher)
 ├── scene/        # Scene graph (wlr_scene wrapper)
 └── shell/        # IPC server, panel, terminal, and other shell apps

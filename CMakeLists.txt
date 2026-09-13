@@ -25,17 +25,7 @@ pkg_check_modules(VULKAN REQUIRED vulkan)
 # Find nlohmann/json for JSON parsing
 find_package(nlohmann_json CONFIG REQUIRED)
 
-# Find PipeWire for screen sharing
-pkg_check_modules(PIPEWIRE libpipewire-0.3)
-if(PIPEWIRE_FOUND)
-    set(PIPEWIRE_ENABLED ON)
-    message(STATUS "PipeWire found - screen sharing enabled")
-else()
-    set(PIPEWIRE_ENABLED OFF)
-    message(STATUS "PipeWire not found - screen sharing disabled")
-endif()
-
-# Find GLib/GIO for D-Bus (xdg-desktop-portal integration)
+# Find GLib/GIO for D-Bus (notifications, IPC)
 pkg_check_modules(GLIB gio-2.0 gio-unix-2.0)
 if(GLIB_FOUND)
     set(GLIB_ENABLED ON)
@@ -147,12 +137,6 @@ set(WM_CORE_SOURCES
     src/wm/core/bridge.cpp
     src/wm/core/Animation.cpp
     src/wm/core/Animator.cpp
-    src/wm/core/ScreenCapture.cpp
-    src/wm/core/ScreenCapture.hpp
-    src/wm/core/PipeWireStream.cpp
-    src/wm/core/PipeWireStream.hpp
-    src/wm/core/DesktopPortal.cpp
-    src/wm/core/DesktopPortal.hpp
     src/wm/core/NotificationDaemon.cpp
     src/wm/core/NotificationDaemon.hpp
     src/wm/core/WindowGroupManager.cpp
@@ -308,7 +292,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${FREETYPE_INCLUDE_DIRS}
     ${PNG_INCLUDE_DIRS}
     ${CURL_INCLUDE_DIRS}
-    ${PIPEWIRE_INCLUDE_DIRS}
     ${GLIB_INCLUDE_DIRS}
 )
 
@@ -327,7 +310,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${FREETYPE_LIBRARIES}
     ${PNG_LIBRARIES}
     ${CURL_LIBRARIES}
-    ${PIPEWIRE_LIBRARIES}
     ${GLIB_LIBRARIES}
     nlohmann_json::nlohmann_json
 )

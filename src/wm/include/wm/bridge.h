@@ -35,8 +35,7 @@ struct havel_output;
 struct havel_cpp_server* havel_cpp_server_create(void);
 void havel_cpp_server_destroy(struct havel_cpp_server* server);
 
-// Get native handle for storing in C struct
-void* havel_cpp_server_get_native_handle(struct havel_cpp_server* server);
+// Store the C server pointer in the C++ wrapper
 void havel_cpp_server_set_native_handle(struct havel_cpp_server* server, void* handle);
 
 // Set overlay layer for plugin rendering
@@ -65,7 +64,6 @@ void havel_cpp_on_pointer_decoration_button(struct havel_cpp_server* server, uin
 
 // Output/workspace events
 void havel_cpp_set_output_geometry(struct havel_cpp_server* server, uint32_t workspace_id, int x, int y, int w, int h);
-void havel_cpp_set_active_workspace(struct havel_cpp_server* server, uint32_t workspace_id);
 
 // Animation updates (called from C frame handler)
 void havel_cpp_update_animations(struct havel_cpp_server* server);
@@ -73,16 +71,10 @@ void havel_cpp_update_animations(struct havel_cpp_server* server);
 // Background color (called from C for clear color)
 void havel_cpp_get_background_color(struct havel_cpp_server* server, float* r, float* g, float* b);
 
-// Gamma/temperature control
-void havel_cpp_set_gamma(struct havel_cpp_server* server, float gamma);
-void havel_cpp_set_temperature(struct havel_cpp_server* server, int kelvin);
-void havel_cpp_set_brightness(struct havel_cpp_server* server, float brightness);
-
 // Overlay rendering
 void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int height);
-void* havel_cpp_get_plugin_manager(struct havel_cpp_server* server);
 
-// Application spawning (for App Launcher)
+// Application spawning (for App Launcher): fork+exec, no shell
 void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command);
 
 // Gesture recognition
@@ -101,7 +93,6 @@ void havel_cpp_dispatch_output_frame(struct havel_cpp_server* server, void* outp
 
 // Desktop management
 void havel_cpp_init_desktop(struct havel_cpp_server* server);
-void* havel_cpp_get_desktop_manager(struct havel_cpp_server* server);
 void* havel_cpp_get_scene_graph(struct havel_cpp_server* server);
 void havel_cpp_process_desktop_mouse(struct havel_cpp_server* server, int button, bool pressed, int x, int y);
 void havel_cpp_process_desktop_motion(struct havel_cpp_server* server, int x, int y);
@@ -109,7 +100,6 @@ void havel_cpp_process_desktop_key(struct havel_cpp_server* server, uint32_t key
 
 // Window group management
 void havel_cpp_init_window_groups(struct havel_cpp_server* server);
-void* havel_cpp_get_window_group_manager(struct havel_cpp_server* server);
 
 // C layer gamma application (global - all monitors)
 void havel_wlr_set_gamma(havel_wlr_server_t* server, float gamma);
@@ -148,14 +138,6 @@ void havel_cpp_register_server_callbacks(
     cpp_server_spawn_fn spawn
 );
 
-// Per-monitor control functions
-void havel_cpp_set_gamma_for_output(struct havel_cpp_server* server, int output_index, float gamma);
-void havel_cpp_set_temperature_for_output(struct havel_cpp_server* server, int output_index, int kelvin);
-void havel_cpp_set_brightness_for_output(struct havel_cpp_server* server, int output_index, float brightness);
-void havel_cpp_set_zoom_for_output(struct havel_cpp_server* server, int output_index, float zoom,
-                                    double cursor_x, double cursor_y);
-void havel_cpp_set_zoom_for_output_simple(struct havel_cpp_server* server, int output_index, float zoom);
-
 // View manipulation (called from C++ Server.cpp)
 void havel_wlr_set_view_position(void* c_view, int x, int y);
 void havel_wlr_set_view_size(void* c_view, int w, int h);
@@ -168,10 +150,6 @@ void havel_wlr_close_view(void* c_view);
 
 // View texture capture (for Alt-Tab thumbnails)
 uint32_t havel_wlr_capture_view_texture(void* c_view);
-
-// Per-output workspace management
-void havel_wlr_output_set_workspace(struct havel_output *output, uint32_t workspace_id);
-uint32_t havel_wlr_output_get_workspace(struct havel_output *output);
 
 #ifdef __cplusplus
 }

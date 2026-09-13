@@ -308,7 +308,6 @@ struct havel_output {
     uint16_t *gamma_ramp_green;
     uint16_t *gamma_ramp_blue;
     size_t gamma_ramp_size;
-    bool gamma_ramp_dirty;  // Flag to indicate LUT needs regeneration
 };
 
 struct havel_keyboard {
@@ -656,15 +655,6 @@ static void workspace_set_active_output(struct havel_output *havel_out, uint32_t
 static void cpp_impl_workspace_set_active(uint32_t workspace_id) {
     // Update C layer workspace state (global switching)
     workspace_set_active_global(workspace_id);
-}
-
-// C API for per-output workspace switching
-void havel_wlr_output_set_workspace(struct havel_output *output, uint32_t workspace_id) {
-    workspace_set_active_output(output, workspace_id);
-}
-
-uint32_t havel_wlr_output_get_workspace(struct havel_output *output) {
-    return output ? output->active_workspace : 0;
 }
 
 static void cpp_impl_server_quit(void) {
@@ -1572,14 +1562,12 @@ static void server_new_output(struct wl_listener *listener, void *data) {
         output->gamma_ramp_red = calloc(gamma_size, sizeof(uint16_t));
         output->gamma_ramp_green = calloc(gamma_size, sizeof(uint16_t));
         output->gamma_ramp_blue = calloc(gamma_size, sizeof(uint16_t));
-        output->gamma_ramp_dirty = true;  // Force initial LUT generation
         LOG_INFO("[OUTPUT] Gamma LUT allocated for %s (size=%zu)", wlr_output->name, gamma_size);
     } else {
         output->gamma_ramp_size = 0;
         output->gamma_ramp_red = NULL;
         output->gamma_ramp_green = NULL;
         output->gamma_ramp_blue = NULL;
-        output->gamma_ramp_dirty = false;
         LOG_WARN("[OUTPUT] %s does not support gamma control", wlr_output->name);
     }
 
@@ -2255,13 +2243,16 @@ havel_wlr_server_t* havel_wlr_create(void) {
     server->output_layout = wlr_output_layout_create(server->display);
     server->scene = wlr_scene_create();
 
-    // Initialize screen capture (PipeWire/screencopy support)
-    // This enables screen sharing in browsers and recording apps
-    // screencapture::initialize(server->display, server->output_layout);
-
-    // Initialize xdg-desktop-portal integration
-    // This enables browser screen sharing (Firefox, Chrome) via D-Bus
-    // portal::initialize(server->display);
+    // Screencopy protocol: one line, unlocks grim / wf-recorder /
+    // xdg-desktop-portal-wlr screen sharing. (The old C++ ScreenCapture /
+    // PipeWireStream / DesktopPortal stack never ran - its bridge calls
+    // were commented out and HAVE_PIPEWIRE was never defined by the
+    // build - and was removed 2026-09. This is the real, supported path.)
+    if (wlr_screencopy_manager_v1_create(server->display)) {
+        LOG_INFO("[ScreenCapture] wlr-screencopy-v1 protocol created");
+    } else {
+        LOG_WARN("[ScreenCapture] Failed to create wlr-screencopy-v1 protocol");
+    }
 
     // Background color is now handled by wallpaper plugin via output_frame handler
     // No static background rect needed - plugin draws per-output backgrounds
@@ -2638,7 +2629,6 @@ static void havel_output_apply_gamma(struct havel_output *output) {
         output->gamma_ramp_blue[i] = (uint16_t)(b_value * 0xFFFF);
     }
 
-    output->gamma_ramp_dirty = false;
 
     // Apply LUT via wlroots 0.20 gamma_control_v1 API
     if (!output->server->gamma_control_manager) {

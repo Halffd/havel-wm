@@ -1,5 +1,18 @@
 # Havel WM - Status Report
 
+> **SUPERSEDED (2026-09)** — This report is a March snapshot and its
+> claims do not reflect the current codebase. Known-stale claims:
+> "Production Ready", "15/15 plugins fully functional", Kawase blur
+> (BlurPlugin never existed; the factory declaration was removed),
+> GL texture extraction via wlr_gles2 (structurally impossible under
+> wlroots 0.20 — no GL context on the overlay path), "fully rendered"
+> overlays (the GL overlay renderer never executed; replaced 2026-09
+> with a scene-graph-backed implementation), ExamplePlugin and the
+> WobblyWindows/SpringOnSpawn/DestroyOnClose WIP plugins (removed
+> 2026-09), OverlayController stack (removed 2026-09), FreeTypeFont
+> (removed 2026-09), PipeWire screencopy (protocol stub only).
+> See README.md and the 2026-09 commit log for the current state.
+
 **Date:** 2026-03-03
 **Version:** Development (Feature Complete)
 **Status:** Production Ready
