@@ -288,7 +288,19 @@ std::string IPCServer::processJsonRequest(const std::string& jsonStr) {
         [&method](const CommandHandler& h) { return h.name == method; });
 
     if (it != m_commands.end()) {
-        std::string result = it->callback(params.dump());
+        // Exception guard: a malformed request must return an error
+        // response, never kill the compositor. (Found live: `focus` with
+        // any JSON-object params hit std::stoull on "{" and terminated
+        // the whole session via uncaught invalid_argument.)
+        std::string result;
+        try {
+            result = it->callback(params.dump());
+        } catch (const std::exception& e) {
+            return createError(id, -32000,
+                               std::string("Handler error: ") + e.what());
+        } catch (...) {
+            return createError(id, -32000, "Handler error: unknown exception");
+        }
         return createResponse(id, result);
     }
 
@@ -296,10 +308,23 @@ std::string IPCServer::processJsonRequest(const std::string& jsonStr) {
 }
 
 std::string IPCServer::createResponse(int id, const std::string& result) {
+    // Handlers return pre-serialized JSON; parse defensively so a
+    // non-JSON handler result becomes an error, not a crash.
+    json resultJson;
+    try {
+        resultJson = json::parse(result);
+    } catch (...) {
+        json err = {
+            {"jsonrpc", "2.0"},
+            {"id", id},
+            {"error", {{"code", -32000}, {"message", "Handler returned invalid JSON"}}}
+        };
+        return err.dump() + "\n";
+    }
     json response = {
         {"jsonrpc", "2.0"},
         {"id", id},
-        {"result", json::parse(result)}
+        {"result", resultJson}
     };
     return response.dump() + "\n";
 }
@@ -407,45 +432,112 @@ std::string IPCServer::handleGetFocused() {
     return j.dump();
 }
 
+// Extract a window id from JSON params. Accepts "id" or "window_id"
+// (both appear across the surface). Returns false on missing/invalid.
+static bool extractWindowId(const std::string& args, uint64_t* out) {
+    try {
+        json j = json::parse(args);
+        if (!j.is_object()) return false;
+        // "id" first (historical), then "window_id"
+        if (j.contains("id") && j["id"].is_number()) {
+            *out = j["id"].get<uint64_t>();
+            return true;
+        }
+        if (j.contains("window_id") && j["window_id"].is_number()) {
+            *out = j["window_id"].get<uint64_t>();
+            return true;
+        }
+        // Bare numeric param (string form)
+        if (j.is_number()) {
+            *out = j.get<uint64_t>();
+            return true;
+        }
+        if (j.is_string()) {
+            try {
+                *out = std::stoull(j.get<std::string>());
+                return true;
+            } catch (...) {
+                return false;
+            }
+        }
+    } catch (...) {
+        // Raw non-JSON arg that might still be a bare number
+        try {
+            *out = std::stoull(args);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+    return false;
+}
+
 std::string IPCServer::handleFocus(const std::string& args) {
-    uint64_t id = std::stoull(args);
+    uint64_t id = 0;
+    if (!extractWindowId(args, &id)) {
+        json err = {{"error", "focus: missing/invalid window id"}};
+        return err.dump();
+    }
     m_windowManager.focusWindow(id);
     json j = {{"focused", id}};
     return j.dump();
 }
 
 std::string IPCServer::handleMinimize(const std::string& args) {
-    uint64_t id = std::stoull(args);
+    uint64_t id = 0;
+    if (!extractWindowId(args, &id)) {
+        json err = {{"error", "minimize: missing/invalid window id"}};
+        return err.dump();
+    }
     m_windowManager.minimizeWindow(id);
     broadcastEvent(EventType::WindowMoved, "{\"id\":" + std::to_string(id) + ",\"minimized\":true}");
     return "{}";
 }
 
 std::string IPCServer::handleMaximize(const std::string& args) {
-    uint64_t id = std::stoull(args);
-    // Maximize window through WindowManager
+    uint64_t id = 0;
+    if (!extractWindowId(args, &id)) {
+        json err = {{"error", "maximize: missing/invalid window id"}};
+        return err.dump();
+    }
     m_windowManager.maximizeWindow(id);
     broadcastEvent(EventType::WindowResized, "{\"id\":" + std::to_string(id) + ",\"maximized\":true}");
     return "{}";
 }
 
 std::string IPCServer::handleRestore(const std::string& args) {
-    uint64_t id = std::stoull(args);
+    uint64_t id = 0;
+    if (!extractWindowId(args, &id)) {
+        json err = {{"error", "restore: missing/invalid window id"}};
+        return err.dump();
+    }
     m_windowManager.restoreWindow(id);
     broadcastEvent(EventType::WindowResized, "{\"id\":" + std::to_string(id) + ",\"restored\":true}");
     return "{}";
 }
 
 std::string IPCServer::handleClose(const std::string& args) {
-    uint64_t id = std::stoull(args);
+    uint64_t id = 0;
+    if (!extractWindowId(args, &id)) {
+        json err = {{"error", "close: missing/invalid window id"}};
+        return err.dump();
+    }
     m_windowManager.closeWindow(id);
     return "{}";
 }
 
 std::string IPCServer::handleMove(const std::string& args) {
-    // params: {"id": 123, "x": 100, "y": 200}
-    json j = json::parse(args);
-    uint64_t id = j.value("id", static_cast<uint64_t>(0));
+    // params: {"id": 123, "x": 100, "y": 100}
+    json j;
+    try {
+        j = json::parse(args);
+    } catch (...) {
+        json err = {{"error", "move: invalid params"}};
+        return err.dump();
+    }
+    uint64_t id = 0;
+    json idj = j.contains("id") ? j["id"] : (j.contains("window_id") ? j["window_id"] : json());
+    if (idj.is_number()) id = idj.get<uint64_t>();
     int x = j.value("x", 0);
     int y = j.value("y", 0);
 
@@ -456,10 +548,18 @@ std::string IPCServer::handleMove(const std::string& args) {
 
 std::string IPCServer::handleResize(const std::string& args) {
     // params: {"id": 123, "w": 800, "h": 600}
-    json j = json::parse(args);
-    uint64_t id = j.value("id", static_cast<uint64_t>(0));
-    int w = j.value("w", 0);
-    int h = j.value("h", 0);
+    json j;
+    try {
+        j = json::parse(args);
+    } catch (...) {
+        json err = {{"error", "resize: invalid params"}};
+        return err.dump();
+    }
+    uint64_t id = 0;
+    json idj = j.contains("id") ? j["id"] : (j.contains("window_id") ? j["window_id"] : json());
+    if (idj.is_number()) id = idj.get<uint64_t>();
+    int w = j.value("w", j.value("width", 0));
+    int h = j.value("h", j.value("height", 0));
 
     m_windowManager.resizeWindow(id, w, h);
     broadcastEvent(EventType::WindowResized, args);
@@ -468,8 +568,16 @@ std::string IPCServer::handleResize(const std::string& args) {
 
 std::string IPCServer::handleSetFloating(const std::string& args) {
     // params: {"id": 123, "floating": true}
-    json j = json::parse(args);
-    uint64_t id = j.value("id", static_cast<uint64_t>(0));
+    json j;
+    try {
+        j = json::parse(args);
+    } catch (...) {
+        json err = {{"error", "set_floating: invalid params"}};
+        return err.dump();
+    }
+    uint64_t id = 0;
+    json idj = j.contains("id") ? j["id"] : (j.contains("window_id") ? j["window_id"] : json());
+    if (idj.is_number()) id = idj.get<uint64_t>();
     bool floating = j.value("floating", false);
 
     m_windowManager.setFloating(id, floating);
