@@ -94,21 +94,23 @@ public:
     void* nativeHandle() const { return m_nativeHandle; }
 
     // Overlay layer for plugin rendering
-    void setOverlayLayer(void* layer) { 
-        m_overlayLayer = layer; 
-        // Create overlay renderer for plugins
+    void setOverlayLayer(void* layer) {
+        m_overlayLayer = layer;
+        // Create overlay renderer for plugins, backed by the scene graph
+        // (the layer tree is the compositing surface in wlroots 0.20).
         if (layer && !m_overlayRenderer) {
             m_overlayRenderer = new OverlayRenderer();
+            m_overlayRenderer->setSceneTree(static_cast<wlr_scene_tree_t*>(layer));
             bool initialized = m_overlayRenderer->initialize();
             printf("[Server] OverlayRenderer created and initialized: %s\n", initialized ? "SUCCESS" : "FAILED");
         }
     }
     void* overlayLayer() const { return m_overlayLayer; }
-    OverlayRenderer* getOverlayRenderer() { 
+    OverlayRenderer* getOverlayRenderer() {
         if (!m_overlayRenderer) {
             printf("[Server] getOverlayRenderer() returning NULL - not initialized\n");
         }
-        return m_overlayRenderer; 
+        return m_overlayRenderer;
     }
 
     // Text Input Manager (IME)

@@ -173,8 +173,6 @@ set(WM_CORE_SOURCES
     src/wm/render/OverlayRenderer.cpp
     src/wm/render/OverlayRenderer.hpp
     src/wm/render/OverlayRendering.cpp
-    src/wm/render/FreeTypeFont.cpp
-    src/wm/render/FreeTypeFont.hpp
     src/wm/render/AppIconLoader.cpp
     src/wm/input/InputManager.cpp
     src/wm/input/KeybindingManager.cpp

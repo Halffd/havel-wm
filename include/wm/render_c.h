@@ -63,6 +63,31 @@ void havel_overlay_destroy_wrapper(havel_overlay_scene_t* overlay);
 // Check if any overlay is visible
 bool havel_overlay_is_any_visible(void);
 
+// ============================================================================
+// Scene-graph drawing primitives for the C++ OverlayRenderer
+// (C boundary: C++ never includes wlroots headers directly)
+// ============================================================================
+
+typedef void wlr_scene_tree_t;
+typedef void wlr_scene_rect_t;
+typedef void wlr_scene_buffer_t;
+typedef void wlr_buffer_t;
+
+// Create/destroy the per-frame container under a parent tree.
+// destroy also removes all child nodes created under it.
+wlr_scene_tree_t* havel_scene_frame_tree_create(wlr_scene_tree_t* parent);
+void havel_scene_frame_tree_destroy(wlr_scene_tree_t** tree);
+
+// Solid rectangle (color is float[4] RGBA)
+wlr_scene_rect_t* havel_scene_rect(wlr_scene_tree_t* parent, int x, int y,
+                                   int width, int height, const float color[4]);
+
+// CPU pixel buffer (ARGB8888 little-endian, pixels copied) drawn at
+// (x, y) stretched to (width, height); pw/ph are the source dimensions.
+wlr_scene_buffer_t* havel_scene_pixels(wlr_scene_tree_t* parent,
+                                        const uint32_t* pixels, int pw, int ph,
+                                        int x, int y, int width, int height);
+
 #ifdef __cplusplus
 }
 #endif

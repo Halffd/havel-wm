@@ -14,7 +14,6 @@
 #include <random>
 #include <cstring>
 #include <sys/stat.h>
-#include <GLES2/gl2.h>
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -915,10 +914,10 @@ uint32_t DesktopManager::loadIconTexture(const std::string& iconPath) {
 }
 
 void DesktopManager::unloadIconTexture(uint32_t textureId) {
-    // Delete OpenGL texture
-    if (textureId != 0) {
-        glDeleteTextures(1, &textureId);
-    }
+    // AppIconLoader owns icon pixel data in its cache for the compositor's
+    // lifetime; nothing to free per-unload (the old GL path deleted a
+    // texture that never existed — created without a GL context).
+    (void)textureId;
 }
 
 // ============================================================================

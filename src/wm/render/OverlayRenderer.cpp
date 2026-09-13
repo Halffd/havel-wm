@@ -1,77 +1,163 @@
 #include "OverlayRenderer.hpp"
-#include "FreeTypeFont.hpp"
-#include <GLES2/gl2ext.h>
-#include <EGL/egl.h>
-#include <cstdio>
+#include <wm/render_c.h>
+#include <Logger.h>
+#include <ft2build.h>
+#include <freetype/freetype.h>
 #include <cstring>
+#include <cstdio>
 #include <cmath>
-
-// GLES2 compatibility - vertex arrays are an extension
-static PFNGLBINDVERTEXARRAYOESPROC glBindVertexArrayOES_ptr = nullptr;
-static PFNGLGENVERTEXARRAYSOESPROC glGenVertexArraysOES_ptr = nullptr;
-static PFNGLDELETEVERTEXARRAYSOESPROC glDeleteVertexArraysOES_ptr = nullptr;
-
-static void initVertexArrays() {
-    static bool initialized = false;
-    if (initialized) return;
-    
-    glBindVertexArrayOES_ptr = (PFNGLBINDVERTEXARRAYOESPROC)eglGetProcAddress("glBindVertexArrayOES");
-    glGenVertexArraysOES_ptr = (PFNGLGENVERTEXARRAYSOESPROC)eglGetProcAddress("glGenVertexArraysOES");
-    glDeleteVertexArraysOES_ptr = (PFNGLDELETEVERTEXARRAYSOESPROC)eglGetProcAddress("glDeleteVertexArraysOES");
-    initialized = true;
-}
-
-#define glBindVertexArray glBindVertexArrayOES_ptr
-#define glGenVertexArrays glGenVertexArraysOES_ptr
-#define glDeleteVertexArrays glDeleteVertexArraysOES_ptr
+#include <string>
+#include <unordered_map>
+#include <memory>
+#include <vector>
 
 namespace havel {
 
 // ============================================================================
-// Shader Sources
+// Text rasterization: FreeType -> ARGB8888 line bitmap, cached per
+// (text, pixel size, color). Rasterization is CPU-only; the resulting
+// pixels go to the scene graph through the render_c boundary.
 // ============================================================================
 
-static const char* colorVertSrc = R"(
-    attribute vec2 a_position;
-    attribute vec4 a_color;
-    varying vec4 v_color;
-    void main() {
-        gl_Position = vec4(a_position, 0.0, 1.0);
-        v_color = a_color;
+struct TextKey {
+    std::string text;
+    uint32_t px;
+    uint32_t color;  // packed ARGB
+    bool operator==(const TextKey& o) const {
+        return px == o.px && color == o.color && text == o.text;
     }
-)";
+};
 
-static const char* colorFragSrc = R"(
-    precision mediump float;
-    varying vec4 v_color;
-    void main() {
-        gl_FragColor = v_color;
+struct TextKeyHash {
+    size_t operator()(const TextKey& k) const {
+        return std::hash<std::string>()(k.text) ^ (k.px * 31) ^ (k.color * 17);
     }
-)";
+};
 
-static const char* textureVertSrc = R"(
-    attribute vec2 a_position;
-    attribute vec2 a_texCoord;
-    varying vec2 v_texCoord;
-    void main() {
-        gl_Position = vec4(a_position, 0.0, 1.0);
-        v_texCoord = a_texCoord;
-    }
-)";
+class SceneText {
+public:
+    SceneText() = default;
+    ~SceneText() { shutdown(); }
 
-static const char* textureFragSrc = R"(
-    precision mediump float;
-    varying vec2 v_texCoord;
-    uniform sampler2D u_texture;
-    uniform float u_alpha;
-    void main() {
-        vec4 color = texture2D(u_texture, v_texCoord);
-        gl_FragColor = vec4(color.rgb, color.a * u_alpha);
+    bool initialize() {
+        if (FT_Init_FreeType(&m_ft)) {
+            fprintf(stderr, "[SceneText] FreeType init failed\n");
+            return false;
+        }
+        static const char* fontPaths[] = {
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/gnu-free/FreeSans.ttf",
+            nullptr
+        };
+        for (int i = 0; fontPaths[i]; i++) {
+            if (FT_New_Face(m_ft, fontPaths[i], 0, &m_face) == 0) {
+                m_ok = true;
+                return true;
+            }
+        }
+        fprintf(stderr, "[SceneText] No usable TTF font found\n");
+        return false;
     }
-)";
+
+    void shutdown() {
+        if (m_face) { FT_Done_Face(m_face); m_face = nullptr; }
+        if (m_ft) { FT_Done_FreeType(m_ft); m_ft = nullptr; }
+        m_ok = false;
+    }
+
+    bool ok() const { return m_ok; }
+
+    struct Rasterized {
+        std::vector<uint32_t> pixels;  // ARGB8888 little-endian
+        int w = 0, h = 0;
+    };
+
+    Rasterized rasterize(const std::string& text, uint32_t px, const Color& color) {
+        Rasterized out;
+        if (!m_ok || text.empty()) return out;
+
+        uint32_t argb = packColor(color);
+        TextKey key{text, px, argb};
+        auto it = m_cache.find(key);
+        if (it != m_cache.end()) return it->second;
+
+        if (FT_Set_Pixel_Sizes(m_face, 0, px) != 0) return out;
+
+        // First pass: measure (width from advances, ascent/descent from bitmaps)
+        int width = 0;
+        int asc = 0, desc = 0;
+        for (unsigned char c : text) {
+            if (FT_Load_Char(m_face, c, FT_LOAD_RENDER)) continue;
+            FT_GlyphSlot g = m_face->glyph;
+            width += (g->advance.x >> 6);
+            int top = g->bitmap_top;
+            int bot = top - (int)g->bitmap.rows;
+            if (top > asc) asc = top;
+            if (bot < desc) desc = bot;
+        }
+        if (width <= 0) return out;
+        int height = asc - desc;
+        if (height <= 0) height = (int)px;
+
+        out.w = width;
+        out.h = height;
+        out.pixels.assign((size_t)width * height, 0);
+
+        // Second pass: composite glyphs (grayscale coverage -> ARGB)
+        int penX = 0;
+        for (unsigned char c : text) {
+            if (FT_Load_Char(m_face, c, FT_LOAD_RENDER)) continue;
+            FT_GlyphSlot g = m_face->glyph;
+            FT_Bitmap* bmp = &g->bitmap;
+            int gx = penX + g->bitmap_left;
+            int gy = asc - g->bitmap_top;
+            for (unsigned row = 0; row < bmp->rows; row++) {
+                int dy = gy + (int)row;
+                if (dy < 0 || dy >= height) continue;
+                for (unsigned col = 0; col < bmp->width; col++) {
+                    int dx = gx + (int)col;
+                    if (dx < 0 || dx >= width) continue;
+                    unsigned char a = bmp->buffer[row * bmp->pitch + col];
+                    if (!a) continue;
+                    uint32_t& dst = out.pixels[(size_t)dy * width + dx];
+                    if (a == 255) {
+                        dst = (argb & 0xFFFFFF00u) | 0xFFu;
+                    } else {
+                        uint8_t da = dst & 0xFFu;
+                        uint8_t oa = (uint8_t)(a + da * (255 - a) / 255);
+                        dst = (argb & 0xFFFFFF00u) | oa;
+                    }
+                }
+            }
+            penX += (g->advance.x >> 6);
+        }
+
+        // Bounded cache; re-rasterize on eviction (UI strings are short)
+        if (m_cache.size() > 256) m_cache.clear();
+        m_cache.emplace(key, out);
+        return out;
+    }
+
+private:
+    static uint32_t packColor(const Color& c) {
+        uint32_t r = (uint32_t)(c.r * 255.0f) & 0xFFu;
+        uint32_t g = (uint32_t)(c.g * 255.0f) & 0xFFu;
+        uint32_t b = (uint32_t)(c.b * 255.0f) & 0xFFu;
+        uint32_t a = (uint32_t)(c.a * 255.0f) & 0xFFu;
+        return (b << 24) | (g << 16) | (r << 8) | a;  // little-endian ARGB8888
+    }
+
+    FT_Library m_ft = nullptr;
+    FT_Face m_face = nullptr;
+    bool m_ok = false;
+    std::unordered_map<TextKey, SceneText::Rasterized, TextKeyHash> m_cache;
+};
 
 // ============================================================================
-// Implementation
+// OverlayRenderer (scene-graph backed; C boundary via render_c.h)
 // ============================================================================
 
 OverlayRenderer::OverlayRenderer() = default;
@@ -80,235 +166,56 @@ OverlayRenderer::~OverlayRenderer() {
     shutdown();
 }
 
+void OverlayRenderer::setSceneTree(wlr_scene_tree_t* tree) {
+    m_parent = tree;
+}
+
 bool OverlayRenderer::initialize() {
-    if (m_initialized) {
-        return true;
-    }
+    if (m_initialized) return true;
 
-    // Initialize vertex array extension functions
-    initVertexArrays();
-
-    // Check GL is available
-    const char* version = (const char*)glGetString(GL_VERSION);
-    if (!version) {
-        fprintf(stderr, "[OverlayRenderer] No GL context available\n");
+    if (!m_parent) {
+        fprintf(stderr, "[OverlayRenderer] No scene tree set (call setSceneTree)\n");
         return false;
     }
 
-    printf("[OverlayRenderer] GL Version: %s\n", version);
-
-    // Compile shaders
-    if (!compileShaders()) {
-        fprintf(stderr, "[OverlayRenderer] Failed to compile shaders\n");
+    m_frameTree = havel_scene_frame_tree_create(m_parent);
+    if (!m_frameTree) {
+        fprintf(stderr, "[OverlayRenderer] Failed to create frame tree\n");
         return false;
     }
 
-    // Create geometry buffers
-    createGeometry();
-    
-    // Initialize FreeType font
-    m_font = std::make_unique<FreeTypeFont>();
-    
-    // Try to load a system font
-    // Common Linux font paths
-    const char* fontPaths[] = {
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/gnu-free/FreeSans.ttf",
-        nullptr
-    };
-    
-    bool fontLoaded = false;
-    for (int i = 0; fontPaths[i] != nullptr; i++) {
-        if (m_font->loadFont(fontPaths[i], 16)) {
-            printf("[OverlayRenderer] Loaded font: %s\n", fontPaths[i]);
-            fontLoaded = true;
-            break;
-        }
+    m_text = std::make_unique<SceneText>();
+    if (!m_text->initialize()) {
+        fprintf(stderr, "[OverlayRenderer] Warning: text unavailable; overlays render without text\n");
     }
-    
-    if (!fontLoaded) {
-        fprintf(stderr, "[OverlayRenderer] Warning: Could not load TrueType font, using fallback\n");
-        // Font will render as empty - overlays will still work, just no text
-    }
-    
-    m_fontLoaded = fontLoaded;
 
     m_initialized = true;
-    printf("[OverlayRenderer] Initialized (with FreeType font)\n");
+    printf("[OverlayRenderer] Initialized (scene-graph backed)\n");
     return true;
 }
 
 void OverlayRenderer::shutdown() {
-    if (!m_initialized) return;
-
-    if (m_font) {
-        m_font->shutdown();
-        m_font.reset();
-    }
-    m_fontLoaded = false;
-    
-    cleanup();
+    // Nodes/buffers are owned by the scene graph; it tears down with the
+    // compositor. Clear our handles only.
+    havel_scene_frame_tree_destroy(&m_frameTree);
+    m_text.reset();
+    m_frameSceneBuffers.clear();
     m_initialized = false;
-}
-
-bool OverlayRenderer::compileShaders() {
-    // Color shader program
-    GLuint vertShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertShader, 1, &colorVertSrc, nullptr);
-    glCompileShader(vertShader);
-    
-    GLint success;
-    glGetShaderiv(vertShader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        char log[512];
-        glGetShaderInfoLog(vertShader, 512, nullptr, log);
-        fprintf(stderr, "[OverlayRenderer] Color vertex shader error: %s\n", log);
-        return false;
-    }
-    
-    GLuint fragShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragShader, 1, &colorFragSrc, nullptr);
-    glCompileShader(fragShader);
-    
-    glGetShaderiv(fragShader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        char log[512];
-        glGetShaderInfoLog(fragShader, 512, nullptr, log);
-        fprintf(stderr, "[OverlayRenderer] Color fragment shader error: %s\n", log);
-        return false;
-    }
-    
-    m_colorShader = glCreateProgram();
-    glAttachShader(m_colorShader, vertShader);
-    glAttachShader(m_colorShader, fragShader);
-    glLinkProgram(m_colorShader);
-    
-    glGetProgramiv(m_colorShader, GL_LINK_STATUS, &success);
-    if (!success) {
-        char log[512];
-        glGetProgramInfoLog(m_colorShader, 512, nullptr, log);
-        fprintf(stderr, "[OverlayRenderer] Color shader program error: %s\n", log);
-        return false;
-    }
-    
-    glDeleteShader(vertShader);
-    glDeleteShader(fragShader);
-    
-    // Texture shader program
-    vertShader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertShader, 1, &textureVertSrc, nullptr);
-    glCompileShader(vertShader);
-    
-    glGetShaderiv(vertShader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        char log[512];
-        glGetShaderInfoLog(vertShader, 512, nullptr, log);
-        return false;
-    }
-    
-    fragShader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragShader, 1, &textureFragSrc, nullptr);
-    glCompileShader(fragShader);
-    
-    glGetShaderiv(fragShader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-        char log[512];
-        glGetShaderInfoLog(fragShader, 512, nullptr, log);
-        return false;
-    }
-    
-    m_textureShader = glCreateProgram();
-    glAttachShader(m_textureShader, vertShader);
-    glAttachShader(m_textureShader, fragShader);
-    glLinkProgram(m_textureShader);
-    
-    glGetProgramiv(m_textureShader, GL_LINK_STATUS, &success);
-    if (!success) {
-        char log[512];
-        glGetProgramInfoLog(m_textureShader, 512, nullptr, log);
-        return false;
-    }
-    
-    glDeleteShader(vertShader);
-    glDeleteShader(fragShader);
-
-    // Cache shader attribute/uniform locations (avoid glGet* per draw)
-    m_colorPosLoc = glGetAttribLocation(m_colorShader, "a_position");
-    m_colorColorLoc = glGetUniformLocation(m_colorShader, "a_color");
-    
-    m_texturePosLoc = glGetAttribLocation(m_textureShader, "a_position");
-    m_textureTexCoordLoc = glGetAttribLocation(m_textureShader, "a_texCoord");
-    m_textureAlphaLoc = glGetUniformLocation(m_textureShader, "u_alpha");
-    m_textureTexLoc = glGetUniformLocation(m_textureShader, "u_texture");
-
-    printf("[OverlayRenderer] Shaders compiled successfully (locations cached)\n");
-    return true;
-}
-
-void OverlayRenderer::createGeometry() {
-    glGenVertexArrays(1, &m_vao);
-    glGenBuffers(1, &m_vbo);
-    
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    
-    // Allocate buffer (will be filled with data each frame)
-    glBufferData(GL_ARRAY_BUFFER, 1024 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
-    
-    glBindVertexArray(0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-}
-
-void OverlayRenderer::cleanup() {
-    if (m_colorShader) {
-        glDeleteProgram(m_colorShader);
-        m_colorShader = 0;
-    }
-    if (m_textureShader) {
-        glDeleteProgram(m_textureShader);
-        m_textureShader = 0;
-    }
-    if (m_vao) {
-        glDeleteVertexArrays(1, &m_vao);
-        m_vao = 0;
-    }
-    if (m_vbo) {
-        glDeleteBuffers(1, &m_vbo);
-        m_vbo = 0;
-    }
 }
 
 void OverlayRenderer::beginFrame(int screenWidth, int screenHeight) {
     if (!m_initialized) return;
-
     m_screenWidth = screenWidth;
     m_screenHeight = screenHeight;
 
-    // Setup viewport
-    glViewport(0, 0, screenWidth, screenHeight);
-
-    // Update font projection to match screen size
-    if (m_fontLoaded && m_font) {
-        m_font->setProjection(screenWidth, screenHeight);
-    }
-
-    // Enable blending for transparency
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    // Disable depth test (2D overlay)
-    glDisable(GL_DEPTH_TEST);
+    // Clear last frame's nodes (immediate-mode plugins redraw every frame)
+    havel_scene_frame_tree_destroy(&m_frameTree);
+    m_frameTree = havel_scene_frame_tree_create(m_parent);
+    m_frameSceneBuffers.clear();
 }
 
 void OverlayRenderer::endFrame() {
-    if (!m_initialized) return;
-    
-    // Restore state
-    glDisable(GL_BLEND);
-    glEnable(GL_DEPTH_TEST);
+    // Nodes stay in the tree until the next beginFrame.
 }
 
 void OverlayRenderer::drawRect(const FloatRect& rect, const Color& color) {
@@ -317,43 +224,11 @@ void OverlayRenderer::drawRect(const FloatRect& rect, const Color& color) {
 
 void OverlayRenderer::drawRect(float x, float y, float w, float h, const Color& color) {
     if (!m_initialized) return;
-
-    // Convert to clip space (-1 to 1)
-    float left = (2.0f * x) / m_screenWidth - 1.0f;
-    float top = 1.0f - (2.0f * y) / m_screenHeight;
-    float right = (2.0f * (x + w)) / m_screenWidth - 1.0f;
-    float bottom = 1.0f - (2.0f * (y + h)) / m_screenHeight;
-
-    // Vertex data: position (x,y) + color (r,g,b,a)
-    float vertices[] = {
-        // pos x, pos y,  r, g, b, a
-        left,   bottom,  color.r, color.g, color.b, color.a,
-        right,  bottom,  color.r, color.g, color.b, color.a,
-        right,  top,     color.r, color.g, color.b, color.a,
-        left,   bottom,  color.r, color.g, color.b, color.a,
-        right,  top,     color.r, color.g, color.b, color.a,
-        left,   top,     color.r, color.g, color.b, color.a,
-    };
-
-    glUseProgram(m_colorShader);
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-
-    // Use cached locations (no glGet* per draw)
-    glEnableVertexAttribArray(m_colorPosLoc);
-    glVertexAttribPointer(m_colorPosLoc, 2, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)0);
-
-    glEnableVertexAttribArray(m_colorColorLoc);
-    glVertexAttribPointer(m_colorColorLoc, 4, GL_FLOAT, GL_FALSE, 6 * sizeof(float), (void*)(2 * sizeof(float)));
-
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-
-    glBindVertexArray(0);
+    float col[4] = {color.r, color.g, color.b, color.a};
+    havel_scene_rect(m_frameTree, (int)x, (int)y, (int)w, (int)h, col);
 }
 
 void OverlayRenderer::drawBorder(const FloatRect& rect, const Color& color, float thickness) {
-    // Draw 4 rectangles for border
     drawRect(rect.x, rect.y, rect.w, thickness, color);  // Top
     drawRect(rect.x, rect.y + rect.h - thickness, rect.w, thickness, color);  // Bottom
     drawRect(rect.x, rect.y, thickness, rect.h, color);  // Left
@@ -362,126 +237,68 @@ void OverlayRenderer::drawBorder(const FloatRect& rect, const Color& color, floa
 
 void OverlayRenderer::drawCircle(float cx, float cy, float radius, const Color& color) {
     if (!m_initialized) return;
-    
-    // Draw circle as a series of small rectangles (approximation)
-    // Using 32 segments for smooth appearance
     const int segments = 32;
     const float PI = 3.14159265359f;
-    
+    float col[4] = {color.r, color.g, color.b, color.a};
+    float lineWidth = 2.0f;
     for (int i = 0; i < segments; i++) {
-        float angle1 = 2.0f * PI * i / segments;
-        float angle2 = 2.0f * PI * (i + 1) / segments;
-        
-        float x1 = cx + radius * std::cos(angle1);
-        float y1 = cy + radius * std::sin(angle1);
-        float x2 = cx + radius * std::cos(angle2);
-        float y2 = cy + radius * std::sin(angle2);
-        
-        // Draw line segment as thin rectangle
-        float dx = x2 - x1;
-        float dy = y2 - y1;
+        float a1 = 2.0f * PI * i / segments;
+        float a2 = 2.0f * PI * (i + 1) / segments;
+        float x1 = cx + radius * std::cos(a1);
+        float y1 = cy + radius * std::sin(a1);
+        float x2 = cx + radius * std::cos(a2);
+        float y2 = cy + radius * std::sin(a2);
+        float dx = x2 - x1, dy = y2 - y1;
         float dist = std::sqrt(dx * dx + dy * dy);
-
-        float lineWidth = 2.0f;
-        float rectW = dist;
-        float rectH = lineWidth;
-
-        FloatRect rect(x1, y1 - lineWidth/2, rectW, rectH);
-        
-        // Rotate and draw
-        glUseProgram(m_colorShader);
-        glUniform4f(m_colorColorLoc, color.r, color.g, color.b, color.a);
-        
-        glBindVertexArray(m_vao);
-        glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-        
-        // Simple approach: draw small rectangle at each segment
-        float left = (2.0f * x1) / m_screenWidth - 1.0f;
-        float top = 1.0f - (2.0f * y1) / m_screenHeight;
-        float right = (2.0f * (x1 + rectW)) / m_screenWidth - 1.0f;
-        float bottom = 1.0f - (2.0f * (y1 + rectH)) / m_screenHeight;
-        
-        float vertices[] = {
-            left, bottom, 0.0f, 0.0f,
-            right, bottom, 1.0f, 0.0f,
-            right, top, 1.0f, 1.0f,
-            left, bottom, 0.0f, 0.0f,
-            right, top, 1.0f, 1.0f,
-            left, top, 0.0f, 1.0f,
-        };
-        
-        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-        glEnableVertexAttribArray(m_colorPosLoc);
-        glVertexAttribPointer(m_colorPosLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-        
-        glDrawArrays(GL_TRIANGLES, 0, 6);
+        if (dist < 0.01f) continue;
+        havel_scene_rect(m_frameTree, (int)x1, (int)y1, (int)dist, (int)lineWidth, col);
     }
-    glBindVertexArray(0);
 }
 
-void OverlayRenderer::drawTexture(GLuint texture, const FloatRect& rect, float alpha) {
+void OverlayRenderer::drawTexture(uint32_t texture, const FloatRect& rect, float alpha) {
     drawTexture(texture, rect.x, rect.y, rect.w, rect.h, alpha);
 }
 
-void OverlayRenderer::drawTexture(GLuint texture, float x, float y, float w, float h, float alpha) {
-    if (!m_initialized || !texture) return;
+void OverlayRenderer::drawTexture(uint32_t texture, float x, float y, float w, float h, float alpha) {
+    // GPU texture handles are never produced: the bridge's texture capture
+    // returns 0 (no renderer access from the C layer) and AppIconLoader
+    // stores CPU pixels. Callers use drawPixels / rect fallbacks.
+    static int logged = 0;
+    if (logged++ < 5) {
+        LOG_WARN("[OverlayRenderer] drawTexture(0x%x) ignored: no GPU texture path (icons render via drawPixels)",
+                 texture);
+    }
+    (void)alpha; (void)w; (void)h; (void)x; (void)y;
+}
 
-    // Convert to clip space
-    float left = (2.0f * x) / m_screenWidth - 1.0f;
-    float top = 1.0f - (2.0f * y) / m_screenHeight;
-    float right = (2.0f * (x + w)) / m_screenWidth - 1.0f;
-    float bottom = 1.0f - (2.0f * (y + h)) / m_screenHeight;
-
-    // Vertex data: position (x,y) + texCoord (u,v)
-    float vertices[] = {
-        // pos x, pos y,  u, v
-        left,   bottom,  0.0f, 1.0f,
-        right,  bottom,  1.0f, 1.0f,
-        right,  top,     1.0f, 0.0f,
-        left,   bottom,  0.0f, 1.0f,
-        right,  top,     1.0f, 0.0f,
-        left,   top,     0.0f, 0.0f,
-    };
-
-    glUseProgram(m_textureShader);
-    
-    glUniform1f(m_textureAlphaLoc, alpha);
-    glUniform1i(m_textureTexLoc, 0);
-
-    glBindVertexArray(m_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, m_vbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices);
-
-    // Use cached locations (no glGet* per draw)
-    glEnableVertexAttribArray(m_texturePosLoc);
-    glVertexAttribPointer(m_texturePosLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-
-    glEnableVertexAttribArray(m_textureTexCoordLoc);
-    glVertexAttribPointer(m_textureTexCoordLoc, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
-
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-    glBindTexture(GL_TEXTURE_2D, 0);
-
-    glBindVertexArray(0);
+void OverlayRenderer::drawPixels(const uint32_t* pixels, int pw, int ph,
+                                  float x, float y, float w, float h) {
+    if (!m_initialized || !pixels || pw <= 0 || ph <= 0) return;
+    wlr_scene_buffer_t* sb = havel_scene_pixels(
+        m_frameTree, pixels, pw, ph, (int)x, (int)y, (int)w, (int)h);
+    if (sb) m_frameSceneBuffers.push_back(sb);
 }
 
 void OverlayRenderer::drawText(const char* text, float x, float y, float size, const Color& color) {
-    if (!m_initialized || !text || !m_fontLoaded || !m_font) return;
-    
-    // Use FreeType font for rendering
-    m_font->renderText(x, y, size / 16.0f, text, color.r, color.g, color.b, color.a);
+    if (!m_initialized || !text || !m_text || !m_text->ok()) return;
+
+    auto rz = m_text->rasterize(text, (uint32_t)(size + 0.5f), color);
+    if (rz.pixels.empty()) return;
+    wlr_scene_buffer_t* sb = havel_scene_pixels(
+        m_frameTree, rz.pixels.data(), rz.w, rz.h, (int)x, (int)y, rz.w, rz.h);
+    if (sb) m_frameSceneBuffers.push_back(sb);
 }
 
 void OverlayRenderer::drawTextCentered(const char* text, float cx, float cy, float size, const Color& color) {
-    if (!text || !m_fontLoaded || !m_font) return;
-    
-    float textWidth = m_font->getTextWidth(text, size / 16.0f);
-    float textHeight = m_font->getTextHeight(size / 16.0f);
-    float x = cx - textWidth / 2.0f;
-    float y = cy - textHeight / 2.0f;
-    
-    drawText(text, x, y, size, color);
+    if (!m_initialized || !text || !m_text || !m_text->ok()) return;
+
+    auto rz = m_text->rasterize(text, (uint32_t)(size + 0.5f), color);
+    if (rz.pixels.empty()) return;
+    float x = cx - rz.w / 2.0f;
+    float y = cy - rz.h / 2.0f;
+    wlr_scene_buffer_t* sb = havel_scene_pixels(
+        m_frameTree, rz.pixels.data(), rz.w, rz.h, (int)x, (int)y, rz.w, rz.h);
+    if (sb) m_frameSceneBuffers.push_back(sb);
 }
 
 } // namespace havel

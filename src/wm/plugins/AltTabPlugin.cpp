@@ -27,7 +27,7 @@ struct WindowEntry {
     uint32_t textureId = 0;   // OpenGL texture ID for thumbnail
     int textureWidth = 0;
     int textureHeight = 0;
-    uint32_t iconTextureId = 0;  // OpenGL texture ID for app icon
+    uint32_t iconTextureId = 0;  // AppIconLoader handle (CPU pixel data)
     int iconSize = 32;  // Icon display size
 };
 
@@ -387,10 +387,20 @@ private:
       if (entry.iconTextureId != 0) {
                 int iconX = x + thumbnailWidth - entry.iconSize - 8;
                 int iconY = y + thumbnailHeight - entry.iconSize - 8;
-                renderer->drawTexture(entry.iconTextureId,
-                                      (float)iconX, (float)iconY,
+                AppIconLoader* icons = AppIconLoader::getInstance();
+                const uint32_t* iconPixels = icons ? icons->getIconPixels(entry.iconTextureId) : nullptr;
+                int iw = 0, ih = 0;
+                if (icons) icons->getIconDimensions(entry.iconTextureId, &iw, &ih);
+                if (iconPixels && iw > 0 && ih > 0) {
+                    renderer->drawPixels(iconPixels, iw, ih,
+                                          (float)iconX, (float)iconY,
+                                          (float)entry.iconSize, (float)entry.iconSize);
+                } else {
+                    // Placeholder square in the hash color
+                    renderer->drawRect((float)iconX, (float)iconY,
                                       (float)entry.iconSize, (float)entry.iconSize,
-                                      1.0f);
+                                      Color(0.4f, 0.4f, 0.45f, 1.0f));
+                }
             }
 
       const std::string& name = entry.appId;
