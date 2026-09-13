@@ -1269,11 +1269,8 @@ void Server::registerKeybindings() {
         "toggle_floating", [this]() { toggleFloating(); }
     );
 
-    // Meta+0: Minimize window
-    m_keybindingManager.registerKeybinding(
-        KeybindingManager::MOD_LOGO, XKB_KEY_0,
-        "minimize_window", [this]() { minimizeWindow(); }
-    );
+    // Meta+0 is workspace 10 (matches the Meta+1-9 pattern). Minimize has
+    // no documented keybinding; IPC minimize covers it.
 
     // Meta+Shift+V: Toggle always on top. Meta+Shift+F is the documented
     // FPS-overlay binding (owned by FPSPlugin); previously this binding

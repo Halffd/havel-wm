@@ -114,16 +114,37 @@ void PluginManager::registerPlugin(std::unique_ptr<Plugin> plugin) {
     }
     
     LOG_INFO("[PluginManager] Registering plugin '%s' v%s (priority=%d)",
-             plugin->getName().c_str(), 
+             plugin->getName().c_str(),
              plugin->getVersion().c_str(),
              plugin->getInfo().priority);
-    
-    // Load config before the plugin enters the enabled set so its init
-    // hooks see real settings. Server registers plugins AFTER
-    // PluginManager::initialize, so the initialize-loop load alone
-    // would miss every built-in plugin on first boot.
-    if (!m_configPath.empty()) {
-        loadPluginSettings(*plugin);
+
+    // Full lifecycle at registration time when the manager is already
+    // initialized. The Server registers built-in plugins AFTER
+    // PluginManager::initialize - previously that meant they never
+    // received init(this) at all (first real client connect crashed
+    // ServerDecorationPlugin onViewMap on its null m_api; every plugin
+    // has been running with a null CompositorAPI since forever).
+    if (m_initialized) {
+        plugin->preInit();
+        plugin->init(this);
+        if (!m_configPath.empty()) {
+            loadPluginSettings(*plugin);
+        }
+        plugin->postInit();
+
+        PluginEvent event;
+        event.type = PluginEventType::PluginLoaded;
+        event.data = plugin->getName();
+        emitEvent(event);
+
+        LOG_INFO("[PluginManager] Plugin '%s' v%s initialized",
+                 plugin->getName().c_str(), plugin->getVersion().c_str());
+    } else {
+        // Pre-initialization registration (not expected today):
+        // config only, lifecycle happens in the initialize loop
+        if (!m_configPath.empty()) {
+            loadPluginSettings(*plugin);
+        }
     }
 
     m_plugins.push_back(std::move(plugin));

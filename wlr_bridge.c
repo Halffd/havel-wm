@@ -282,6 +282,7 @@ struct havel_output {
     struct wlr_output *output;
     struct wlr_scene_output *scene_output;
     struct wl_listener frame;
+    struct wl_listener needs_frame;
     struct wl_listener destroy;
 
     struct havel_wlr_server *server;
@@ -345,10 +346,13 @@ struct havel_xdg_view {
     // Only wlroots handles and C++ opaque pointer
     void *cpp_view;  // Opaque pointer to C++ View object
     void *scene_graph_view;  // Scene graph View (SceneView*)
+    bool destroyed;  // Guard: cleanup runs exactly once (toplevel destroy
+                     // fires before xdg_surface destroy on client teardown)
 
     struct wl_listener map;
     struct wl_listener unmap;
-    struct wl_listener destroy;
+    struct wl_listener destroy;          // xdg_surface->events.destroy
+    struct wl_listener toplevel_destroy; // toplevel->events.destroy (fires first)
     struct wl_listener surface_commit;  // Waits for first commit before sending configure
     struct wl_listener set_app_id;      // Called when app_id is set
     struct wl_listener set_title;       // Called when title is set
@@ -948,20 +952,24 @@ static void xdg_handle_request_fullscreen(struct wl_listener *listener, void *da
     wlr_xdg_toplevel_set_fullscreen(toplevel, !fullscreen);
 }
 
-static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
-    struct havel_xdg_view *view = wl_container_of(listener, view, destroy);
+static void xdg_view_cleanup(struct havel_xdg_view *view) {
+    if (view->destroyed) return;
+    view->destroyed = true;
 
     LOG_INFO("[XDG] DESTROY: %p (cpp_view=%p)", (void*)view, view->cpp_view);
 
     // CRITICAL: Save server pointer BEFORE any cleanup (needed for C++ notification)
     struct havel_wlr_server *server = view->server;
     void *cpp_view = view->cpp_view;
-    
+
     // CRITICAL: Clear cpp_view pointer FIRST to prevent C++ from accessing freed memory
     view->cpp_view = NULL;
-    
-    // CRITICAL: Remove ALL listeners from toplevel->events FIRST
-    // These are on toplevel->events which wlroots cleans up during destroy
+
+    // Remove toplevel-event listeners. On client teardown the toplevel
+    // destroy signal fires BEFORE xdg_surface destroy (and wlroots
+    // asserts in destroy_xdg_toplevel that request_* listeners are
+    // gone) - removing them here covers both orderings via the
+    // destroyed-flag guard.
     wl_list_remove(&view->set_app_id.link);
     wl_list_remove(&view->set_title.link);
     wl_list_remove(&view->request_move.link);
@@ -969,6 +977,7 @@ static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
     wl_list_remove(&view->request_minimize.link);
     wl_list_remove(&view->request_maximize.link);
     wl_list_remove(&view->request_fullscreen.link);
+    wl_list_remove(&view->toplevel_destroy.link);
 
     // Remove remaining listeners
     wl_list_remove(&view->map.link);
@@ -998,6 +1007,22 @@ static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
 
     LOG_INFO("[XDG] View freed");
     free(view);
+}
+
+// Toplevel destroy: fires first on client teardown, before wlroots
+// asserts that request_* listeners are detached.
+static void xdg_view_handle_toplevel_destroy(struct wl_listener *listener, void *data) {
+    struct havel_xdg_view *view = wl_container_of(listener, view, toplevel_destroy);
+    (void)data;
+    xdg_view_cleanup(view);
+}
+
+// xdg_surface destroy: fires on other teardown paths (e.g. wl_surface
+// role change). Idempotent via the destroyed flag.
+static void xdg_view_handle_destroy(struct wl_listener *listener, void *data) {
+    struct havel_xdg_view *view = wl_container_of(listener, view, destroy);
+    (void)data;
+    xdg_view_cleanup(view);
 }
 
 static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
@@ -1040,6 +1065,10 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
     LOG_INFO("[XDG] Adding destroy listener");
     view->destroy.notify = xdg_view_handle_destroy;
     wl_signal_add(&xdg_surface->events.destroy, &view->destroy);
+
+    LOG_INFO("[XDG] Adding toplevel destroy listener (fires before surface destroy)");
+    view->toplevel_destroy.notify = xdg_view_handle_toplevel_destroy;
+    wl_signal_add(&xdg_surface->toplevel->events.destroy, &view->toplevel_destroy);
 
     // Add commit listener - will send configure after first client commit
     LOG_INFO("[XDG] Adding commit listener (will send configure after first commit)");
@@ -1400,10 +1429,10 @@ static void output_frame(struct wl_listener *listener, void *data) {
     server->current_fps = fps;
     server->frame_count++;
 
-    // DEBUG: Confirm frame callback is firing (only every 600 frames = ~10 seconds)
+    // DEBUG: log the first frame and every 600th after (~10s at 60fps)
     static int frame_count = 0;
     frame_count++;
-    if (frame_count % 600 == 0) {
+    if (frame_count == 1 || frame_count % 600 == 0) {
         LOG_INFO("[FRAME] Frame #%d on %s (enabled=%d, scene_output=%p, FPS=%.1f)",
                  frame_count, output->output->name,
                  output->output->enabled, output->scene_output, fps);
@@ -1495,6 +1524,12 @@ static void output_frame(struct wl_listener *listener, void *data) {
         wlr_scene_output_commit(output->scene_output, &options);
     }
     wlr_output_state_finish(&state);
+
+    // Drive the next frame. DRM outputs chain via page-flip; the
+    // headless backend does not - without an explicit schedule the
+    // frame loop runs exactly once and stalls (observed: Frame #1 then
+    // silence). No-op when a frame is already pending.
+    wlr_output_schedule_frame(output->output);
 }
 
 static void output_destroy(struct wl_listener *listener, void *data) {
@@ -1616,6 +1651,50 @@ static void server_new_output(struct wl_listener *listener, void *data) {
              (void*)&server->scene->tree, server->scene->tree.node.enabled);
     LOG_INFO("[SCENE_OUTPUT] %s: scene_output=%p",
              wlr_output->name, (void*)output->scene_output);
+
+    // Enable the output and commit a mode (tinywl pattern). Without
+    // this, outputs stay disabled and the frame loop never runs - the
+    // headless boot showed exactly that (enabled=0, zero frames).
+    // Physical DRM outputs get their preferred mode; mode-less outputs
+    // (headless) get a custom 1280x720.
+    {
+        struct wlr_output_state state;
+        wlr_output_state_init(&state);
+        wlr_output_state_set_enabled(&state, true);
+
+        struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
+        if (mode != NULL) {
+            wlr_output_state_set_mode(&state, mode);
+        } else {
+            LOG_INFO("[OUTPUT] %s has no modes; using custom 1280x720@60",
+                     wlr_output->name);
+            // refresh in mHz; 0 means "no frame timer" - the headless
+            // backend would never emit events.frame
+            wlr_output_state_set_custom_mode(&state, 1280, 720, 60000);
+        }
+
+        if (!wlr_output_commit_state(wlr_output, &state)) {
+            LOG_ERROR("[OUTPUT] %s: failed to commit enabled state", wlr_output->name);
+        } else {
+            LOG_INFO("[OUTPUT] %s enabled (mode committed)", wlr_output->name);
+            // Kick the frame loop: DRM chains frames via page-flip, but
+            // headless outputs need an explicit first present or
+            // events.frame never fires. Commit the (empty) scene once to
+            // present a buffer, then schedule the next frame.
+            struct wlr_scene_output_state_options opts = {0};
+            struct wlr_output_state scene_state;
+            wlr_output_state_init(&scene_state);
+            if (wlr_scene_output_build_state(output->scene_output, &scene_state, &opts) &&
+                wlr_output_commit_state(wlr_output, &scene_state)) {
+                LOG_INFO("[OUTPUT] %s: first frame presented", wlr_output->name);
+                wlr_output_schedule_frame(wlr_output);
+            } else {
+                LOG_WARN("[OUTPUT] %s: first frame present failed", wlr_output->name);
+            }
+            wlr_output_state_finish(&scene_state);
+        }
+        wlr_output_state_finish(&state);
+    }
 }
 
 // ============================================================================
@@ -2374,7 +2453,12 @@ havel_wlr_server_t* havel_wlr_create(void) {
     }
 
     // Create Linux DMA-BUF v1 (hardware buffer sharing)
-    server->linux_dmabuf = wlr_linux_dmabuf_v1_create(server->display, 1, NULL);
+    // create_with_renderer: passing NULL feedback to _create makes
+    // wlroots build default feedback from nothing and crashes under
+    // software renderers (pixman) — the header mandates the renderer
+    // variant for wlr_renderer compositors.
+    server->linux_dmabuf = wlr_linux_dmabuf_v1_create_with_renderer(
+        server->display, 1, server->renderer);
     if (server->linux_dmabuf) {
         LOG_INFO("[Linux DMA-BUF] linux_dmabuf_v1 created (hardware acceleration)");
     }
@@ -2399,9 +2483,41 @@ havel_wlr_server_t* havel_wlr_create(void) {
     }
 
     // Create color manager v1 (color calibration)
-    server->color_manager = wlr_color_manager_v1_create(server->display, 1, NULL);
-    if (server->color_manager) {
-        LOG_INFO("[Color Management] color_manager_v1 created (color calibration)");
+    // Options must be populated (renderer-derived lists, like labwc);
+    // passing NULL crashes inside wlroots when it reads the option
+    // arrays, and this wlroots version asserts against unsupported
+    // features (icc_v2_v4, set_primaries). Parametric-only, perceptual
+    // intent - verified under headless+pixman boot.
+    {
+        size_t tf_len = 0, prim_len = 0;
+        enum wp_color_manager_v1_transfer_function *tfs =
+            wlr_color_manager_v1_transfer_function_list_from_renderer(
+                server->renderer, &tf_len);
+        enum wp_color_manager_v1_primaries *prims =
+            wlr_color_manager_v1_primaries_list_from_renderer(
+                server->renderer, &prim_len);
+
+        // Perceptual is required (wlroots asserts has_perceptual_render_intent)
+        static const enum wp_color_manager_v1_render_intent intents[] = {
+            WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL,
+        };
+        struct wlr_color_manager_v1_options opts = {0};
+        opts.features.parametric = true;
+        opts.render_intents = intents;
+        opts.render_intents_len = sizeof(intents) / sizeof(intents[0]);
+        opts.transfer_functions = tfs;
+        opts.transfer_functions_len = tf_len;
+        opts.primaries = prims;
+        opts.primaries_len = prim_len;
+
+        server->color_manager = wlr_color_manager_v1_create(
+            server->display, 1, &opts);
+        if (server->color_manager) {
+            LOG_INFO("[Color Management] color_manager_v1 created (color calibration)");
+        }
+
+        free(tfs);
+        free(prims);
     }
 
     // Create extended foreign toplevel list v1 (taskbar support)
