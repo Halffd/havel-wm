@@ -1651,9 +1651,6 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
         const uint32_t keycode = event->keycode + 8;
         uint32_t modifiers = keyboard->keyboard->modifiers.depressed;
 
-        // Process through combo manager
-        havel_cpp_process_combo_key(server->cpp_server, event->keycode, true, modifiers);
-
         // Get keysym from XKB state (layout-aware)
         xkb_keysym_t keysym = 0;
         char key_char = 0;
@@ -1749,10 +1746,6 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
         }
         return;
     }
-
-    // Key released - notify combo manager
-    havel_cpp_process_combo_key(server->cpp_server, event->keycode, false,
-                                 keyboard->keyboard->modifiers.depressed);
 
     // Forward release to C++ layer too (push-to-zoom end, alt-tab
     // select-on-alt-release depend on it). Releases are never "consumed"
@@ -1873,8 +1866,9 @@ static void server_new_input(struct wl_listener *listener, void *data) {
                 strstr(name, "joystick") || strstr(name, "Xbox") ||
                 strstr(name, "PlayStation") || strstr(name, "DualShock") ||
                 strstr(name, "DualSense") || strstr(name, "Steam")) {
+                // Accepted by the seat as a plain input device; gamepad-
+                // specific handling would need a real consumer first.
                 LOG_INFO("[Input] New gamepad/controller: %s", device->name);
-                // Would initialize via InputDeviceManager
             }
         }
         break;
@@ -1925,11 +1919,6 @@ static void server_cursor_motion(struct wl_listener *listener, void *data) {
     struct wlr_pointer_motion_event *event = data;
 
     wlr_cursor_move(server->cursor, &event->pointer->base, event->delta_x, event->delta_y);
-
-    // Process gesture recognition
-    havel_cpp_process_gesture_motion(server->cpp_server,
-                                      server->cursor->x, server->cursor->y,
-                                      event->time_msec);
 
     // Process desktop events
     havel_cpp_process_desktop_motion(server->cpp_server,
@@ -1985,12 +1974,6 @@ static void server_cursor_motion_absolute(struct wl_listener *listener, void *da
 static void server_cursor_button(struct wl_listener *listener, void *data) {
     struct havel_wlr_server *server = wl_container_of(listener, server, cursor_button);
     struct wlr_pointer_button_event *event = data;
-
-    // Process gesture recognition
-    havel_cpp_process_gesture_button(server->cpp_server, event->button, 
-                                      event->state == WL_POINTER_BUTTON_STATE_PRESSED,
-                                      server->cursor->x, server->cursor->y,
-                                      event->time_msec);
 
     wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
 
@@ -2193,9 +2176,6 @@ havel_wlr_server_t* havel_wlr_create(void) {
     // Initialize text input manager (IME support)
     // This requires wl_display to be created
     havel_cpp_server_init_text_input(server->cpp_server, server->display);
-
-    // Initialize gesture recognition
-    havel_cpp_init_gestures(server->cpp_server);
 
     // Initialize desktop manager
     havel_cpp_init_desktop(server->cpp_server);

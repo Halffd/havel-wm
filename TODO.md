@@ -147,9 +147,12 @@
   - Files: `src/wm/plugins/WorkspaceInfoBar.cpp`
 
 ### Input
-- [ ] **Touchpad gestures incomplete** - Only basic swipe recognized
-  - TODO in code: "Add more complex gesture recognition (ZigZag, S-shape, Check)"
-  - Files: `src/wm/input/GestureRecognizer.cpp:177`
+- [x] ~~**Touchpad gestures incomplete**~~ REMOVED 2026-09 - GestureRecognizer/
+  GestureManager (and ComboManager, InputDeviceManager) were never instantiated
+  and registerGesture had zero callers; the wired chain fed an empty action list.
+  Deleted with the bridge wiring. Re-derive from wlroots touch events when a
+  real consumer exists.
+  - Files: N/A (deleted)
 
 - [ ] **No touch input support** - Touchscreen not handled
   - Files: `wlr_bridge.c`

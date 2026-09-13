@@ -77,14 +77,6 @@ void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int hei
 // Application spawning (for App Launcher): fork+exec, no shell
 void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command);
 
-// Gesture recognition
-void havel_cpp_init_gestures(struct havel_cpp_server* server);
-void havel_cpp_process_gesture_motion(struct havel_cpp_server* server, double x, double y, uint64_t timestamp);
-void havel_cpp_process_gesture_button(struct havel_cpp_server* server, int button, bool pressed, double x, double y, uint64_t timestamp);
-
-// Combo system
-void havel_cpp_process_combo_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers);
-
 // IPC server events
 void havel_cpp_process_ipc_events(struct havel_cpp_server* server);
 

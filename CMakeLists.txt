@@ -157,16 +157,9 @@ set(WM_CORE_SOURCES
     src/wm/render/OverlayRenderer.cpp
     src/wm/render/OverlayRenderer.hpp
     src/wm/render/AppIconLoader.cpp
-    src/wm/input/InputManager.cpp
     src/wm/input/KeybindingManager.cpp
     src/wm/input/KeybindingManager.hpp
     src/wm/input/TextInputManager.cpp
-    src/wm/input/GestureRecognizer.cpp
-    src/wm/input/GestureRecognizer.hpp
-    src/wm/input/InputDeviceManager.cpp
-    src/wm/input/InputDeviceManager.hpp
-    src/wm/input/ComboManager.cpp
-    src/wm/input/ComboManager.hpp
     src/wm/desktop/DesktopManager.cpp
     src/wm/desktop/DesktopManager.hpp
     src/wm/desktop/NASAWallpaper.cpp

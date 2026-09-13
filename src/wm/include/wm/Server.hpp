@@ -156,10 +156,6 @@ public:
     void setTemperature(int kelvin);
     void setBrightness(float brightness);
 
-    // Gesture recognition
-    void* gestureRecognizer() const { return m_gestureRecognizer; }
-    void setGestureRecognizer(void* recognizer) { m_gestureRecognizer = recognizer; }
-
     // Window group management
     void* windowGroupManager() const { return m_windowGroupManager; }
     void setWindowGroupManager(void* manager) { m_windowGroupManager = manager; }
@@ -237,9 +233,6 @@ private:
     float m_bgColorR = 0.1f;
     float m_bgColorG = 0.1f;
     float m_bgColorB = 0.15f;
-
-    // Gesture recognition
-    void* m_gestureRecognizer = nullptr;
 
     // Window group manager
     void* m_windowGroupManager = nullptr;
