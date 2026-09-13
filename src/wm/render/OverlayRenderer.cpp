@@ -106,7 +106,15 @@ public:
         out.h = height;
         out.pixels.assign((size_t)width * height, 0);
 
-        // Second pass: composite glyphs (grayscale coverage -> ARGB)
+        // Second pass: composite glyphs. The scene buffer is
+        // DRM_FORMAT_ARGB8888 = PREMULTIPLIED alpha (wlroots/pixman
+        // convention): writing straight RGB with partial alpha makes
+        // glyph edges render at full brightness (fringes) instead of
+        // dimming with coverage. Proper premultiplied over-operator:
+        //   out_a = sa + da*(1-sa)
+        //   out_rgb = s_rgb*sa + d_rgb*(1-sa)   (all channels /255)
+        // The buffer starts transparent (0), so dst RGB is already
+        // premultiplied from any previous glyph overlap.
         int penX = 0;
         for (unsigned char c : text) {
             if (FT_Load_Char(m_face, c, FT_LOAD_RENDER)) continue;
@@ -123,12 +131,31 @@ public:
                     unsigned char a = bmp->buffer[row * bmp->pitch + col];
                     if (!a) continue;
                     uint32_t& dst = out.pixels[(size_t)dy * width + dx];
+
+                    uint32_t sr = (argb >> 8) & 0xFFu;  // unpremultiplied src RGB
+                    uint32_t sg = (argb >> 16) & 0xFFu;
+                    uint32_t sb = (argb >> 24) & 0xFFu;
+                    // premultiplied source
+                    uint32_t pr = sr * a / 255;
+                    uint32_t pg = sg * a / 255;
+                    uint32_t pb = sb * a / 255;
+
                     if (a == 255) {
-                        dst = (argb & 0xFFFFFF00u) | 0xFFu;
+                        dst = (sb << 24) | (sg << 16) | (sr << 8) | 0xFFu;
                     } else {
-                        uint8_t da = dst & 0xFFu;
-                        uint8_t oa = (uint8_t)(a + da * (255 - a) / 255);
-                        dst = (argb & 0xFFFFFF00u) | oa;
+                        uint32_t da = dst & 0xFFu;
+                        uint32_t inv = 255 - a;
+                        uint32_t dstr = (dst >> 8) & 0xFFu;  // dst RGB (premult)
+                        uint32_t dstg = (dst >> 16) & 0xFFu;
+                        uint32_t dstb = (dst >> 24) & 0xFFu;
+                        uint32_t or_ = pr + dstr * inv / 255;
+                        uint32_t og = pg + dstg * inv / 255;
+                        uint32_t ob = pb + dstb * inv / 255;
+                        uint32_t oa = a + da * inv / 255;
+                        if (or_ > 255) or_ = 255;
+                        if (og > 255) og = 255;
+                        if (ob > 255) ob = 255;
+                        dst = (ob << 24) | (og << 16) | (or_ << 8) | oa;
                     }
                 }
             }

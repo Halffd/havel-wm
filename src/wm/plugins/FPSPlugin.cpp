@@ -233,12 +233,17 @@ private:
         
         // Draw frame time bars
         float barW = static_cast<float>(w) / static_cast<float>(m_frameTimes.size());
-        
+
         for (size_t i = 0; i < m_frameTimes.size(); i++) {
             float ft = m_frameTimes[i];
+            // Clamp to the graph box: idle scenes can spike frame times
+            // far over maxFt, and unclamped bars computed negative y and
+            // drew upward out of the box (observed as a red wedge over
+            // the panel in a headless capture)
             float barH = (ft / maxFt) * static_cast<float>(h);
             if (barH < 1.0f) barH = 1.0f;
-            
+            if (barH > static_cast<float>(h)) barH = static_cast<float>(h);
+
             int barX = x + static_cast<int>(i * barW);
             int barY = y + h - static_cast<int>(barH);
             int barWInt = static_cast<int>(barW) + 1;
