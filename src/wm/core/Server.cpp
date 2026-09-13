@@ -1642,7 +1642,11 @@ std::string Server::ipcCloseNotification(const std::string& args) {
 }
 
 std::string Server::ipcReloadConfig() {
-    m_pluginManager.reloadConfig();
+    if (!m_pluginManager.reloadConfig()) {
+        // reloadConfig fails when no config file exists (first-boot
+        // state); that's "reloaded, from defaults" not an error
+        return m_ipcServer->createSuccessResponse("Configuration reloaded (no config file; defaults)");
+    }
     return m_ipcServer->createSuccessResponse("Configuration reloaded");
 }
 
