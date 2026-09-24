@@ -43,7 +43,7 @@ static const char* arg_str(HavelState* H, int idx) {
 
 static int hf_spawn(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    const char* cmd = arg_str(H, 1);
+    const char* cmd = arg_str(H, 0);
     if (!cmd || !*cmd || !ctx || !ctx->server) {
         havel_pushboolean(H, 0);
         return HAVEL_OK;
@@ -55,7 +55,7 @@ static int hf_spawn(HavelState* H, void*) {
 
 static int hf_workspace(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    int64_t ws = arg_int(H, 1);
+    int64_t ws = arg_int(H, 0);
     if (ctx && ctx->server && ws >= 0) {
         ctx->server->workspaceStepTo((uint32_t)ws);
     }
@@ -79,7 +79,7 @@ static int hf_workspace_prev(HavelState* H, void*) {
 
 static int hf_focus(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    int64_t id = arg_int(H, 1);
+    int64_t id = arg_int(H, 0);
     if (ctx && ctx->server && id >= 0) {
         ctx->server->windowManager().focusWindow((uint64_t)id);
     }
@@ -89,7 +89,7 @@ static int hf_focus(HavelState* H, void*) {
 
 static int hf_close_window(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    int64_t id = arg_int(H, 1);
+    int64_t id = arg_int(H, 0);
     if (ctx && ctx->server && id >= 0) {
         ctx->server->windowManager().closeWindow((uint64_t)id);
     }
@@ -99,7 +99,7 @@ static int hf_close_window(HavelState* H, void*) {
 
 static int hf_minimize(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    int64_t id = arg_int(H, 1);
+    int64_t id = arg_int(H, 0);
     if (ctx && ctx->server && id >= 0) {
         ctx->server->windowManager().minimizeWindow((uint64_t)id);
     }
@@ -109,7 +109,7 @@ static int hf_minimize(HavelState* H, void*) {
 
 static int hf_maximize(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    int64_t id = arg_int(H, 1);
+    int64_t id = arg_int(H, 0);
     if (ctx && ctx->server && id >= 0) {
         ctx->server->windowManager().maximizeWindow((uint64_t)id);
     }
@@ -119,7 +119,7 @@ static int hf_maximize(HavelState* H, void*) {
 
 static int hf_restore(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    int64_t id = arg_int(H, 1);
+    int64_t id = arg_int(H, 0);
     if (ctx && ctx->server && id >= 0) {
         ctx->server->windowManager().restoreWindow((uint64_t)id);
     }
@@ -129,9 +129,9 @@ static int hf_restore(HavelState* H, void*) {
 
 static int hf_move(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    int64_t id = arg_int(H, 1);
-    int64_t x = arg_int(H, 2);
-    int64_t y = arg_int(H, 3);
+    int64_t id = arg_int(H, 0);
+    int64_t x = arg_int(H, 1);
+    int64_t y = arg_int(H, 2);
     if (ctx && ctx->server && id >= 0) {
         ctx->server->windowManager().moveWindow((uint64_t)id, (int)x, (int)y);
     }
@@ -141,9 +141,9 @@ static int hf_move(HavelState* H, void*) {
 
 static int hf_resize(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    int64_t id = arg_int(H, 1);
-    int64_t w = arg_int(H, 2);
-    int64_t h = arg_int(H, 3);
+    int64_t id = arg_int(H, 0);
+    int64_t w = arg_int(H, 1);
+    int64_t h = arg_int(H, 2);
     if (ctx && ctx->server && id >= 0) {
         ctx->server->windowManager().resizeWindow((uint64_t)id, (int)w, (int)h);
     }
@@ -153,7 +153,7 @@ static int hf_resize(HavelState* H, void*) {
 
 static int hf_set_floating(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    int64_t id = arg_int(H, 1);
+    int64_t id = arg_int(H, 0);
     int floating = havel_toboolean(H, 2);
     if (ctx && ctx->server && id >= 0) {
         ctx->server->windowManager().setFloating((uint64_t)id, floating != 0);
@@ -164,7 +164,7 @@ static int hf_set_floating(HavelState* H, void*) {
 
 static int hf_set_gamma(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    double g = arg_num(H, 1);
+    double g = arg_num(H, 0);
     if (ctx && ctx->server) ctx->server->setGamma((float)g);
     havel_pushnil(H);
     return HAVEL_OK;
@@ -172,7 +172,7 @@ static int hf_set_gamma(HavelState* H, void*) {
 
 static int hf_set_temperature(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    int64_t k = arg_int(H, 1);
+    int64_t k = arg_int(H, 0);
     if (ctx && ctx->server) ctx->server->setTemperature((int)k);
     havel_pushnil(H);
     return HAVEL_OK;
@@ -180,7 +180,7 @@ static int hf_set_temperature(HavelState* H, void*) {
 
 static int hf_set_brightness(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    double b = arg_num(H, 1);
+    double b = arg_num(H, 0);
     if (ctx && ctx->server) ctx->server->setBrightness((float)b);
     havel_pushnil(H);
     return HAVEL_OK;
@@ -188,8 +188,8 @@ static int hf_set_brightness(HavelState* H, void*) {
 
 static int hf_notify(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    const char* summary = arg_str(H, 1);
-    const char* body = havel_gettop(H) >= 2 ? arg_str(H, 2) : "";
+    const char* summary = arg_str(H, 0);
+    const char* body = havel_gettop(H) >= 2 ? arg_str(H, 1) : "";
     if (ctx && ctx->server && summary && *summary) {
         // Same path the IPC notify command uses
         std::string args = "{\"summary\":\"" + std::string(summary) +
@@ -201,7 +201,7 @@ static int hf_notify(HavelState* H, void*) {
 }
 
 static int hf_log(HavelState* H, void*) {
-    const char* msg = arg_str(H, 1);
+    const char* msg = arg_str(H, 0);
     LOG_INFO("[Havel] %s", msg ? msg : "");
     havel_pushnil(H);
     return HAVEL_OK;
@@ -246,8 +246,12 @@ static int hf_keybind(HavelState* H, void*) {
         havel_pushboolean(H, 0);
         return HAVEL_OK;
     }
-    const char* spec = arg_str(H, 1);
-    if (!spec || !*spec || havel_type(H, 2) != HAVEL_TFUNCTION) {
+    const char* spec = arg_str(H, 0);
+    int arg1type = havel_type(H, 1);
+    // Any non-nil value qualifies: closures arrive as FUNCTION_OBJ_ID
+    // values which don't satisfy the capi's TFUNCTION mapping over the
+    // bridge. The runtime decides callable-ness at callback time.
+    if (!spec || !*spec || arg1type == HAVEL_TNIL) {
         LOG_WARN("[Havel] keybind: needs (\"Mods+Key\", fn)");
         havel_pushboolean(H, 0);
         return HAVEL_OK;
@@ -265,7 +269,7 @@ static int hf_keybind(HavelState* H, void*) {
     // stores the duplicate (and pops it).
     HavelHost* host = ctx->server->havelHost();
     std::string global = "havel_cb_" + std::to_string(++host->m_nextCallbackId);
-    havel_pushvalue(H, 2);
+    havel_pushvalue(H, 1);
     havel_setglobal(H, global.c_str());
 
     HavelState* HH = host->state();
