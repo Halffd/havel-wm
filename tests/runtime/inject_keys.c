@@ -86,6 +86,14 @@ int main(int argc, char** argv) {
     wl_registry_add_listener(registry, &reg_listener, NULL);
     wl_display_roundtrip(d);
 
+    // The compositor may advertise wl_seat/vk_manager lazily relative
+    // to the first batch of globals; keep round-tripping until both
+    // show up instead of failing on a single early roundtrip.
+    for (int tries = 0; !(seat && mgr) && tries < 50; tries++) {
+        wl_display_roundtrip(d);
+        usleep(100000); // 100ms
+    }
+
     if (!seat || !mgr) {
         fprintf(stderr, "missing globals: seat=%p vk_mgr=%p\n",
                 (void*)seat, (void*)mgr);

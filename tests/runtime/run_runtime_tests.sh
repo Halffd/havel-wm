@@ -86,10 +86,14 @@ report $(grep -qE "Conflict: .* already bound" "$LOG" && echo 1 || echo 0) "no k
 echo "--- phase 2: client round-trip (foot)"
 WAYLAND_DISPLAY=wayland-0 timeout 60 foot -e sh -c 'sleep 300' > /dev/null 2>&1 &
 FOOT_PID=$!
-sleep 5
-report $(grep -q "onViewMapped" "$LOG" && echo 0 || echo 1) "client mapped a view"
-report $(grep -qE "View unmapped" "$LOG" && echo 0 || echo 1) "placeholder (unmap happens at foot exit)"
-
+# poll for the map before testing it: client startup time varies under
+# load (previous fixed 5s sleep raced slow boots)
+MAP_SEEN=1
+for _ in $(seq 1 20); do
+    grep -q "onViewMapped" "$LOG" && { MAP_SEEN=0; break; }
+    sleep 1
+done
+report "$MAP_SEEN" "client mapped a view"
 # ---------------------------------------------------------------- phase 3
 echo "--- phase 3: pixel capture (grim)"
 sleep 2
@@ -110,6 +114,18 @@ print(n)
 else
     echo "FAIL: grim could not capture (is wlr-screencopy wired?)"; FAIL=$((FAIL+1))
 fi
+
+# exercise teardown now (after the capture, which needs the window on
+# screen): kill foot, then wait for the compositor's onViewUnmapped log
+# line - previously checked while foot still ran 'sleep 300', so the
+# check could never pass
+kill "$FOOT_PID" 2>/dev/null; wait "$FOOT_PID" 2>/dev/null; FOOT_PID=""
+UNMAP_SEEN=1
+for _ in $(seq 1 15); do
+    grep -qE "View unmapped" "$LOG" && { UNMAP_SEEN=0; break; }
+    sleep 1
+done
+report "$UNMAP_SEEN" "view unmapped after client exit"
 
 # ---------------------------------------------------------------- phase 4
 echo "--- phase 4: IPC probe"
