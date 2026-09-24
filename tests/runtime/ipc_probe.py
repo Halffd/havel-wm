@@ -114,6 +114,34 @@ def main():
         else:
             print(f"NOTED    {method}: result={json.dumps(resp.get('result'))[:60]}")
 
+    # havel_run: the embedded havel-lang IPC command. Exercises the
+    # HavelHost path on the compositor thread - success, error, and
+    # bad-source must all answer without killing the server.
+    HAVEL_CASES = [
+        ({"source": "1"}, True, "valid source"),
+        ({}, False, "no file or source"),
+        ({"file": "/nonexistent/does-not-exist.hv"}, False, "missing file"),
+        ({"source": "this is (not valid havel @@@"}, False, "syntax error"),
+    ]
+    for params, expect_ok, label in HAVEL_CASES:
+        seq += 1
+        line = rpc(cmd_sock, "havel_run", params, seq)
+        if line is None:
+            print(f"DEAD havel_run({label}): compositor killed by script input!")
+            failures += 1
+            continue
+        resp = json.loads(line)
+        # this server's error convention: {"result": {"error": ..., "success": false}}
+        result = resp.get("result") or {}
+        ok = "error" not in resp and "error" not in result
+        if ok == expect_ok:
+            print(f"{'OK' if ok else 'GUARDED'}  havel_run({label})")
+        else:
+            print(
+                f"FAIL havel_run({label}): expected {'ok' if expect_ok else 'error'}, got {line[:100]}"
+            )
+            failures += 1
+
     # compositor liveness proof
     seq += 1
     line = rpc(cmd_sock, "ping", {}, seq)

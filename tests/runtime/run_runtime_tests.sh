@@ -130,7 +130,7 @@ report "$UNMAP_SEEN" "view unmapped after client exit"
 # ---------------------------------------------------------------- phase 4
 echo "--- phase 4: IPC probe"
 if python3 tests/runtime/ipc_probe.py > /tmp/havel-ipc-out.txt 2>&1; then
-    echo "PASS: IPC surface (28 valid + 6 hostile)"; PASS=$((PASS+1))
+    echo "PASS: IPC surface (28 valid + 6 hostile + 4 havel_run)"; PASS=$((PASS+1))
 else
     echo "FAIL: IPC probe"; cat /tmp/havel-ipc-out.txt | tail -8
     FAIL=$((FAIL+1))
