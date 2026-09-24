@@ -320,14 +320,18 @@ bool PluginManager::dispatchKey(const KeyEvent& event) {
     PluginEvent pluginEvent;
     pluginEvent.type = PluginEventType::Custom;
     pluginEvent.data = &const_cast<KeyEvent&>(event);
-    
+
     // Check if any plugin consumes the key event
     for (auto& plugin : m_plugins) {
         if (plugin->onKey(event)) {
+            LOG_INFO("[PluginManager] Key consumed by plugin '%s' "
+                     "(keysym=0x%x mods=0x%x pressed=%d)",
+                     plugin->getName().c_str(), event.keysym,
+                     event.modifiers, event.pressed);
             return true;  // Event consumed
         }
     }
-    
+
     return false;  // Event not consumed, pass to compositor
 }
 

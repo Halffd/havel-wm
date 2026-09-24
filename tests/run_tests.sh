@@ -14,7 +14,7 @@ FAILED=0
 
 # Test 1: Build test
 echo "Test 1: Build System"
-cd /home/all/repos/havel-wm
+cd "$(cd "$(dirname "$0")/.." && pwd)"
 if ./build.sh > /dev/null 2>&1; then
     echo -e "${GREEN}✓ PASS${NC}: Build successful"
     ((PASSED++))
@@ -26,7 +26,7 @@ echo ""
 
 # Test 2: Binary exists
 echo "Test 2: Binary Check"
-if [ -f "/home/all/repos/havel-wm/build/bin/havel-wm" ]; then
+if [ -f "$PWD/build/bin/havel-wm" ]; then
     echo -e "${GREEN}✓ PASS${NC}: Binary exists"
     ((PASSED++))
 else

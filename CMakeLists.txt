@@ -159,6 +159,9 @@ set(WM_CORE_SOURCES
     src/wm/input/TextInputManager.cpp
     src/wm/desktop/DesktopManager.cpp
     src/wm/desktop/DesktopManager.hpp
+    src/wm/havel/HavelHost.cpp
+    src/wm/havel/HavelHost.hpp
+    src/wm/havel/HavelLangStubs.cpp
     src/wm/desktop/NASAWallpaper.cpp
     src/wm/desktop/NASAWallpaper.hpp
     src/wm/desktop/NASAWallpaperTests.cpp
@@ -279,6 +282,89 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 
 # Enable unstable wlroots features
 target_compile_definitions(${PROJECT_NAME} PRIVATE WLR_USE_UNSTABLE)
+
+# ============================================================================
+# Havel language embedding (scripts as compositor commands)
+# ============================================================================
+# Links the havel-lang static library from the sibling monorepo build.
+# The monorepo builds it LLVM-free (its LLVM TUs are excluded), so no
+# LLVM libraries are needed here. Undefined externals in the archive:
+# libc/libm/libdl/readline/X11 only.
+option(ENABLE_HAVEL_LANG "Embed the Havel language (config.hv, havel_run IPC)" ON)
+
+set(HAVEL_LANG_LIB "")
+set(HAVEL_CORE_LIB "")
+if(ENABLE_HAVEL_LANG)
+    foreach(_cand
+            "${CMAKE_CURRENT_SOURCE_DIR}/../build-debug/libhavel_lang.a"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../build-release/libhavel_lang.a"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../build/libhavel_lang.a")
+        if(EXISTS "${_cand}")
+            set(HAVEL_LANG_LIB "${_cand}")
+            break()
+        endif()
+    endforeach()
+    if(HAVEL_LANG_LIB)
+        get_filename_component(_lang_dir "${HAVEL_LANG_LIB}" DIRECTORY)
+        # libhavel_core.a carries the host-bridge implementations
+        # (ModularHostBridges) and the app-layer backends they call
+        # (IO, HotkeyManager, EventListener, DisplayManager, MouseService,
+        # KeyMap) - the lang archive references their symbols.
+        if(EXISTS "${_lang_dir}/libhavel_core.a")
+            set(HAVEL_CORE_LIB "${_lang_dir}/libhavel_core.a")
+        endif()
+    endif()
+endif()
+
+if(HAVEL_LANG_LIB)
+    message(STATUS "Havel language embedding: ${HAVEL_LANG_LIB}")
+    if(HAVEL_CORE_LIB)
+        message(STATUS "Havel host bridges: ${HAVEL_CORE_LIB}")
+    endif()
+    target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_HAVEL_LANG)
+    # allow-multiple-definition: libhavel_core.a carries the monorepo's
+    # own havel::WindowManager (X11-based) - same class name as this WM's
+    # shell WindowManager. The archive member gets pulled for its 40
+    # non-overlapping symbols; the 15 overlapping ones then collide.
+    # The WM's objects link first, so with this flag the WM's
+    # implementations win and the archive's duplicates are ignored. Safe
+    # because the bridge code that would call the wrong instance never
+    # runs: nothing in the WM calls createHostBridge().
+    target_link_options(${PROJECT_NAME} PRIVATE -Wl,--allow-multiple-definition)
+    target_include_directories(${PROJECT_NAME} PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../src/havel-lang/capi"
+    )
+    target_link_libraries(${PROJECT_NAME} PRIVATE
+        "${HAVEL_LANG_LIB}"
+        pthread
+        dl
+        m
+        readline
+        X11
+        Xrandr
+        Xinerama
+        Xext
+        Xi
+        Xtst
+        ffi
+        wayland-client
+        dbus-1
+        asound
+    )
+    if(HAVEL_CORE_LIB)
+        target_link_libraries(${PROJECT_NAME} PRIVATE "${HAVEL_CORE_LIB}")
+    endif()
+    # wayland client-protocol code (zxdg_output_v1_interface etc.) that
+    # the bridge layer references
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../build-debug/libwayland-protos.a")
+        target_link_libraries(${PROJECT_NAME} PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/../build-debug/libwayland-protos.a")
+    endif()
+else()
+    if(ENABLE_HAVEL_LANG)
+        message(STATUS "Havel language embedding: libhavel_lang.a not found - building without script support")
+    endif()
+endif()
 
 # Link with wlroots bridge library and other libraries
 target_link_libraries(${PROJECT_NAME} PRIVATE

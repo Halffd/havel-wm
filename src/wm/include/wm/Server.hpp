@@ -18,6 +18,12 @@
 #include <array>
 #include <unordered_map>
 
+// Havel language host (global-namespace class from HavelHost.hpp).
+// Declared at GLOBAL scope: an elaborated 'class HavelHost*' inside
+// namespace havel would forward-declare a NEW havel::HavelHost instead
+// of referring to this one.
+class HavelHost;
+
 namespace havel {
 
 class DbusNotificationDaemon;
@@ -197,6 +203,22 @@ public:
     std::string ipcGetVersion();
     std::string ipcGetStats();
 
+    // Shell window manager accessor (id-based operations; the projection
+    // the IPC commands use)
+    havel::WindowManager& windowManager() { return m_windowManager; }
+
+    // Generic command spawn (fork+exec, no shell) - same path
+    // spawnTerminal() uses
+    void spawnCommand(const char* cmd);
+
+#ifdef HAVE_HAVEL_LANG
+    // Havel language embedding (scripts as compositor commands)
+    ::HavelHost* havelHost() { return m_havelHost; }
+    bool initHavelHost();  // create + load config.hv
+    bool registerHavelKeybinding(uint32_t modifiers, uint32_t keysym,
+                                 const char* name, std::function<void()> callback);
+#endif
+
 private:
     std::array<std::unique_ptr<Workspace>, WORKSPACE_COUNT> m_workspaces;
     uint32_t m_activeWorkspace = 0;
@@ -210,6 +232,10 @@ private:
 
     // Text Input (IME)
     TextInputManager* m_textInputManager = nullptr;
+
+#ifdef HAVE_HAVEL_LANG
+    ::HavelHost* m_havelHost = nullptr;
+#endif
 
     // Overlay UIs (alt-tab, overview, launcher) are plugin-owned:
     // AltTabPlugin, OverviewPlugin, AppLauncherPlugin.

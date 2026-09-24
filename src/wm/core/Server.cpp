@@ -13,6 +13,9 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <cstdio>
+#ifdef HAVE_HAVEL_LANG
+#include <wm/havel/HavelHost.hpp>
+#endif
 
 namespace havel {
 
@@ -682,6 +685,35 @@ int Server::getOutputHeight() const {
 // ============================================================================
 // Action helpers
 // ============================================================================
+
+void Server::spawnCommand(const char* cmd) {
+    if (!cmd || !*cmd) return;
+    if (g_server_spawn) {
+        g_server_spawn(cmd);
+        return;
+    }
+    // Fork+exec, no shell (same as havel_cpp_server_spawn's body)
+    char* cmd_copy = strdup(cmd);
+    if (!cmd_copy) return;
+    char* argv[64];
+    int argc = 0;
+    char* token = strtok(cmd_copy, " \t\n");
+    while (token && argc < 63) {
+        argv[argc++] = token;
+        token = strtok(NULL, " \t\n");
+    }
+    argv[argc] = NULL;
+    if (argc > 0) {
+        pid_t pid = fork();
+        if (pid == 0) {
+            execvp(argv[0], argv);
+            _exit(127);
+        } else if (pid > 0) {
+            LOG_INFO("[Server] Spawned: %s (PID: %d)", cmd, pid);
+        }
+    }
+    free(cmd_copy);
+}
 
 void Server::spawnTerminal() {
     const char* terminals[] = {"alacritty", "foot", nullptr};
@@ -1533,8 +1565,54 @@ bool Server::startIPCServer(const std::string& socketPath) {
         return m_ipcServer->handleQuit();
     });
 
+#ifdef HAVE_HAVEL_LANG
+    // Run a Havel script: {"file": "/path/to/script.hv"} or
+    // {"source": "spawn(\"foot\")"}
+    m_ipcServer->registerCommand("havel_run", [this](const std::string& args) -> std::string {
+        if (!m_havelHost) {
+            return m_ipcServer->createErrorResponse(-5, "Havel host not initialized");
+        }
+        std::string file = m_ipcServer->extractJsonString(args, "file");
+        std::string source = m_ipcServer->extractJsonString(args, "source");
+        bool ok = false;
+        std::string err;
+        if (!file.empty()) {
+            ok = m_havelHost->runFile(file);
+            err = m_havelHost->lastError();
+        } else if (!source.empty()) {
+            ok = m_havelHost->runString(source, "ipc_snippet");
+            err = m_havelHost->lastError();
+        } else {
+            return m_ipcServer->createErrorResponse(-5, "havel_run: needs file or source");
+        }
+        if (!ok) {
+            return m_ipcServer->createErrorResponse(-1, err.empty() ? "script failed" : err);
+        }
+        return m_ipcServer->createSuccessResponse("script executed");
+    });
+#endif
+
     if (m_ipcServer->start(socketPath)) {
         LOG_INFO("IPC server started on: %s", socketPath.c_str());
+
+#ifdef HAVE_HAVEL_LANG
+        // Embed the Havel language and run the startup config (config.hv).
+        // Scripts register keybindings via keybind() and run quick
+        // compositor commands; they execute before the frame loop starts.
+        if (initHavelHost()) {
+            const char* home = getenv("HOME");
+            if (home) {
+                char configPath[512];
+                snprintf(configPath, sizeof(configPath), "%s/.config/havel-wm/config.hv", home);
+                if (access(configPath, R_OK) == 0) {
+                    m_havelHost->runFile(configPath);
+                } else {
+                    LOG_INFO("[Havel] No config.hv at %s (scripts optional)", configPath);
+                }
+            }
+        }
+#endif
+
         return true;
     } else {
         LOG_ERROR("Failed to start IPC server on: %s", socketPath.c_str());
@@ -1565,6 +1643,24 @@ void Server::processIPCEvents() {
 // IPC command handlers (phase 2 extraction from startIPCServer lambdas).
 // Each returns the JSON-RPC result string for its command.
 // ============================================================================
+
+bool Server::initHavelHost() {
+    if (m_havelHost && m_havelHost->isInitialized()) return true;
+    if (!m_havelHost) {
+        m_havelHost = new HavelHost();
+    }
+    if (!m_havelHost->init(this)) {
+        LOG_ERROR("[Havel] Failed to initialize language host: %s",
+                  m_havelHost->lastError().c_str());
+        return false;
+    }
+    return true;
+}
+
+bool Server::registerHavelKeybinding(uint32_t modifiers, uint32_t keysym,
+                                      const char* name, std::function<void()> callback) {
+    return m_keybindingManager.registerKeybinding(modifiers, keysym, name, callback);
+}
 
 std::string Server::ipcSetGamma(const std::string& args) {
     float gamma = m_ipcServer->extractJsonFloat(args, "gamma", 1.0f);
