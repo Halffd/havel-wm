@@ -117,12 +117,27 @@ def main():
     # havel_run: the embedded havel-lang IPC command. Exercises the
     # HavelHost path on the compositor thread - success, error, and
     # bad-source must all answer without killing the server.
-    HAVEL_CASES = [
-        ({"source": "1"}, True, "valid source"),
-        ({}, False, "no file or source"),
-        ({"file": "/nonexistent/does-not-exist.hv"}, False, "missing file"),
-        ({"source": "this is (not valid havel @@@"}, False, "syntax error"),
-    ]
+    # havel_run only exists when the compositor was built with
+    # HAVE_HAVEL_LANG (needs the sibling monorepo's libhavel_lang.a).
+    # Probe registration first; skip the matrix entirely when absent.
+    seq += 1
+    line = rpc(cmd_sock, "havel_run", {}, seq)
+    havel_available = True
+    if line is not None:
+        resp = json.loads(line)
+        err = resp.get("error") or {}
+        if err.get("code") == -32601:
+            havel_available = False
+    if not havel_available:
+        print("SKIP havel_run: compositor built without HAVE_HAVEL_LANG")
+        HAVEL_CASES = []
+    else:
+        HAVEL_CASES = [
+            ({"source": "1"}, True, "valid source"),
+            ({}, False, "no file or source"),
+            ({"file": "/nonexistent/does-not-exist.hv"}, False, "missing file"),
+            ({"source": "this is (not valid havel @@@"}, False, "syntax error"),
+        ]
     for params, expect_ok, label in HAVEL_CASES:
         seq += 1
         line = rpc(cmd_sock, "havel_run", params, seq)
