@@ -45,7 +45,19 @@ try:
     s=socket.socket(socket.AF_UNIX); s.settimeout(1); s.connect('$SOCK'); s.close()
 except Exception: sys.exit(1)
 " 2>/dev/null; then return 0; fi
-        sleep 1
+        sleep 0.2
+    done
+    return 1
+}
+
+# Wait until a log line matching PATTERN appears (real readiness/event
+# condition, never a fixed sleep - fixed sleeps raced repeated times on
+# this machine's load spikes during the audit)
+wait_for_log() {
+    local pattern="$1" timeout_s="${2:-30}"
+    for _ in $(seq $((timeout_s * 5))); do
+        grep -qE "$pattern" "$LOG" && return 0
+        sleep 0.2
     done
     return 1
 }
@@ -76,8 +88,12 @@ echo "log: $LOG"
 # ---------------------------------------------------------------- phase 1
 echo "--- phase 1: boot"
 start_wm || { echo "FAIL: compositor did not start"; exit 1; }
-sleep 3
-report $([ "$(crashes)" -eq 0 ] && grep -q "Havel Compositor running" "$LOG" && echo 0 || echo 1) "clean boot, event loop running"
+
+# boot checks: each polls its real log condition, no idle sleeps
+BOOT_OK=1
+wait_for_log "Havel Compositor running" 40 && wait_for_log "Auto-hide timeout reached" 10 && \
+    wait_for_log "\[FRAME\] Frame #1" 5 && BOOT_OK=0
+report $([ "$(crashes)" -eq 0 ] && [ "$BOOT_OK" -eq 0 ] && echo 0 || echo 1) "clean boot, event loop running"
 report $(grep -q "Auto-hide timeout reached" "$LOG" && echo 0 || echo 1) "loading-screen auto-hide timer fires"
 report $(grep -q "\[FRAME\] Frame #1" "$LOG" && echo 0 || echo 1) "frame loop started"
 report $(grep -qE "Conflict: .* already bound" "$LOG" && echo 1 || echo 0) "no keybinding registration conflicts"
@@ -96,7 +112,9 @@ done
 report "$MAP_SEEN" "client mapped a view"
 # ---------------------------------------------------------------- phase 3
 echo "--- phase 3: pixel capture (grim)"
-sleep 2
+# wait for the map's position/focus to settle (that log line appears right
+# after onViewMapped) - the client's first presented frame is then live
+wait_for_log "Node raised, positioned" 20 || true
 CAP="$(mktemp /tmp/havel-capture-XXXXXX.png)"
 if WAYLAND_DISPLAY=wayland-0 grim "$CAP" 2>/dev/null && [ -s "$CAP" ]; then
     # window content check: foot's #242424 terminal background must be
@@ -150,20 +168,17 @@ if [ ! -x "$INJ" ]; then
 fi
 if [ -x "$INJ" ]; then
     WAYLAND_DISPLAY=wayland-0 "$INJ" +125 28 -125
-    sleep 2
-    report $(grep -q "TRIGGERED: spawn_terminal" "$LOG" && echo 0 || echo 1) "Meta+Return triggers spawn_terminal"
+    report $(wait_for_log "TRIGGERED: spawn_terminal" 10 && echo 0 || echo 1) "Meta+Return triggers spawn_terminal"
     WAYLAND_DISPLAY=wayland-0 "$INJ" +125 3 -125
-    sleep 1
-    report $(grep -q "TRIGGERED: workspace_2" "$LOG" && echo 0 || echo 1) "Meta+2 triggers workspace_2"
+    report $(wait_for_log "TRIGGERED: workspace_2" 10 && echo 0 || echo 1) "Meta+2 triggers workspace_2"
 else
     echo "SKIP: injector build failed (wayland-scanner missing?)"
 fi
 
 # ---------------------------------------------------------------- teardown
 kill "$FOOT_PID" 2>/dev/null; FOOT_PID=""
-sleep 2
 report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "zero crashes across all phases"
-grep -q "View freed" "$LOG" && report 0 "client teardown clean (View freed)" || report 1 "client teardown clean (View freed)"
+report $(wait_for_log "View freed" 10 && echo 0 || echo 1) "client teardown clean (View freed)"
 
 kill "$WM_PID" 2>/dev/null; WM_PID=""
 echo ""
