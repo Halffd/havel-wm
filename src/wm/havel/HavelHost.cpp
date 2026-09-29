@@ -240,26 +240,53 @@ static int hf_get_windows(HavelState* H, void*) {
 // keybind(spec, fn): Havel-defined keybindings
 // ---------------------------------------------------------------------------
 
+// Convert a compact havel hotkey spec ("^+F1", "#Return", "!" alone)
+// into the canonical "Meta+Shift+..." form PluginConfig understands.
+static std::string hotkeySpecToBinding(const std::string& hk) {
+    std::string mods;
+    std::string key;
+    size_t i = 0;
+    for (; i < hk.size(); ++i) {
+        char c = hk[i];
+        if (c == '^') mods += "Ctrl+";
+        else if (c == '#') mods += "Meta+";
+        else if (c == '!') mods += "Alt+";
+        else if (c == '+' && i + 1 < hk.size()) mods += "Shift+";  // '+' followed by key
+        else if (c == '+' && i + 1 >= hk.size()) { key = "+"; }       // "+" alone is the key
+        else { key = hk.substr(i); break; }
+    }
+    if (key.empty()) key = hk;  // nothing consumed as modifiers
+    if (key == "->") key = "Plus";  // only "+" would've consumed by typo; guard
+    return mods + key;
+}
+
 static int hf_keybind(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
     if (!ctx || !ctx->server) {
         havel_pushboolean(H, 0);
         return HAVEL_OK;
     }
-    const char* spec = arg_str(H, 0);
+    const char* rawSpec = arg_str(H, 0);
     int arg1type = havel_type(H, 1);
     // Any non-nil value qualifies: closures arrive as FUNCTION_OBJ_ID
     // values which don't satisfy the capi's TFUNCTION mapping over the
     // bridge. The runtime decides callable-ness at callback time.
-    if (!spec || !*spec || arg1type == HAVEL_TNIL) {
+    if (!rawSpec || !*rawSpec || arg1type == HAVEL_TNIL) {
         LOG_WARN("[Havel] keybind: needs (\"Mods+Key\", fn)");
         havel_pushboolean(H, 0);
         return HAVEL_OK;
     }
 
+    // Translate havel hotkey syntax ("^+F1", "#Return", "!F1") into the
+    // binding spec ("Ctrl+Shift+F1", "Meta+Return", "Alt+F1") so both the
+    // host-function form keybind("Meta+Return", fn) and the language sugar
+    // ^+F1 => {...} land in the same table.
+    std::string spec = hotkeySpecToBinding(rawSpec);
+
     uint32_t mods = 0, keysym = 0;
-    if (!PluginConfig::parseKeybindingSpec(spec, &mods, &keysym)) {
-        LOG_WARN("[Havel] keybind: unrecognized binding spec '%s'", spec);
+    if (!PluginConfig::parseKeybindingSpec(spec.c_str(), &mods, &keysym)) {
+        LOG_WARN("[Havel] keybind: unrecognized binding spec '%s' (translated: '%s')",
+                 rawSpec, spec.c_str());
         havel_pushboolean(H, 0);
         return HAVEL_OK;
     }
@@ -357,6 +384,12 @@ void HavelHost::registerHostFunctions() {
     havel_pushcfunction_with_ctx(m_H, hf_get_windows, nullptr, "get_windows");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_keybind, nullptr, "keybind");
+    havel_pop(m_H, 1);
+    // Language-level hotkey syntax (^+F1 => {...}, #Return => {...})
+    // lowers to calls to the global "hotkey.register". Register the same
+    // handler under that dotted name; the keymap parse inside hf_keybind
+    // normalizes the syntax sugar into the same mods+keysym form.
+    havel_pushcfunction_with_ctx(m_H, hf_keybind, nullptr, "hotkey.register");
     havel_pop(m_H, 1);
 }
 

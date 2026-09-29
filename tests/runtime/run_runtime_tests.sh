@@ -64,8 +64,11 @@ wait_for_log() {
 
 start_wm() {
     rm -f "$SOCK"
+    # timeout must outlast the whole harness (boot + client + pixels +
+    # ipc + keys + parity phases); 90s expired mid-run under load and
+    # killed the compositor during the IPC phase
     WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 \
-        timeout 90 "$BUILD_DIR/bin/havel-wm" > "$LOG" 2>&1 &
+        timeout 240 "$BUILD_DIR/bin/havel-wm" > "$LOG" 2>&1 &
     WM_PID=$!
     wait_socket || { echo "compositor socket never came up"; return 1; }
 }
@@ -174,6 +177,48 @@ if [ -x "$INJ" ]; then
 else
     echo "SKIP: injector build failed (wayland-scanner missing?)"
 fi
+
+# ---------------------------------------------------------------- phase 6
+echo "--- phase 6: havel language-syntax hotkeys (config.hv)"
+# The real user-facing hotkey forms through the embedded interpreter:
+# sugar (^+F2 => {...} lowers to hotkey.register) and host fn
+# (keybind("Meta+F3", fn())). Both must register and fire via injection.
+# F-key evdev codes: F2=60, F3=61 (compositor adds 8 for xkb).
+PARITY_HOME="$(mktemp -d /tmp/havel-parity-XXXXXX)"
+mkdir -p "$PARITY_HOME/.config/havel-wm"
+cat > "$PARITY_HOME/.config/havel-wm/config.hv" <<'EOF'
+^+F2 => { log("harness-^+F2-fired") }
+keybind("Meta+F3", fn() { log("harness-keybind-F3-fired") })
+EOF
+HOME="$PARITY_HOME" WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 \
+    timeout 50 "$BUILD_DIR/bin/havel-wm" > /tmp/havel-parity-wm.log 2>&1 &
+PARITY_PID=$!
+OLD_LOG="$LOG"; LOG=/tmp/havel-parity-wm.log
+# The main harness WM still holds wayland-0; the parity instance
+# auto-increments. The real readiness signal: the parity WM's own
+# "Compositor running on <sock>" line (config.hv loaded by then). Wait
+# for it, then read the actual socket name from the log - never assume.
+PARITY_SOCK=""
+for _ in $(seq 150); do
+    if grep -q "Compositor running on" /tmp/havel-parity-wm.log 2>/dev/null; then
+        PARITY_SOCK=$(grep -o "Compositor running on wayland-[0-9]*" /tmp/havel-parity-wm.log | head -1 | grep -o "wayland-[0-9]*")
+        break
+    fi
+    sleep 0.2
+done
+if [ -z "$PARITY_SOCK" ]; then
+    echo "SKIP: parity compositor never became ready"
+    LOG="$OLD_LOG"
+else
+    WAYLAND_DISPLAY="$PARITY_SOCK" "$INJ" +29 +42 60 -42 -29
+    report $(wait_for_log "harness-..F2-fired" 10 && echo 0 || echo 1) "^+F2 sugar fires (Ctrl+Shift+F2)"
+    WAYLAND_DISPLAY="$PARITY_SOCK" "$INJ" +125 61 -125
+    report $(wait_for_log "harness-keybind-F3-fired" 10 && echo 0 || echo 1) "keybind('Meta+F3') fires"
+    report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "parity compositor clean"
+fi
+kill "$PARITY_PID" 2>/dev/null
+rm -rf "$PARITY_HOME"
+LOG="$OLD_LOG"
 
 # ---------------------------------------------------------------- teardown
 kill "$FOOT_PID" 2>/dev/null; FOOT_PID=""

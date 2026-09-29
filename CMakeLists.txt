@@ -350,6 +350,8 @@ if(HAVEL_LANG_LIB)
         wayland-client
         dbus-1
         asound
+        opencv_core
+        opencv_imgcodecs
     )
     if(HAVEL_CORE_LIB)
         target_link_libraries(${PROJECT_NAME} PRIVATE "${HAVEL_CORE_LIB}")
