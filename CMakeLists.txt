@@ -61,6 +61,21 @@ execute_process(
     ${PROTOCOL_HEADERS_DIR}/xdg-shell-protocol.h
 )
 
+# Generate virtual-keyboard CLIENT protocol (self-injection keyboard;
+# XML lives in tests/runtime - it's the unstable upstream protocol)
+execute_process(
+    COMMAND ${WAYLAND_SCANNER} client-header
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime/virtual-keyboard-unstable-v1.xml
+    ${PROTOCOL_HEADERS_DIR}/virtual-keyboard-unstable-v1-client-protocol.h
+)
+
+execute_process(
+    COMMAND ${WAYLAND_SCANNER} private-code
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime/virtual-keyboard-unstable-v1.xml
+    ${PROTOCOL_HEADERS_DIR}/virtual-keyboard-unstable-v1-protocol.c
+)
+list(APPEND PROTOCOL_SOURCES ${PROTOCOL_HEADERS_DIR}/virtual-keyboard-unstable-v1-protocol.c)
+
 execute_process(
     COMMAND ${WAYLAND_SCANNER} private-code
     ${WAYLAND_PROTOCOLS_DIR}/stable/xdg-shell/xdg-shell.xml

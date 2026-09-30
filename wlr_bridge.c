@@ -2683,6 +2683,11 @@ int havel_wlr_run(havel_wlr_server_t *server) {
     LOG_INFO("=== Havel Compositor running on %s ===", socket);
     printf("Havel Compositor running on %s\n", socket);
 
+    // Self-injection keyboard: persistent virtual keyboard over a
+    // background connection to our own socket. The background roundtrip
+    // completes once the event loop below starts dispatching.
+    havel_self_kbd_start();
+
     // Hide loading screen once compositor is fully running
     if (loading_screen_is_visible()) {
         loading_screen_set_progress(100);
@@ -3170,4 +3175,160 @@ uint32_t havel_wlr_capture_view_texture(void* c_view) {
     // Texture capture not fully implemented (needs renderer access from the
     // C++ layer); Alt-Tab uses fallback colored rectangles.
     return 0;
+}
+
+// ============================================================================
+// Input injection (script-driven; io.injectKey host function)
+// ============================================================================
+
+#include <wlr/interfaces/wlr_keyboard.h>
+#include <wayland-client.h>
+#include <pthread.h>
+#include "virtual-keyboard-unstable-v1-client-protocol.h"
+
+// Self-injection keyboard: a background wayland-client connection to the
+// compositor's own socket, holding a persistent virtual keyboard. The
+// transient-client pattern (the harness's inject_keys) dies with its
+// client; this one lives for the compositor's lifetime, so io.injectKey
+// works at any point after the event loop starts. This is the "WM owns
+// the input system" vision from the archived input-backend plan, in
+// Wayland terms.
+struct havel_self_kbd {
+    struct wl_display *display;
+    struct wl_seat *seat;
+    struct zwp_virtual_keyboard_manager_v1 *mgr;
+    struct zwp_virtual_keyboard_v1 *kbd;
+    pthread_t thread;
+    pthread_mutex_t lock;
+    volatile bool ready;
+};
+static struct havel_self_kbd self_kbd = {.lock = PTHREAD_MUTEX_INITIALIZER, .ready = false};
+
+static const char *SELF_KBD_KEYMAP = \
+    "xkb_keymap {\n"
+    "xkb_keycodes { include \"evdev+aliases(qwerty)\" };\n"
+    "xkb_types { include \"complete\" };\n"
+    "xkb_compat { include \"complete\" };\n"
+    "xkb_symbols { include \"pc+us+inet(evdev)\" };\n"
+    "};\n";
+
+static void self_kbd_reg_global(void *data, struct wl_registry *r,
+                                 uint32_t name, const char *iface, uint32_t ver) {
+    (void)data; (void)ver;
+    if (strcmp(iface, "wl_seat") == 0) {
+        self_kbd.seat = wl_registry_bind(r, name, &wl_seat_interface, 1);
+    } else if (strcmp(iface, "zwp_virtual_keyboard_manager_v1") == 0) {
+        self_kbd.mgr = wl_registry_bind(r, name,
+                                         &zwp_virtual_keyboard_manager_v1_interface, 1);
+    }
+}
+static void self_kbd_reg_remove(void *data, struct wl_registry *r, uint32_t name) {
+    (void)data; (void)r; (void)name;
+}
+
+static void *self_kbd_thread(void *arg) {
+    (void)arg;
+    struct wl_display *d = wl_display_connect(NULL);  // WAYLAND_DISPLAY is set
+    if (!d) {
+        LOG_WARN("[Inject] Self-keyboard: failed to connect to own socket");
+        return NULL;
+    }
+    self_kbd.display = d;
+
+    struct wl_registry *registry = wl_display_get_registry(d);
+    struct wl_registry_listener reg_listener = {
+        .global = self_kbd_reg_global,
+        .global_remove = self_kbd_reg_remove,
+    };
+    wl_registry_add_listener(registry, &reg_listener, NULL);
+    wl_display_roundtrip(d);
+
+    if (!self_kbd.seat || !self_kbd.mgr) {
+        LOG_WARN("[Inject] Self-keyboard: missing globals (seat=%p mgr=%p)",
+                 (void*)self_kbd.seat, (void*)self_kbd.mgr);
+        return NULL;
+    }
+
+    self_kbd.kbd = zwp_virtual_keyboard_manager_v1_create_virtual_keyboard(
+        self_kbd.mgr, self_kbd.seat);
+    wl_display_roundtrip(d);
+    if (!self_kbd.kbd) {
+        LOG_WARN("[Inject] Self-keyboard: keyboard creation failed");
+        return NULL;
+    }
+
+    // Keymap (protocol requirement before keys)
+    size_t size = strlen(SELF_KBD_KEYMAP) + 1;
+    char path[] = "/tmp/havel-self-kbd-XXXXXX";
+    int fd = mkstemp(path);
+    if (fd >= 0) {
+        unlink(path);
+        if (write(fd, SELF_KBD_KEYMAP, size) == (ssize_t)size) {
+            lseek(fd, 0, SEEK_SET);
+            zwp_virtual_keyboard_v1_keymap(self_kbd.kbd, 1 /* xkb_v1 */, fd, (uint32_t)size);
+        }
+        close(fd);
+    }
+    wl_display_roundtrip(d);
+
+    self_kbd.ready = true;
+    LOG_INFO("[Inject] Self-keyboard ready (persistent virtual keyboard)");
+
+    // Dispatch loop: keeps the connection alive and processes the
+    // keyboard's lifecycle events for the compositor's runtime
+    while (wl_display_dispatch(d) >= 0) {
+    }
+    LOG_WARN("[Inject] Self-keyboard connection lost");
+    return NULL;
+}
+
+// Feed a synthetic key event through the self-keyboard (persistent) or,
+// before it is ready, the seat's current keyboard. The full compositor
+// dispatch chain runs (bridge handler -> keybindings -> plugins) exactly
+// as it would for a real keypress. The global-hotkey path the monorepo's
+// io.send was written for (X11 evdev grabs) has no meaning under a
+// compositor that owns the seat - this is its Wayland equivalent.
+void havel_wlr_inject_key(struct havel_wlr_server *server, uint32_t keycode,
+                          bool pressed) {
+    if (!server) return;
+
+    struct wlr_keyboard_key_event event = {0};
+    event.keycode = keycode;  // evdev convention; handler adds 8 for xkb
+    event.state = pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
+                          : WL_KEYBOARD_KEY_STATE_RELEASED;
+    event.time_msec = (uint32_t)get_monotonic_time_ms();
+
+    // Preferred: the persistent self-keyboard (survives client
+    // connect/disconnect cycles)
+    if (self_kbd.ready && self_kbd.kbd) {
+        pthread_mutex_lock(&self_kbd.lock);
+        zwp_virtual_keyboard_v1_key(self_kbd.kbd, event.time_msec, keycode, event.state);
+        wl_display_flush(self_kbd.display);
+        pthread_mutex_unlock(&self_kbd.lock);
+        return;
+    }
+
+    // Fallback: the seat's current keyboard (a client's virtual keyboard
+    // or a physical device)
+    if (server->seat) {
+        struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
+        if (keyboard) {
+            wlr_keyboard_notify_key(keyboard, &event);
+            return;
+        }
+    }
+
+    LOG_WARN("[Inject] No keyboard available (self-keyboard not ready, no seat keyboard) - key 0x%x dropped",
+             keycode);
+}
+
+// Start the self-keyboard thread. Called from havel_wlr_run once the
+// socket exists; the background roundtrip completes when the main loop
+// begins dispatching.
+void havel_self_kbd_start(void) {
+    if (pthread_create(&self_kbd.thread, NULL, self_kbd_thread, NULL) == 0) {
+        LOG_INFO("[Inject] Self-keyboard thread started");
+    } else {
+        LOG_WARN("[Inject] Self-keyboard thread failed to start");
+    }
 }

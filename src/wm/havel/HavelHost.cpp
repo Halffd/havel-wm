@@ -207,6 +207,27 @@ static int hf_log(HavelState* H, void*) {
     return HAVEL_OK;
 }
 
+// io.injectKey(code, pressed): script-driven input synthesis, the
+// Wayland equivalent of the monorepo's X11 io.send. Feeds the key
+// through the seat's current keyboard - the full compositor dispatch
+// chain runs (keybindings, plugins), exactly like a real keypress.
+// Code is the evdev keycode (the handler adds 8 for xkb).
+extern "C" void havel_wlr_inject_key(struct havel_wlr_server*, uint32_t, bool);
+static int hf_inject_key(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    int64_t code = arg_int(H, 0);
+    int pressed = havel_gettop(H) >= 2 ? havel_toboolean(H, 1) : 1;
+    if (ctx && ctx->server && code >= 0) {
+        void* native = ctx->server->nativeHandle();
+        if (native) {
+            havel_wlr_inject_key((struct havel_wlr_server*)native,
+                                  (uint32_t)code, pressed != 0);
+        }
+    }
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
 static int hf_get_workspace(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
     uint32_t ws = ctx && ctx->server ? ctx->server->windowManager().getCurrentWorkspace() : 0;
@@ -382,6 +403,8 @@ void HavelHost::registerHostFunctions() {
     havel_pushcfunction_with_ctx(m_H, hf_get_workspace, nullptr, "get_workspace");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_get_windows, nullptr, "get_windows");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_inject_key, nullptr, "io.injectKey");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_keybind, nullptr, "keybind");
     havel_pop(m_H, 1);

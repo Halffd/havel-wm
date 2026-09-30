@@ -138,6 +138,15 @@ void havel_wlr_close_view(void* c_view);
 // View texture capture (for Alt-Tab thumbnails)
 uint32_t havel_wlr_capture_view_texture(void* c_view);
 
+// Script-driven key injection (io.injectKey): feeds a synthetic key
+// event through the seat's current keyboard - updates xkb state and
+// emits events.key, running the full compositor dispatch chain.
+void havel_wlr_inject_key(struct havel_wlr_server *server, uint32_t keycode, bool pressed);
+
+// Start the persistent self-injection keyboard (background wayland-client
+// connection to the compositor's own socket)
+void havel_self_kbd_start(void);
+
 #ifdef __cplusplus
 }
 
