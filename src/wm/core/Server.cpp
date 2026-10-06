@@ -1592,33 +1592,37 @@ bool Server::startIPCServer(const std::string& socketPath) {
     });
 #endif
 
-    if (m_ipcServer->start(socketPath)) {
+    const bool ipcStarted = m_ipcServer->start(socketPath);
+    if (ipcStarted) {
         LOG_INFO("IPC server started on: %s", socketPath.c_str());
-
-#ifdef HAVE_HAVEL_LANG
-        // Embed the Havel language and run the startup config (config.hv).
-        // Scripts register keybindings via keybind() and run quick
-        // compositor commands; they execute before the frame loop starts.
-        if (initHavelHost()) {
-            const char* home = getenv("HOME");
-            if (home) {
-                char configPath[512];
-                snprintf(configPath, sizeof(configPath), "%s/.config/havel-wm/config.hv", home);
-                if (access(configPath, R_OK) == 0) {
-                    m_havelHost->runFile(configPath);
-                } else {
-                    LOG_INFO("[Havel] No config.hv at %s (scripts optional)", configPath);
-                }
-            }
-        }
-#endif
-
-        return true;
     } else {
         LOG_ERROR("Failed to start IPC server on: %s", socketPath.c_str());
         m_ipcServer.reset();
-        return false;
     }
+
+#ifdef HAVE_HAVEL_LANG
+    // Embed the Havel language and run the startup config (config.hv).
+    // Scripts register keybindings via keybind() and run quick
+    // compositor commands; they execute before the frame loop starts.
+    // This must not depend on the IPC server starting: a second
+    // compositor instance with the default socket path fails IPC by
+    // design (live-socket check refuses to steal), but its config.hv
+    // keybind() closures are compositor features, not IPC features.
+    if (initHavelHost()) {
+        const char* home = getenv("HOME");
+        if (home) {
+            char configPath[512];
+            snprintf(configPath, sizeof(configPath), "%s/.config/havel-wm/config.hv", home);
+            if (access(configPath, R_OK) == 0) {
+                m_havelHost->runFile(configPath);
+            } else {
+                LOG_INFO("[Havel] No config.hv at %s (scripts optional)", configPath);
+            }
+        }
+    }
+#endif
+
+    return ipcStarted;
 }
 
 void Server::stopIPCServer() {
