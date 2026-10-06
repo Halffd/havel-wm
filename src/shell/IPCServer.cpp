@@ -89,7 +89,25 @@ bool IPCServer::start(const std::string& socketPath) {
 
     m_socketPath = socketPath;
 
-    // Remove existing socket file
+    // Live-socket check: if another compositor's IPC is listening, FAIL
+    // instead of stealing its socket (the old unconditional unlink broke
+    // the first instance's IPC clients - visible in the parity harness
+    // where a second compositor silently took over havel-wm.sock).
+    // A stale socket file (dead process) is still removed.
+    struct sockaddr_un probe;
+    memset(&probe, 0, sizeof(probe));
+    probe.sun_family = AF_UNIX;
+    strncpy(probe.sun_path, socketPath.c_str(), sizeof(probe.sun_path) - 1);
+    int probeFd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (probeFd >= 0) {
+        int connected = connect(probeFd, (struct sockaddr*)&probe, sizeof(probe));
+        close(probeFd);
+        if (connected == 0) {
+            printf("[IPC] %s is live - another compositor owns it; not stealing\n",
+                   socketPath.c_str());
+            return false;
+        }
+    }
     unlink(socketPath.c_str());
 
     // Create socket

@@ -39,15 +39,22 @@ struct havel_cpp_server* havel_cpp_server_create(void) {
     cpp->nativeHandle = nullptr;
     
     // Start IPC server for external tool communication
+    // HAVEL_IPC_SOCKET overrides the default name so a second compositor
+    // instance gets its own IPC (with the live-socket check in
+    // IPCServer::start, the default path would refuse a second instance
+    // instead of stealing the first one's socket).
+    const char* ipc_override = getenv("HAVEL_IPC_SOCKET");
     const char* runtime_dir = getenv("XDG_RUNTIME_DIR");
     std::string socket_path;
-    if (runtime_dir) {
+    if (ipc_override && *ipc_override) {
+        socket_path = ipc_override;
+    } else if (runtime_dir) {
         socket_path = std::string(runtime_dir) + "/havel-wm.sock";
     } else {
         // Fallback to /tmp
         socket_path = "/tmp/havel-wm.sock";
     }
-    
+
     cpp->server->startIPCServer(socket_path);
     
     return cpp;
