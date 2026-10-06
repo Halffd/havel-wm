@@ -22,6 +22,15 @@ pkg_check_modules(CURL REQUIRED libcurl)
 # Find nlohmann/json for JSON parsing
 find_package(nlohmann_json CONFIG REQUIRED)
 
+# OpenCV is only needed when the monorepo archives were built WITH it
+# (HAVE_OPENCV); archives rebuilt without it carry no cv:: references and
+# link fine with no opencv at all. Link only what pkg-config can find
+# (OpenCV 5 ships opencv5.pc, 4 ships opencv4.pc).
+pkg_check_modules(OPENCV opencv4)
+if(NOT OPENCV_FOUND)
+    pkg_check_modules(OPENCV opencv5)
+endif()
+
 # Find GLib/GIO for D-Bus (notifications, IPC)
 pkg_check_modules(GLIB gio-2.0 gio-unix-2.0)
 if(GLIB_FOUND)
@@ -310,7 +319,16 @@ option(ENABLE_HAVEL_LANG "Embed the Havel language (config.hv, havel_run IPC)" O
 set(HAVEL_LANG_LIB "")
 set(HAVEL_CORE_LIB "")
 if(ENABLE_HAVEL_LANG)
+    # HAVEL_ARCHIVE_DIR selects which monorepo build tree provides the
+    # archives. The shared build-debug is contested ground (parallel
+    # sessions flip ENABLE_QT on and off; a Qt-enabled core references
+    # services whose implementation lives in the Qt-only gui target, so
+    # core+lang alone cannot resolve). A private out-of-source tree
+    # (e.g. build-wm-embed configured with ENABLE_QT=OFF) stays stable.
+    set(HAVEL_ARCHIVE_DIR "" CACHE PATH
+        "Monorepo build dir providing libhavel_lang.a/libhavel_core.a (default: search)")
     foreach(_cand
+            "${HAVEL_ARCHIVE_DIR}/libhavel_lang.a"
             "${CMAKE_CURRENT_SOURCE_DIR}/../build-debug/libhavel_lang.a"
             "${CMAKE_CURRENT_SOURCE_DIR}/../build-release/libhavel_lang.a"
             "${CMAKE_CURRENT_SOURCE_DIR}/../build/libhavel_lang.a")
@@ -349,8 +367,13 @@ if(HAVEL_LANG_LIB)
     target_include_directories(${PROJECT_NAME} PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../src/havel-lang/capi"
     )
+    # Both archives in ONE group: core's EventBridge references
+    # EventRuntime (lang archive) - separate groups left it unresolved
+    # (the lang archive was scanned before the reference existed).
     target_link_libraries(${PROJECT_NAME} PRIVATE
+        -Wl,--start-group
         "${HAVEL_LANG_LIB}"
+        "${HAVEL_CORE_LIB}"
         pthread
         dl
         m
@@ -365,11 +388,52 @@ if(HAVEL_LANG_LIB)
         wayland-client
         dbus-1
         asound
-        opencv_core
-        opencv_imgcodecs
+        -Wl,--end-group
     )
-    if(HAVEL_CORE_LIB)
-        target_link_libraries(${PROJECT_NAME} PRIVATE "${HAVEL_CORE_LIB}")
+    # cv:: symbols only appear when the linked archives were built with
+    # HAVE_OPENCV; absent that, linking opencv would be dead weight (and
+    # fails outright on systems without the libs installed). Link only
+    # the modules the monorepo's own link uses (core/imgproc/imgcodecs) -
+    # ${OPENCV_LIBRARIES} wholesale drags in opencv_viz and its VTK
+    # dependency (351 unresolved vtk:: symbols - observed).
+    if(OPENCV_FOUND)
+        foreach(_cvlib opencv_core opencv_imgproc opencv_imgcodecs)
+            if(";${OPENCV_LIBRARIES};" MATCHES ";${_cvlib};")
+                target_link_libraries(${PROJECT_NAME} PRIVATE ${_cvlib})
+            endif()
+        endforeach()
+    endif()
+    # Same conditional logic for OCR: archives built with HAVE_TESSERACT
+    # reference tesseract::/leptonica symbols (the monorepo's own link
+    # carries -ltesseract -lleptonica).
+    pkg_check_modules(TESSERACT tesseract)
+    pkg_check_modules(LEPTONICA leptonica)
+    if(TESSERACT_FOUND)
+        target_link_libraries(${PROJECT_NAME} PRIVATE tesseract)
+    endif()
+    if(LEPTONICA_FOUND)
+        target_link_libraries(${PROJECT_NAME} PRIVATE leptonica)
+    endif()
+    # The monorepo's lang archive embeds the ORC JIT when its tree is
+    # configured with ENABLE_LLVM=ON; pulled archive members reference
+    # llvm:: symbols (847 unresolved refs - observed). Mirror the
+    # monorepo's own link: llvm-config --libs all + --system-libs.
+    find_program(LLVM_CONFIG_EXE llvm-config)
+    if(LLVM_CONFIG_EXE)
+        execute_process(COMMAND ${LLVM_CONFIG_EXE} --libdir
+            OUTPUT_VARIABLE _llvm_libdir OUTPUT_STRIP_TRAILING_WHITESPACE)
+        execute_process(COMMAND ${LLVM_CONFIG_EXE} --libs all
+            OUTPUT_VARIABLE _llvm_libs OUTPUT_STRIP_TRAILING_WHITESPACE)
+        execute_process(COMMAND ${LLVM_CONFIG_EXE} --system-libs
+            OUTPUT_VARIABLE _llvm_syslibs OUTPUT_STRIP_TRAILING_WHITESPACE)
+        separate_arguments(_llvm_libs)
+        separate_arguments(_llvm_syslibs)
+        if(_llvm_libdir)
+            target_link_directories(${PROJECT_NAME} PRIVATE ${_llvm_libdir})
+        endif()
+        target_link_libraries(${PROJECT_NAME} PRIVATE ${_llvm_libs} ${_llvm_syslibs})
+    else()
+        message(STATUS "llvm-config not found - archive LLVM refs, if any, stay unresolved")
     endif()
     # wayland client-protocol code (zxdg_output_v1_interface etc.) that
     # the bridge layer references
@@ -424,8 +488,17 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
     OUTPUT_NAME "havel-wm"
 )
-target_compile_options(${PROJECT_NAME}  PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
-target_link_options(${PROJECT_NAME} PRIVATE -fsanitize=address,undefined)
+# Sanitizers are Debug-only (see also: build.sh modes). Toggled off via
+# -DENABLE_ASAN=OFF: the sandbox's exec layer has been observed placing
+# sanitizer-linked PIEs at 0x100000000 - inside ASan's fixed shadow range
+# [0x7fff7000,0x10007fff7fff] - which aborts at ASan init before main
+# (sanitizers issue #856, "shadow range interleaves"). Non-sanitized
+# builds are placement-immune.
+option(ENABLE_ASAN "Enable address+undefined sanitizers" ON)
+if(ENABLE_ASAN)
+    target_compile_options(${PROJECT_NAME}  PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    target_link_options(${PROJECT_NAME} PRIVATE -fsanitize=address,undefined)
+endif()
 # Install targets
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
