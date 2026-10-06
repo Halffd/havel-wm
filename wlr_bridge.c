@@ -2662,6 +2662,17 @@ void havel_wlr_destroy(havel_wlr_server_t *server) {
     free(server);
 }
 
+// Repeating event-loop timer: services IPC even when no frames are
+// scheduled (idle compositor stops requesting frames once damage dries
+// up - see the add_timer call site in havel_wlr_run).
+static int ipc_timer_event(void *data) {
+    havel_wlr_server_t *server = (havel_wlr_server_t *)data;
+    if (server && server->cpp_server) {
+        havel_cpp_process_ipc_events(server->cpp_server);
+    }
+    return 50;  // ms until next fire (re-arm)
+}
+
 int havel_wlr_run(havel_wlr_server_t *server) {
     if (!server) return 1;
 
@@ -2678,6 +2689,7 @@ int havel_wlr_run(havel_wlr_server_t *server) {
         LOG_ERROR("Failed to start backend");
         return 1;
     }
+
 
     setenv("WAYLAND_DISPLAY", socket, true);
     LOG_INFO("=== Havel Compositor running on %s ===", socket);
@@ -2697,6 +2709,23 @@ int havel_wlr_run(havel_wlr_server_t *server) {
         struct LoadingScreenConfig* config = loading_screen_get_config();
         config->timeout_ms = 1000;
         loading_screen_start_timer();
+    }
+
+    // IPC liveness: processEvents is also driven from output_frame,
+    // but an idle compositor stops scheduling frames (no damage, no
+    // frame callbacks) and IPC clients would starve: a probe's
+    // havel_run RPC sat unread for 5s after ~2 idle minutes while the
+    // wayland input path kept working (observed live). This repeating
+    // timer on the display event loop services IPC regardless of
+    // frame activity; the frame-path call stays for low latency while
+    // rendering.
+    struct wl_event_loop *ipc_loop = wl_display_get_event_loop(server->display);
+    struct wl_event_source *ipc_timer =
+        wl_event_loop_add_timer(ipc_loop, ipc_timer_event, server);
+    if (ipc_timer) {
+        wl_event_source_timer_update(ipc_timer, 50);
+    } else {
+        LOG_ERROR("Failed to add IPC timer - IPC only serviced on frame ticks");
     }
 
     wl_display_run(server->display);
