@@ -312,6 +312,19 @@ static int hf_keybind(HavelState* H, void*) {
         return HAVEL_OK;
     }
 
+    // Pin the callable to its owning chunk BEFORE storing it: a raw
+    // FUNCTION_OBJ_ID is a chunk-relative index, and it re-resolves
+    // against whatever chunk is current when the keybinding fires. A
+    // havel_run snippet calling io.injectKey replaced the main chunk and
+    // made the stored "closure" resolve into the snippet itself - 139
+    // re-triggers, zero closure logs (observed live). pinCallableAsClosure
+    // rewrites the stack slot into a closure carrying its own chunk ref.
+    if (havel_pin_callable(H, 1) != HAVEL_OK) {
+        LOG_WARN("[Havel] keybind: argument is not a pin-able callable");
+        havel_pushboolean(H, 0);
+        return HAVEL_OK;
+    }
+
     // Store the closure as a global so the KeybindingManager callback can
     // retrieve + call it later: pushvalue duplicates the arg, setglobal
     // stores the duplicate (and pops it).
@@ -444,13 +457,24 @@ bool HavelHost::runString(const std::string& source, const std::string& name) {
     // C-API semantics: havel_loadstring already compiles AND executes
     // the chunk, leaving its return value on the stack. No havel_call
     // here - the stack top is a value, not a function.
+    //
+    // Pin the config chunk around every snippet: loadstring REPLACES the
+    // VM's main chunk, and keybind()'s stored closures are chunk-relative
+    // FUNCTION_OBJ_ID indexes - without the pin they re-resolve into the
+    // snippet's own function table (a havel_run snippet calling
+    // io.injectKey re-resolved into itself and spun: 139 triggers, zero
+    // closure logs - observed live). Restoring also resets current_chunk,
+    // so triggers that fire after the snippet resolve in the pinned chunk.
+    void* pin = havel_pin_main_chunk(m_H);
     int status = havel_loadstring(m_H, source.c_str(), name.c_str());
     if (status != HAVEL_OK) {
+        havel_restore_chunk(m_H, pin);
         m_lastError = havel_errmsg(m_H) ? havel_errmsg(m_H) : "load failed";
         LOG_ERROR("[Havel] Failed to compile %s: %s", name.c_str(), m_lastError.c_str());
         havel_settop(m_H, 0);
         return false;
     }
+    havel_restore_chunk(m_H, pin);
     havel_pop(m_H, 1);
     return true;
 }
