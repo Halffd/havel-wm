@@ -100,6 +100,11 @@ report $([ "$(crashes)" -eq 0 ] && [ "$BOOT_OK" -eq 0 ] && echo 0 || echo 1) "cl
 report $(grep -q "Auto-hide timeout reached" "$LOG" && echo 0 || echo 1) "loading-screen auto-hide timer fires"
 report $(grep -q "\[FRAME\] Frame #1" "$LOG" && echo 0 || echo 1) "frame loop started"
 report $(grep -qE "Conflict: .* already bound" "$LOG" && echo 1 || echo 0) "no keybinding registration conflicts"
+# Embed detection for phase 6: the harness must pass on CI builds without
+# the monorepo lib (same contract as the IPC probe's havel_run skip). The
+# embed announces itself with this line at boot; without it the hotkey
+# phases can only fail, so they skip.
+HAS_EMBED=$(grep -ac "\[Havel\] Language embedded" "$LOG")
 
 # ---------------------------------------------------------------- phase 2
 echo "--- phase 2: client round-trip (terminal)"
@@ -215,6 +220,9 @@ fi
 
 # ---------------------------------------------------------------- phase 6
 echo "--- phase 6: havel language-syntax hotkeys (config.hv)"
+if [ "${HAS_EMBED:-0}" -eq 0 ]; then
+    echo "SKIP: compositor built without the havel embed (no [Havel] line at boot)"
+else
 # The real user-facing hotkey forms through the embedded interpreter:
 # sugar (^+F2 => {...} lowers to hotkey.register) and host fn
 # (keybind("Meta+F3", fn())). Both must register and fire via injection.
@@ -317,10 +325,11 @@ PYEOF
         echo "SKIP: parity restart never became ready"
     fi
     report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "parity compositor clean"
-fi
-kill "$PARITY_PID" 2>/dev/null
-rm -rf "$PARITY_HOME"
-LOG="$OLD_LOG"
+fi   # closes: if [ -z "$PARITY_SOCK" ]
+fi   # HAS_EMBED gate (phase 6)
+kill "${PARITY_PID:-}" 2>/dev/null
+[ -n "${PARITY_HOME:-}" ] && rm -rf "$PARITY_HOME"
+LOG="${OLD_LOG:-$LOG}"
 
 # ---------------------------------------------------------------- teardown
 kill "$FOOT_PID" 2>/dev/null; FOOT_PID=""
