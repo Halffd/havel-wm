@@ -83,7 +83,8 @@ execute_process(
     ${CMAKE_CURRENT_SOURCE_DIR}/tests/runtime/virtual-keyboard-unstable-v1.xml
     ${PROTOCOL_HEADERS_DIR}/virtual-keyboard-unstable-v1-protocol.c
 )
-list(APPEND PROTOCOL_SOURCES ${PROTOCOL_HEADERS_DIR}/virtual-keyboard-unstable-v1-protocol.c)
+# (compiled into the WM via PROTOCOL_SOURCES below - a stray list(APPEND)
+# here was dead code, overwritten by the later set())
 
 execute_process(
     COMMAND ${WAYLAND_SCANNER} private-code
@@ -141,10 +142,15 @@ execute_process(
 )
 
 # Add the generated protocol source
+# virtual-keyboard-unstable-v1: the bridge's self-injection keyboard is a
+# wayland CLIENT - its protocol code must build into the WM itself, not
+# ride on the monorepo's wayland-protos archive (undefined refs without
+# the embed - observed in the no-embed link)
 set(PROTOCOL_SOURCES
     ${PROTOCOL_HEADERS_DIR}/xdg-shell-protocol.c
     ${PROTOCOL_HEADERS_DIR}/wlr-layer-shell-unstable-v1-protocol.c
     ${PROTOCOL_HEADERS_DIR}/text-input-unstable-v3-protocol.c
+    ${PROTOCOL_HEADERS_DIR}/virtual-keyboard-unstable-v1-protocol.c
 )
 
 # C++ WM core sources
@@ -183,9 +189,6 @@ set(WM_CORE_SOURCES
     src/wm/input/TextInputManager.cpp
     src/wm/desktop/DesktopManager.cpp
     src/wm/desktop/DesktopManager.hpp
-    src/wm/havel/HavelHost.cpp
-    src/wm/havel/HavelHost.hpp
-    src/wm/havel/HavelLangStubs.cpp
     src/wm/desktop/NASAWallpaper.cpp
     src/wm/desktop/NASAWallpaper.hpp
     src/wm/desktop/NASAWallpaperTests.cpp
@@ -275,6 +278,53 @@ set_target_properties(wlr_bridge PROPERTIES
 )
 
 # Add executable
+# Havel language embedding (scripts as compositor commands). Detection
+# runs before add_executable so the embed-only sources can join
+# WM_CORE_SOURCES: HavelHost.cpp includes the monorepo's capi headers,
+# so it only builds when the language actually links.
+option(ENABLE_HAVEL_LANG "Embed the Havel language (config.hv, havel_run IPC)" ON)
+
+set(HAVEL_LANG_LIB "")
+set(HAVEL_CORE_LIB "")
+if(ENABLE_HAVEL_LANG)
+    # HAVEL_ARCHIVE_DIR selects which monorepo build tree provides the
+    # archives. The shared build-debug is contested ground (parallel
+    # sessions flip ENABLE_QT on and off; a Qt-enabled core references
+    # services whose implementation lives in the Qt-only gui target, so
+    # core+lang alone cannot resolve). A private out-of-source tree
+    # (e.g. build-wm-embed configured with ENABLE_QT=OFF) stays stable.
+    set(HAVEL_ARCHIVE_DIR "" CACHE PATH
+        "Monorepo build dir providing libhavel_lang.a/libhavel_core.a (default: search)")
+    foreach(_cand
+            "${HAVEL_ARCHIVE_DIR}/libhavel_lang.a"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../build-debug/libhavel_lang.a"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../build-release/libhavel_lang.a"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../build/libhavel_lang.a")
+        if(EXISTS "${_cand}")
+            set(HAVEL_LANG_LIB "${_cand}")
+            break()
+        endif()
+    endforeach()
+    if(HAVEL_LANG_LIB)
+        get_filename_component(_lang_dir "${HAVEL_LANG_LIB}" DIRECTORY)
+        # libhavel_core.a carries the host-bridge implementations
+        # (ModularHostBridges) and the app-layer backends they call
+        # (IO, HotkeyManager, EventListener, DisplayManager, MouseService,
+        # KeyMap) - the lang archive references their symbols.
+        if(EXISTS "${_lang_dir}/libhavel_core.a")
+            set(HAVEL_CORE_LIB "${_lang_dir}/libhavel_core.a")
+        endif()
+    endif()
+endif()
+
+if(HAVEL_LANG_LIB)
+    list(APPEND WM_CORE_SOURCES
+        src/wm/havel/HavelHost.cpp
+        src/wm/havel/HavelHost.hpp
+        src/wm/havel/HavelLangStubs.cpp
+    )
+endif()
+
 add_executable(${PROJECT_NAME}
     src/main.cpp
     ${WM_CORE_SOURCES}
@@ -314,40 +364,6 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE WLR_USE_UNSTABLE)
 # The monorepo builds it LLVM-free (its LLVM TUs are excluded), so no
 # LLVM libraries are needed here. Undefined externals in the archive:
 # libc/libm/libdl/readline/X11 only.
-option(ENABLE_HAVEL_LANG "Embed the Havel language (config.hv, havel_run IPC)" ON)
-
-set(HAVEL_LANG_LIB "")
-set(HAVEL_CORE_LIB "")
-if(ENABLE_HAVEL_LANG)
-    # HAVEL_ARCHIVE_DIR selects which monorepo build tree provides the
-    # archives. The shared build-debug is contested ground (parallel
-    # sessions flip ENABLE_QT on and off; a Qt-enabled core references
-    # services whose implementation lives in the Qt-only gui target, so
-    # core+lang alone cannot resolve). A private out-of-source tree
-    # (e.g. build-wm-embed configured with ENABLE_QT=OFF) stays stable.
-    set(HAVEL_ARCHIVE_DIR "" CACHE PATH
-        "Monorepo build dir providing libhavel_lang.a/libhavel_core.a (default: search)")
-    foreach(_cand
-            "${HAVEL_ARCHIVE_DIR}/libhavel_lang.a"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../build-debug/libhavel_lang.a"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../build-release/libhavel_lang.a"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../build/libhavel_lang.a")
-        if(EXISTS "${_cand}")
-            set(HAVEL_LANG_LIB "${_cand}")
-            break()
-        endif()
-    endforeach()
-    if(HAVEL_LANG_LIB)
-        get_filename_component(_lang_dir "${HAVEL_LANG_LIB}" DIRECTORY)
-        # libhavel_core.a carries the host-bridge implementations
-        # (ModularHostBridges) and the app-layer backends they call
-        # (IO, HotkeyManager, EventListener, DisplayManager, MouseService,
-        # KeyMap) - the lang archive references their symbols.
-        if(EXISTS "${_lang_dir}/libhavel_core.a")
-            set(HAVEL_CORE_LIB "${_lang_dir}/libhavel_core.a")
-        endif()
-    endif()
-endif()
 
 if(HAVEL_LANG_LIB)
     message(STATUS "Havel language embedding: ${HAVEL_LANG_LIB}")
@@ -448,9 +464,14 @@ else()
 endif()
 
 # Link with wlroots bridge library and other libraries
+# wayland-client: the bridge's persistent self-injection keyboard is a
+# wayland CLIENT of the compositor's own socket (wl_display_connect) -
+# needed whether or not the language embed links.
+pkg_check_modules(WAYLAND_CLIENT REQUIRED wayland-client)
 target_link_libraries(${PROJECT_NAME} PRIVATE
     wlr_bridge
     ${WAYLAND_SERVER_LIBRARIES}
+    ${WAYLAND_CLIENT_LIBRARIES}
     ${XKB_LIBRARIES}
     ${PIXMAN_LIBRARIES}
     ${FMT_LIBRARIES}

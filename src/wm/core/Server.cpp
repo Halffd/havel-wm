@@ -1648,6 +1648,7 @@ void Server::processIPCEvents() {
 // Each returns the JSON-RPC result string for its command.
 // ============================================================================
 
+#ifdef HAVE_HAVEL_LANG
 bool Server::initHavelHost() {
     if (m_havelHost && m_havelHost->isInitialized()) return true;
     if (!m_havelHost) {
@@ -1665,6 +1666,7 @@ bool Server::registerHavelKeybinding(uint32_t modifiers, uint32_t keysym,
                                       const char* name, std::function<void()> callback) {
     return m_keybindingManager.registerKeybinding(modifiers, keysym, name, callback);
 }
+#endif  // HAVE_HAVEL_LANG
 
 std::string Server::ipcSetGamma(const std::string& args) {
     float gamma = m_ipcServer->extractJsonFloat(args, "gamma", 1.0f);
