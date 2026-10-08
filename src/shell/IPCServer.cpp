@@ -202,6 +202,7 @@ void IPCServer::processEvents() {
 
         m_clientFds.push_back(clientFd);
         m_clientBuffers.push_back("");
+        havel_wlr_notify_ipc_fd(clientFd, 1);
         printf("[IPC] Client connected (fd=%d, total=%zu)\n", clientFd, m_clientFds.size());
     }
 
@@ -238,6 +239,7 @@ void IPCServer::processEvents() {
         } else if (n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
             // Client disconnected or error
             printf("[IPC] Client disconnected (fd=%d)\n", clientFd);
+            havel_wlr_notify_ipc_fd(clientFd, 0);
             close(clientFd);
             m_clientFds.erase(m_clientFds.begin() + i);
             m_clientBuffers.erase(m_clientBuffers.begin() + i);
@@ -404,6 +406,7 @@ void IPCServer::broadcastEvent(EventType type, const std::string& jsonData) {
             if (it->second.count(type) || it->second.count(EventType::All)) {
                 ssize_t n = write(fd, event.c_str(), event.size());
                 if (n < 0 && errno != EAGAIN) {
+                    havel_wlr_notify_ipc_fd(fd, 0);
                     close(fd);
                     m_clientFds.erase(m_clientFds.begin() + i);
                     m_clientBuffers.erase(m_clientBuffers.begin() + i);

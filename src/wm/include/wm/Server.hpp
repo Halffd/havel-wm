@@ -181,6 +181,11 @@ public:
     bool isIPCServerRunning() const;
     void processIPCEvents();
 
+    // IPC socket fds (listen fd first, then clients) for event-loop
+    // registration in the wlr bridge - fd sources are the reliable IPC
+    // wakeup (see wlr_bridge.c ipc fd sources note).
+    int collectIpcFds(int* out, int max);
+
     // IPC command handlers (extracted from startIPCServer lambdas, phase 2).
     // Each returns the JSON-RPC result string for its command.
     std::string ipcSetGamma(const std::string& args);

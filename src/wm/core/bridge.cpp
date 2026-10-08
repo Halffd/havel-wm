@@ -110,6 +110,14 @@ void havel_cpp_process_ipc_events(struct havel_cpp_server* server) {
     server->server->processIPCEvents();
 }
 
+// Current IPC fds (listen socket first, then connected clients) so the
+// bridge can register event-loop sources for them in havel_wlr_run -
+// IPC starts before the display loop exists.
+int havel_cpp_ipc_fds(struct havel_cpp_server* server, int* out, int max) {
+    if (!server || !server->server) return 0;
+    return server->server->collectIpcFds(out, max);
+}
+
 void* havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* c_view, uint32_t workspace_id, const char* appId, const char* title) {
     if (!server || !c_view) return nullptr;
     

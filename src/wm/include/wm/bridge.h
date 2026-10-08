@@ -80,6 +80,15 @@ void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command
 // IPC server events
 void havel_cpp_process_ipc_events(struct havel_cpp_server* server);
 
+// Current IPC fds (listen first, then clients) for event-loop sources
+int havel_cpp_ipc_fds(struct havel_cpp_server* server, int* out, int max);
+
+// Defined in wlr_bridge.c. The IPC server calls this on accept
+// (added=1) and disconnect (added=0) so the display event loop can
+// watch the socket fds directly - fd sources are the reliable IPC
+// wakeup (timer-based service lost wakeups under render load).
+void havel_wlr_notify_ipc_fd(int fd, int added);
+
 // Output frame dispatch (with actual dimensions from wlroots)
 void havel_cpp_dispatch_output_frame(struct havel_cpp_server* server, void* output, void* sceneOutput, int width, int height, int refresh);
 

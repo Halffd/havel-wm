@@ -75,6 +75,17 @@ public:
     // Get connected client count
     size_t getClientCount() const { return m_clientFds.size(); }
 
+    // Socket fds (listen first, then clients) for wlr-bridge event-loop
+    // sources; see the notify hook below.
+    size_t collectIpcFds(int* out, size_t max) const {
+        size_t n = 0;
+        if (m_serverFd >= 0 && n < max) out[n++] = m_serverFd;
+        for (int fd : m_clientFds) {
+            if (fd >= 0 && n < max) out[n++] = fd;
+        }
+        return n;
+    }
+
     // Command handlers (public for Server.cpp lambdas)
     std::string handleGetWindows();
     std::string handleGetFocused();

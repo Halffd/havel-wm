@@ -1643,6 +1643,11 @@ void Server::processIPCEvents() {
     }
 }
 
+int Server::collectIpcFds(int* out, int max) {
+    if (!m_ipcServer) return 0;
+    return static_cast<int>(m_ipcServer->collectIpcFds(out, static_cast<size_t>(max)));
+}
+
 // ============================================================================
 // IPC command handlers (phase 2 extraction from startIPCServer lambdas).
 // Each returns the JSON-RPC result string for its command.

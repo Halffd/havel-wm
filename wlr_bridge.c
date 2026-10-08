@@ -165,6 +165,11 @@ struct havel_wlr_server {
     struct wlr_compositor *compositor;
     struct wlr_output_layout *output_layout;
     struct wlr_scene *scene;
+    // Full-output background rect: wlroots 0.20 has no scene background
+    // color API (that arrived in 0.21), so the wallpaper plugin's color
+    // is rendered as the scene's bottom-most rect, created here BEFORE
+    // the workspace trees so it stays first child.
+    struct wlr_scene_rect *bg_rect;
 
     struct wlr_xdg_shell *xdg_shell;
     struct wl_listener new_xdg_toplevel;
@@ -239,6 +244,7 @@ struct havel_wlr_server {
     struct wlr_xcursor_manager *cursor_mgr;
 
     struct wl_listener new_output;
+    struct wl_listener session_active;
     struct wl_listener new_input;
     struct wl_listener new_virtual_keyboard;
 
@@ -293,6 +299,13 @@ struct havel_output {
     struct havel_wlr_server *server;
     bool is_primary;
     struct wl_list link;
+
+    // True once an enable commit succeeded. Native DRM boots with the
+    // session not yet VT-active: atomic modeset commits fail EPERM
+    // (the X server on the previous VT still holds DRM master) until
+    // seatd activates the session and switches VT - outputs are retried
+    // on the session's active signal (see session_active_cb).
+    bool enable_ok;
     
     // Per-output workspace tracking
     uint32_t active_workspace;  // This output's active workspace
@@ -1460,11 +1473,29 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // Get background color from wallpaper plugin
     float bgR, bgG, bgB;
     havel_cpp_get_background_color(server->cpp_server, &bgR, &bgG, &bgB);
-
-    // Note: Background color clear requires proper render pass integration
-    // For now, the wallpaper plugin sets the color but clearing happens elsewhere
-    // TODO: Integrate with wlroots 0.20 render pass API for proper clear
-    (void)bgR; (void)bgG; (void)bgB;
+    // wlroots 0.20 has no scene background-color API (that arrived in
+    // 0.21). The scene's first-child rect (created at server init)
+    // renders the wallpaper color behind everything. The old TODO here
+    // dropped the color entirely - the desktop rendered black.
+    if (server->bg_rect) {
+        float bg[4] = { bgR, bgG, bgB, 1.0f };
+        bool color_changed = memcmp(server->bg_rect->color, bg, sizeof bg) != 0;
+        bool size_changed = server->bg_rect->width != output->output->width ||
+                            server->bg_rect->height != output->output->height;
+        if (color_changed) {
+            memcpy(server->bg_rect->color, bg, sizeof bg);
+        }
+        if (size_changed) {
+            wlr_scene_rect_set_size(server->bg_rect,
+                                    output->output->width, output->output->height);
+        }
+        if (color_changed || size_changed) {
+            // Scene commits only redraw damaged regions: toggling the
+            // node damages the rect's area so the new color lands.
+            wlr_scene_node_set_enabled(&server->bg_rect->node, false);
+            wlr_scene_node_set_enabled(&server->bg_rect->node, true);
+        }
+    }
 
     // Commit scene output using wlroots 0.20 API with cursor-centered zoom
     struct wlr_output_state state;
@@ -1567,6 +1598,10 @@ static void output_destroy(struct wl_listener *listener, void *data) {
     wl_list_remove(&output->link);
     free(output);
 }
+
+// Forward: the enable logic (defined after server_new_output; also
+// called by session_active_cb for the post-VT-switch retry).
+static void output_try_enable(struct havel_output *output);
 
 static void server_new_output(struct wl_listener *listener, void *data) {
     struct havel_wlr_server *server = wl_container_of(listener, server, new_output);
@@ -1676,43 +1711,81 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     // headless boot showed exactly that (enabled=0, zero frames).
     // Physical DRM outputs get their preferred mode; mode-less outputs
     // (headless) get a custom 1280x720.
-    {
-        struct wlr_output_state state;
-        wlr_output_state_init(&state);
-        wlr_output_state_set_enabled(&state, true);
+    output_try_enable(output);
+}
 
-        struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
-        if (mode != NULL) {
-            wlr_output_state_set_mode(&state, mode);
-        } else {
-            LOG_INFO("[OUTPUT] %s has no modes; using custom 1280x720@60",
+static void output_try_enable(struct havel_output *output) {
+    struct wlr_output *wlr_output = output->output;
+    struct wlr_output_state state;
+    wlr_output_state_init(&state);
+    wlr_output_state_set_enabled(&state, true);
+
+    struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
+    bool committed = false;
+    if (mode != NULL) {
+        wlr_output_state_set_mode(&state, mode);
+        committed = wlr_output_commit_state(wlr_output, &state);
+    } else {
+        LOG_INFO("[OUTPUT] %s has no modes", wlr_output->name);
+        // Mode-less outputs split two ways:
+        // - headless NEEDS a custom mode (no size otherwise, and 0
+        //   refresh means no frame timer at all)
+        // - x11 already has a window size; an enable-only commit
+        //   keeps it and succeeds where a resize commit fails
+        //   (observed live: custom-mode commit failed on X11-1 and
+        //   the output stayed disabled - zero frames, black window)
+        committed = wlr_output_commit_state(wlr_output, &state);
+        if (!committed) {
+            LOG_INFO("[OUTPUT] %s: enable-only commit failed, trying custom 1280x720@60",
                      wlr_output->name);
-            // refresh in mHz; 0 means "no frame timer" - the headless
-            // backend would never emit events.frame
             wlr_output_state_set_custom_mode(&state, 1280, 720, 60000);
+            committed = wlr_output_commit_state(wlr_output, &state);
         }
+    }
 
-        if (!wlr_output_commit_state(wlr_output, &state)) {
-            LOG_ERROR("[OUTPUT] %s: failed to commit enabled state", wlr_output->name);
+    if (!committed) {
+        LOG_ERROR("[OUTPUT] %s: failed to commit enabled state", wlr_output->name);
+    } else {
+        output->enable_ok = true;
+        LOG_INFO("[OUTPUT] %s enabled (mode committed)", wlr_output->name);
+        // Kick the frame loop: DRM chains frames via page-flip, but
+        // headless outputs need an explicit first present or
+        // events.frame never fires. Commit the (empty) scene once to
+        // present a buffer, then schedule the next frame.
+        struct wlr_scene_output_state_options opts = {0};
+        struct wlr_output_state scene_state;
+        wlr_output_state_init(&scene_state);
+        if (wlr_scene_output_build_state(output->scene_output, &scene_state, &opts) &&
+            wlr_output_commit_state(wlr_output, &scene_state)) {
+            LOG_INFO("[OUTPUT] %s: first frame presented", wlr_output->name);
+            wlr_output_schedule_frame(wlr_output);
         } else {
-            LOG_INFO("[OUTPUT] %s enabled (mode committed)", wlr_output->name);
-            // Kick the frame loop: DRM chains frames via page-flip, but
-            // headless outputs need an explicit first present or
-            // events.frame never fires. Commit the (empty) scene once to
-            // present a buffer, then schedule the next frame.
-            struct wlr_scene_output_state_options opts = {0};
-            struct wlr_output_state scene_state;
-            wlr_output_state_init(&scene_state);
-            if (wlr_scene_output_build_state(output->scene_output, &scene_state, &opts) &&
-                wlr_output_commit_state(wlr_output, &scene_state)) {
-                LOG_INFO("[OUTPUT] %s: first frame presented", wlr_output->name);
-                wlr_output_schedule_frame(wlr_output);
-            } else {
-                LOG_WARN("[OUTPUT] %s: first frame present failed", wlr_output->name);
-            }
-            wlr_output_state_finish(&scene_state);
+            LOG_WARN("[OUTPUT] %s: first frame present failed", wlr_output->name);
         }
-        wlr_output_state_finish(&state);
+        wlr_output_state_finish(&scene_state);
+    }
+    wlr_output_state_finish(&state);
+}
+
+// Session VT activation: retry outputs whose enable commit failed during
+// boot. With native DRM the first attempt can race the session
+// activation - the X server on the previous VT still holds DRM master,
+// so atomic modesets return EPERM (observed live: "Atomic commit failed:
+// Permission denied" until the VT switch, then never retried - black
+// console). wlroots signals activation here; retry while active.
+static void session_active_cb(struct wl_listener *listener, void *data) {
+    struct havel_wlr_server *server =
+        wl_container_of(listener, server, session_active);
+    bool active = server->session && server->session->active;
+    LOG_INFO("[SESSION] session %s", active ? "active (VT acquired)" : "inactive");
+    if (!active) return;
+    struct havel_output *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        if (!output->enable_ok && !output->output->enabled) {
+            LOG_INFO("[OUTPUT] %s: retrying enable after session activation",
+                     output->output->name);
+            output_try_enable(output);
+        }
     }
 }
 
@@ -2296,6 +2369,12 @@ havel_wlr_server_t* havel_wlr_create(void) {
 
     if (server->session) {
         LOG_INFO("[SESSION] Session acquired (for VT switching)");
+        // Outputs often first appear while the session is NOT yet
+        // VT-active (native DRM: the previous VT's X server still holds
+        // DRM master); their enable commits fail EPERM. Retry them when
+        // the session activates. See session_active_cb.
+        server->session_active.notify = session_active_cb;
+        wl_signal_add(&server->session->events.active, &server->session_active);
     } else {
         LOG_WARN("[SESSION] No session available (VT switching disabled)");
     }
@@ -2363,6 +2442,15 @@ havel_wlr_server_t* havel_wlr_create(void) {
 
     server->output_layout = wlr_output_layout_create(server->display);
     server->scene = wlr_scene_create();
+
+    // Background rect: created as the scene's FIRST child (bottom z),
+    // before any workspace tree, so the wallpaper plugin's color
+    // renders behind everything. Sized per-output in output_frame.
+    {
+        float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        server->bg_rect = wlr_scene_rect_create(
+            &server->scene->tree, 1, 1, black);
+    }
 
     // Screencopy protocol: one line, unlocks grim / wf-recorder /
     // xdg-desktop-portal-wlr screen sharing. (The old C++ ScreenCapture /
@@ -2662,15 +2750,73 @@ void havel_wlr_destroy(havel_wlr_server_t *server) {
     free(server);
 }
 
+// IPC fd sources on the display event loop. The timer-based service
+// proved fragile on this system's timerfd-based libwayland: under render
+// load the timer expired once, was never read, and never re-armed
+// (fdinfo: it_value=(0,0), ticks=1; the callback stopped firing the
+// moment a rendering client connected - live breakpoints). Level-triggered
+// fd sources do not lose events, so the IPC sockets themselves drive
+// processEvents; the timer and frame-path calls stay as extra sweeps.
+#define IPC_FD_SOURCES_MAX 64
+static struct wl_event_loop *g_ipc_loop = NULL;
+static havel_wlr_server_t *g_ipc_ctx = NULL;
+static struct wl_event_source *g_ipc_fd_src[IPC_FD_SOURCES_MAX];
+static int g_ipc_fd_num[IPC_FD_SOURCES_MAX];
+
+static int ipc_fd_event(int fd, uint32_t mask, void *data) {
+    (void)fd; (void)mask; (void)data;
+    if (g_ipc_ctx && g_ipc_ctx->cpp_server) {
+        havel_cpp_process_ipc_events(g_ipc_ctx->cpp_server);
+    }
+    return 0;
+}
+
+// Called by the C++ IPCServer (accept path adds, disconnect removes).
+// No-op until the display loop exists (IPC starts before havel_wlr_run;
+// havel_wlr_run registers the pre-existing fds itself).
+void havel_wlr_notify_ipc_fd(int fd, int added) {
+    if (fd < 0 || !g_ipc_loop) return;
+    if (added) {
+        for (int i = 0; i < IPC_FD_SOURCES_MAX; i++) {
+            if (!g_ipc_fd_src[i]) {
+                g_ipc_fd_num[i] = fd;
+                g_ipc_fd_src[i] = wl_event_loop_add_fd(
+                    g_ipc_loop, fd, WL_EVENT_READABLE, ipc_fd_event, NULL);
+                break;
+            }
+        }
+    } else {
+        for (int i = 0; i < IPC_FD_SOURCES_MAX; i++) {
+            if (g_ipc_fd_src[i] && g_ipc_fd_num[i] == fd) {
+                wl_event_source_remove(g_ipc_fd_src[i]);
+                g_ipc_fd_src[i] = NULL;
+                g_ipc_fd_num[i] = -1;
+                break;
+            }
+        }
+    }
+}
+
 // Repeating event-loop timer: services IPC even when no frames are
 // scheduled (idle compositor stops requesting frames once damage dries
 // up - see the add_timer call site in havel_wlr_run).
+static struct wl_event_source *g_ipc_timer = NULL;
+
 static int ipc_timer_event(void *data) {
     havel_wlr_server_t *server = (havel_wlr_server_t *)data;
     if (server && server->cpp_server) {
         havel_cpp_process_ipc_events(server->cpp_server);
     }
-    return 50;  // ms until next fire (re-arm)
+    // Explicit re-arm. Returning the delay from the callback is the
+    // documented re-arm mechanism, but this system's timerfd-based
+    // libwayland fired the callback exactly ONCE and never again
+    // (observed live: gdb breakpoint hit at +50ms, then silence for
+    // 40s; epoll kept waiting with timeout=-1). The explicit
+    // wl_event_source_timer_update() works on both implementations.
+    if (g_ipc_timer) {
+        wl_event_source_timer_update(g_ipc_timer, 50);
+    }
+    return 0;
 }
 
 int havel_wlr_run(havel_wlr_server_t *server) {
@@ -2711,19 +2857,24 @@ int havel_wlr_run(havel_wlr_server_t *server) {
         loading_screen_start_timer();
     }
 
-    // IPC liveness: processEvents is also driven from output_frame,
-    // but an idle compositor stops scheduling frames (no damage, no
-    // frame callbacks) and IPC clients would starve: a probe's
-    // havel_run RPC sat unread for 5s after ~2 idle minutes while the
-    // wayland input path kept working (observed live). This repeating
-    // timer on the display event loop services IPC regardless of
-    // frame activity; the frame-path call stays for low latency while
-    // rendering.
-    struct wl_event_loop *ipc_loop = wl_display_get_event_loop(server->display);
-    struct wl_event_source *ipc_timer =
-        wl_event_loop_add_timer(ipc_loop, ipc_timer_event, server);
-    if (ipc_timer) {
-        wl_event_source_timer_update(ipc_timer, 50);
+    // IPC liveness: processEvents is also driven from output_frame and
+    // from fd sources on the loop (see havel_wlr_notify_ipc_fd above -
+    // the reliable path). The repeating timer stays as an extra sweep
+    // for the fully-idle case; its callback-return re-arm does not work
+    // on this timerfd-based libwayland (fires once then stops under
+    // load - observed), hence the explicit timer_update re-arm.
+    g_ipc_loop = wl_display_get_event_loop(server->display);
+    g_ipc_ctx = server;
+    {
+        int fds[IPC_FD_SOURCES_MAX];
+        int n = havel_cpp_ipc_fds(server->cpp_server, fds, IPC_FD_SOURCES_MAX);
+        for (int i = 0; i < n; i++) {
+            havel_wlr_notify_ipc_fd(fds[i], 1);
+        }
+    }
+    g_ipc_timer = wl_event_loop_add_timer(g_ipc_loop, ipc_timer_event, server);
+    if (g_ipc_timer) {
+        wl_event_source_timer_update(g_ipc_timer, 50);
     } else {
         LOG_ERROR("Failed to add IPC timer - IPC only serviced on frame ticks");
     }
