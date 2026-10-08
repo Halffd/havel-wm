@@ -99,6 +99,15 @@ private:
     // Decoration manager global (for protocol)
     void* m_decorationManager = nullptr;
 
+    // Persistent decoration subtree: decorations are state-static content
+    // and MUST NOT redraw per frame (per-frame redraw re-damages the
+    // output and spins the render loop - observed live: CPU-bound loop
+    // starving IPC and input). Redraw only when the window signature
+    // (geometry/focus/state/title set) changes.
+    wlr_scene_tree_t* m_decoTree = nullptr;
+    uint64_t m_decoSig = ~0ull;
+
+    uint64_t decorationSignature() const;
     void updateDecoration(void* view, const WindowDecoration& deco);
     void renderTitleBar(OverlayRenderer* renderer, const WindowDecoration& deco);
     void renderShadow(OverlayRenderer* renderer, const WindowDecoration& deco);

@@ -252,7 +252,22 @@ void OverlayRenderer::drawRect(const FloatRect& rect, const Color& color) {
 void OverlayRenderer::drawRect(float x, float y, float w, float h, const Color& color) {
     if (!m_initialized) return;
     float col[4] = {color.r, color.g, color.b, color.a};
-    havel_scene_rect(m_frameTree, (int)x, (int)y, (int)w, (int)h, col);
+    havel_scene_rect(m_targetTree ? m_targetTree : m_frameTree,
+                     (int)x, (int)y, (int)w, (int)h, col);
+}
+
+wlr_scene_tree_t* OverlayRenderer::createPersistentTree() {
+    if (!m_initialized || !m_parent) return nullptr;
+    return havel_scene_frame_tree_create(m_parent);
+}
+
+void OverlayRenderer::destroyPersistentTree(wlr_scene_tree_t** tree) {
+    if (!tree) return;
+    havel_scene_frame_tree_destroy(tree);
+}
+
+void OverlayRenderer::setTargetTree(wlr_scene_tree_t* tree) {
+    m_targetTree = tree;
 }
 
 void OverlayRenderer::drawBorder(const FloatRect& rect, const Color& color, float thickness) {
@@ -278,7 +293,8 @@ void OverlayRenderer::drawCircle(float cx, float cy, float radius, const Color& 
         float dx = x2 - x1, dy = y2 - y1;
         float dist = std::sqrt(dx * dx + dy * dy);
         if (dist < 0.01f) continue;
-        havel_scene_rect(m_frameTree, (int)x1, (int)y1, (int)dist, (int)lineWidth, col);
+        havel_scene_rect(m_targetTree ? m_targetTree : m_frameTree,
+                         (int)x1, (int)y1, (int)dist, (int)lineWidth, col);
     }
 }
 
@@ -312,8 +328,9 @@ void OverlayRenderer::drawText(const char* text, float x, float y, float size, c
     auto rz = m_text->rasterize(text, (uint32_t)(size + 0.5f), color);
     if (rz.pixels.empty()) return;
     wlr_scene_buffer_t* sb = havel_scene_pixels(
-        m_frameTree, rz.pixels.data(), rz.w, rz.h, (int)x, (int)y, rz.w, rz.h);
-    if (sb) m_frameSceneBuffers.push_back(sb);
+        m_targetTree ? m_targetTree : m_frameTree,
+        rz.pixels.data(), rz.w, rz.h, (int)x, (int)y, rz.w, rz.h);
+    if (sb && !m_targetTree) m_frameSceneBuffers.push_back(sb);
 }
 
 void OverlayRenderer::drawTextCentered(const char* text, float cx, float cy, float size, const Color& color) {
@@ -324,8 +341,9 @@ void OverlayRenderer::drawTextCentered(const char* text, float cx, float cy, flo
     float x = cx - rz.w / 2.0f;
     float y = cy - rz.h / 2.0f;
     wlr_scene_buffer_t* sb = havel_scene_pixels(
-        m_frameTree, rz.pixels.data(), rz.w, rz.h, (int)x, (int)y, rz.w, rz.h);
-    if (sb) m_frameSceneBuffers.push_back(sb);
+        m_targetTree ? m_targetTree : m_frameTree,
+        rz.pixels.data(), rz.w, rz.h, (int)x, (int)y, rz.w, rz.h);
+    if (sb && !m_targetTree) m_frameSceneBuffers.push_back(sb);
 }
 
 } // namespace havel

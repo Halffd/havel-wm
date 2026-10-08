@@ -129,21 +129,47 @@ void ServerDecorationPlugin::onViewDestroy(const ViewEvent& event) {
 }
 
 void ServerDecorationPlugin::renderOverlay(void* rendererPtr) {
-    if (!rendererPtr || m_decorations.empty()) return;
-
+    if (!rendererPtr) return;
     OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
-    int screenWidth = renderer->getScreenWidth();
-    int screenHeight = renderer->getScreenHeight();
 
-    (void)screenWidth;
-    (void)screenHeight;
+    // Update focus state (part of the redraw signature below)
+    for (auto& [viewPtr, deco] : m_decorations) {
+        deco.focused = (viewPtr == m_api->getFocusedView());
+    }
 
+    // No windows: drop the persistent tree entirely - nothing to show,
+    // and a stale tree would keep showing vanished decorations.
+    if (m_decorations.empty()) {
+        if (m_decoTree) {
+            renderer->destroyPersistentTree(&m_decoTree);
+            m_decoSig = ~0ull;
+        }
+        return;
+    }
+
+    // Decorations are state-static (geometry/focus/title). Redrawing
+    // them per frame re-damages the output every frame and spins the
+    // render loop at full tilt: shadows + 4x32-segment corner circles +
+    // borders + title bars + buttons = ~150 scene nodes per window per
+    // frame, recreated and destroyed forever (observed live: the
+    // single-threaded loop stayed CPU-bound in wlroots scene ops and
+    // starved IPC and input). Draw once per state change instead.
+    const uint64_t sig = decorationSignature();
+    if (m_decoTree && sig == m_decoSig) {
+        return;  // nothing changed: no redraw, no damage
+    }
+    m_decoSig = sig;
+
+    if (m_decoTree) {
+        renderer->destroyPersistentTree(&m_decoTree);
+    }
+    m_decoTree = renderer->createPersistentTree();
+    if (!m_decoTree) return;
+
+    renderer->setTargetTree(m_decoTree);
     // Render decorations for all non-minimized windows
     for (auto& [viewPtr, deco] : m_decorations) {
         if (deco.minimized) continue;  // No decorations for minimized windows
-
-        // Update focus state
-        deco.focused = (viewPtr == m_api->getFocusedView());
 
         // Render shadow first (behind window)
         renderShadow(renderer, deco);
@@ -160,6 +186,27 @@ void ServerDecorationPlugin::renderOverlay(void* rendererPtr) {
         // Render buttons
         renderButtons(renderer, deco);
     }
+    renderer->setTargetTree(nullptr);
+}
+
+uint64_t ServerDecorationPlugin::decorationSignature() const {
+    // Order-independent mix of every visual input the drawing uses:
+    // window set, geometry, focus/state flags, titles, hover state.
+    uint64_t h = m_decorations.size() * 0x9e3779b97f4a7c15ull;
+    for (const auto& [viewPtr, deco] : m_decorations) {
+        h ^= (uint64_t)viewPtr;
+        h = h * 131 + (uint64_t)(int64_t)deco.x;
+        h = h * 131 + (uint64_t)(int64_t)deco.y;
+        h = h * 131 + (uint64_t)(int64_t)deco.width;
+        h = h * 131 + (uint64_t)(int64_t)deco.height;
+        h = h * 131 + (uint64_t)deco.view;  // view id (marker pos/color inputs)
+        h = h * 5 + (deco.focused ? 1 : 0) + (deco.minimized ? 2 : 0)
+            + (deco.fullscreen ? 4 : 0) + (deco.maximized ? 8 : 0);
+        h ^= std::hash<std::string>{}(deco.title);
+    }
+    h ^= (uint64_t)m_hoveredView;
+    h = h * 3 + (uint64_t)m_hoveredButton;
+    return h;
 }
 
 void ServerDecorationPlugin::renderShadow(OverlayRenderer* renderer, const WindowDecoration& deco) {

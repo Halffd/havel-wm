@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <ctime>
 #include <cstring>
+#include <chrono>
 
 namespace havel {
 
@@ -58,6 +59,16 @@ public:
 
     void renderOverlay(void* rendererPtr) override {
         if (!m_visible || !rendererPtr) return;
+
+        // Throttle to 1 Hz: content here (workspace label, window count,
+        // clock minute) changes at most once a second. Drawing per frame
+        // re-damages the output at frame rate and spins the render loop
+        // (observed live: CPU-bound loop starving wayland clients and
+        // IPC on real sessions - the same trap the FPS overlay and the
+        // decoration redraws had).
+        auto now = std::chrono::steady_clock::now();
+        if (m_lastDraw + std::chrono::seconds(1) > now) return;
+        m_lastDraw = now;
 
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
         int screenWidth = renderer->getScreenWidth();
@@ -112,6 +123,7 @@ private:
     Color m_bgColor;
     Color m_fgColor;
     Color m_accentColor;
+    std::chrono::steady_clock::time_point m_lastDraw;  // 1 Hz redraw throttle
 
     int getWindowCountOnWorkspace(uint32_t workspace) {
         auto views = m_api->getAllViews();

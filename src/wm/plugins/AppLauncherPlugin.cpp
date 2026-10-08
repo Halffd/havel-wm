@@ -9,6 +9,7 @@
 #include <input/TextInputManager.hpp>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
+#include <chrono>
 #include <cstring>
 #include <vector>
 #include <string>
@@ -161,6 +162,7 @@ private:
     uint32_t m_bindingKeysym = XKB_KEY_d;
     std::string m_searchText;
     std::vector<DesktopEntry> m_entries;
+    std::chrono::steady_clock::time_point m_lastDraw;  // 2 Hz redraw throttle
     std::vector<DesktopEntry> m_filtered;
     
     void scanDesktopFiles() {
@@ -417,7 +419,17 @@ private:
 
     void renderOverlay(void* rendererPtr) override {
         if (!m_visible || !rendererPtr) return;
-        
+
+        // Throttle to 2 Hz while open: content is the result list plus a
+        // blinking caret - both fine at 2 Hz. Per-frame redraw re-damages
+        // at frame rate and spins the render loop (the trap the FPS
+        // overlay, decorations and the info bar all had - observed live
+        // again here: the loop pegged CPU inside this function's
+        // drawRect calls the moment the launcher opened).
+        auto now = std::chrono::steady_clock::now();
+        if (m_lastDraw + std::chrono::milliseconds(500) > now) return;
+        m_lastDraw = now;
+
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
         
         int screenWidth = renderer->getScreenWidth();

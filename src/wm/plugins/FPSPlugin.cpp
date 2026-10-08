@@ -84,6 +84,15 @@ public:
     void renderOverlay(void* rendererPtr) override {
         if (!m_enabled || !rendererPtr) return;
 
+        // Throttle the overlay to 4 Hz: its content changes every frame,
+        // so redrawing per frame re-damages the output at frame rate and
+        // spins the render loop (observed live: CPU-bound loop starving
+        // IPC and input on real sessions). 4 Hz is plenty for an FPS
+        // readout; the per-frame history deque keeps collecting.
+        auto now = std::chrono::steady_clock::now();
+        if (m_lastOverlayDraw + std::chrono::milliseconds(250) > now) return;
+        m_lastOverlayDraw = now;
+
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
         
         int x = 10;
@@ -163,6 +172,7 @@ private:
     
     std::deque<float> m_frameTimes;  // Frame times in ms
     std::chrono::steady_clock::time_point m_lastFrameTime;
+    std::chrono::steady_clock::time_point m_lastOverlayDraw;  // 4 Hz overlay throttle
     int m_frameCount;
     float m_fps;
     uint64_t m_fpsUpdateTime;

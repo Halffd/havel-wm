@@ -69,6 +69,19 @@ public:
     void drawBorder(const FloatRect& rect, const Color& color, float thickness = 2.0f);
     void drawCircle(float cx, float cy, float radius, const Color& color);
 
+    // Persistent overlay subtree + target switch. State-static overlay
+    // content (window decorations) must NOT redraw per frame: every
+    // redraw re-damages the output and spins the render loop (observed
+    // live: ~150 scene nodes per frame per window - shadows, 4x32-segment
+    // corner circles, borders, title bars - keeping the single-threaded
+    // loop CPU-bound and starving IPC and input). Persistent content
+    // renders once per state change instead:
+    //   tree = createPersistentTree(); setTargetTree(tree); <draws>;
+    //   setTargetTree(nullptr);
+    wlr_scene_tree_t* createPersistentTree();
+    void destroyPersistentTree(wlr_scene_tree_t** tree);
+    void setTargetTree(wlr_scene_tree_t* tree);  // nullptr = per-frame tree
+
     // Texture drawing (not backed yet: texture capture always returned 0
     // and callers fall back to rectangles — logged, not silently dropped)
     void drawTexture(uint32_t texture, const FloatRect& rect, float alpha = 1.0f);
@@ -96,6 +109,7 @@ private:
 
     wlr_scene_tree_t* m_parent = nullptr;    // overlay layer (not owned)
     wlr_scene_tree_t* m_frameTree = nullptr; // per-frame node container (scene-owned)
+    wlr_scene_tree_t* m_targetTree = nullptr; // active draw target override (not owned)
 
     // Text cache: rasterized lines keyed by (text, size, color)
     std::unique_ptr<SceneText> m_text;
