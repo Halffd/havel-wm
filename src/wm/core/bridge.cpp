@@ -228,11 +228,18 @@ void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int hei
     if (++frameCount % 60 == 0) {
         printf("[Overlays] Rendering %zu plugins\n", pluginManager.plugins().size());
     }
-    
-    pluginManager.renderOverlays(renderer);
 
-    (void)width;
-    (void)height;
+    // Frame lifecycle: beginFrame destroys last frame's immediate-mode
+    // nodes and re-creates the tree. This was never wired (the tree
+    // accumulated every node ever drawn - an unbounded scene-graph
+    // leak: a plugin drawing 30 nodes per frame piles up 1800/sec).
+    // Plugins that redraw less often than every frame must draw into
+    // persistent trees (OverlayRenderer::createPersistentTree) or
+    // their content would blink off between draws.
+    renderer->beginFrame(width, height);
+    pluginManager.renderOverlays(renderer);
+    renderer->endFrame();
+
 }
 
 void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command) {

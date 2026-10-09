@@ -9,6 +9,7 @@
 #include <wm/View.hpp>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
+#include <functional>
 #include <cstring>
 #include <algorithm>
 #include <vector>
@@ -163,6 +164,10 @@ private:
     int m_selectedIndex;
     bool m_reverse;
     std::vector<WindowEntry> m_windows;
+    // Persistent overlay tree (rebuilt only on selection/window change)
+    wlr_scene_tree_t* m_tree = nullptr;
+    OverlayRenderer* m_renderer = nullptr;  // cached for hide-time teardown
+    uint64_t m_lastSig = ~0ull;  // window-set + selection redraw signature
     // Trigger binding (overridable via config "keybinding", default Alt+Tab)
     uint32_t m_triggerMods = 1u << 3;   // Mod1 (Alt)
     uint32_t m_triggerKeysym = XKB_KEY_Tab;
@@ -195,6 +200,12 @@ private:
         m_visible = false;
         m_windows.clear();
         m_selectedIndex = 0;
+        m_lastSig = ~0ull;
+        // Drop the persistent overlay tree or the full-screen dim and
+        // thumbnails stay frozen on screen after the switch.
+        if (m_renderer && m_tree) {
+            m_renderer->destroyPersistentTree(&m_tree);
+        }
         printf("[AltTab] Hidden\n");
     }
 
@@ -314,7 +325,25 @@ private:
     void renderOverlay(void* rendererPtr) override {
         if (!m_visible || !rendererPtr) return;
 
+        // Draw into a PERSISTENT tree, rebuilt only when the selection
+        // or window set changes. The frame tree is cleared every frame,
+        // so drawing there would either spin the render loop at full
+        // CPU (per-frame redraw of the full-screen dim - observed live)
+        // or blink between throttled draws.
+        uint64_t sig = 0;
+        for (size_t i = 0; i < m_windows.size(); i++) {
+            sig = sig * 131 + std::hash<std::string>{}(m_windows[i].title);
+        }
+        sig = sig * 131 + (uint64_t)m_selectedIndex;
+        if (m_tree && sig == m_lastSig) return;
+        m_lastSig = sig;
+
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+        m_renderer = renderer;
+        if (m_tree) renderer->destroyPersistentTree(&m_tree);
+        m_tree = renderer->createPersistentTree();
+        if (!m_tree) return;
+        renderer->setTargetTree(m_tree);
 
         int screenWidth = renderer->getScreenWidth();
         int screenHeight = renderer->getScreenHeight();
@@ -440,6 +469,8 @@ private:
         renderer->drawBorder(FloatRect(countX - 15.0f, textY - 5.0f, countWidth, 28.0f), Color(m_borderColor[0], m_borderColor[1], m_borderColor[2], 0.55f), 1.0f);
         
     renderer->drawText(countText, countX + 15.0f, textY + 15.0f, 14.0f, Color(0.92f, 0.92f, 0.92f, 1.0f));
+
+    renderer->setTargetTree(nullptr);
     }
 };
 

@@ -60,17 +60,24 @@ public:
     void renderOverlay(void* rendererPtr) override {
         if (!m_visible || !rendererPtr) return;
 
-        // Throttle to 1 Hz: content here (workspace label, window count,
-        // clock minute) changes at most once a second. Drawing per frame
-        // re-damages the output at frame rate and spins the render loop
-        // (observed live: CPU-bound loop starving wayland clients and
-        // IPC on real sessions - the same trap the FPS overlay and the
-        // decoration redraws had).
+        // Draw into a PERSISTENT tree rebuilt at 1 Hz (content - workspace
+        // label, window count, clock minute - changes at most once a
+        // second). The frame tree is cleared every frame, so a throttled
+        // draw there would blink off between draws; a persistent tree
+        // stays visible at 1 damage frame a second instead of one per
+        // frame (the original per-frame redraw spun the render loop,
+        // starving wayland clients and IPC - observed live).
         auto now = std::chrono::steady_clock::now();
-        if (m_lastDraw + std::chrono::seconds(1) > now) return;
+        if (m_tree && m_lastDraw + std::chrono::seconds(1) > now) return;
         m_lastDraw = now;
 
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+        m_renderer = renderer;
+        if (m_tree) renderer->destroyPersistentTree(&m_tree);
+        m_tree = renderer->createPersistentTree();
+        if (!m_tree) return;
+        renderer->setTargetTree(m_tree);
+
         int screenWidth = renderer->getScreenWidth();
 
         renderer->drawRect(0, 0, screenWidth, m_barHeight, m_bgColor);
@@ -97,6 +104,8 @@ public:
         float timeWidth = getTextWidth(timeStr, 16.0f) + 20.0f;
         renderer->drawRect(screenWidth - timeWidth - 8, 5, timeWidth, m_barHeight - 10, Color(0.0f, 0.0f, 0.0f, 0.4f));
         renderer->drawText(timeStr, screenWidth - timeWidth + 2, 8, 16.0f, m_fgColor);
+
+        renderer->setTargetTree(nullptr);
     }
 
     bool onKey(const KeyEvent& event) override {
@@ -106,6 +115,11 @@ public:
         if (event.modifiers == m_bindingMods &&
             event.keysym == m_bindingKeysym) {
             m_visible = !m_visible;
+            // Drop the persistent tree on hide or the bar stays frozen
+            // on screen (nothing redraws while hidden).
+            if (!m_visible && m_renderer && m_tree) {
+                m_renderer->destroyPersistentTree(&m_tree);
+            }
             printf("[WorkspaceInfoBar] %s\n", m_visible ? "shown" : "hidden");
             return true;
         }
@@ -124,6 +138,8 @@ private:
     Color m_fgColor;
     Color m_accentColor;
     std::chrono::steady_clock::time_point m_lastDraw;  // 1 Hz redraw throttle
+    wlr_scene_tree_t* m_tree = nullptr;      // persistent bar tree (rebuilt at 1 Hz)
+    OverlayRenderer* m_renderer = nullptr;   // cached for toggle-time tree teardown
 
     int getWindowCountOnWorkspace(uint32_t workspace) {
         auto views = m_api->getAllViews();

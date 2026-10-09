@@ -10,6 +10,7 @@
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 #include <chrono>
+#include <functional>
 #include <cstring>
 #include <vector>
 #include <string>
@@ -163,6 +164,8 @@ private:
     std::string m_searchText;
     std::vector<DesktopEntry> m_entries;
     std::chrono::steady_clock::time_point m_lastDraw;  // 2 Hz redraw throttle
+    wlr_scene_tree_t* m_tree = nullptr;     // persistent launcher tree
+    OverlayRenderer* m_renderer = nullptr;  // cached for hide-time tree teardown
     std::vector<DesktopEntry> m_filtered;
     
     void scanDesktopFiles() {
@@ -302,20 +305,31 @@ private:
             m_selectedIndex = 0;
             filterResults();
             printf("[AppLauncher] Shown\n");
-            
+
             // Enable text input for IME support
             // Get TextInputManager from Server via API
             // Text input is handled via KeyEvent.utf8 from the keyboard handler
             // This provides full UTF-8 support for international characters
         } else {
+            dropTree();
             printf("[AppLauncher] Hidden\n");
         }
     }
-    
+
     void hideLauncher() {
         m_visible = false;
         m_searchText.clear();
+        dropTree();
         printf("[AppLauncher] Hidden\n");
+    }
+
+    // Tear down the persistent overlay tree - callers that hide the
+    // launcher must do this or the last drawn launcher stays frozen on
+    // screen (nothing redraws while hidden).
+    void dropTree() {
+        if (m_renderer && m_tree) {
+            m_renderer->destroyPersistentTree(&m_tree);
+        }
     }
     
     void navigate(int delta) {
@@ -420,18 +434,23 @@ private:
     void renderOverlay(void* rendererPtr) override {
         if (!m_visible || !rendererPtr) return;
 
-        // Throttle to 2 Hz while open: content is the result list plus a
-        // blinking caret - both fine at 2 Hz. Per-frame redraw re-damages
-        // at frame rate and spins the render loop (the trap the FPS
-        // overlay, decorations and the info bar all had - observed live
-        // again here: the loop pegged CPU inside this function's
-        // drawRect calls the moment the launcher opened).
+        // Draw into a PERSISTENT tree rebuilt at 2 Hz while open (content
+        // is the result list plus a blinking caret). The frame tree is
+        // cleared every frame, so a throttled draw there would blink off
+        // between draws; the persistent tree stays visible at 2 damage
+        // frames a second instead of per-frame redraws that spun the
+        // render loop at full CPU (observed live).
         auto now = std::chrono::steady_clock::now();
-        if (m_lastDraw + std::chrono::milliseconds(500) > now) return;
+        if (m_tree && m_lastDraw + std::chrono::milliseconds(500) > now) return;
         m_lastDraw = now;
 
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
-        
+        m_renderer = renderer;
+        if (m_tree) renderer->destroyPersistentTree(&m_tree);
+        m_tree = renderer->createPersistentTree();
+        if (!m_tree) return;
+        renderer->setTargetTree(m_tree);
+
         int screenWidth = renderer->getScreenWidth();
         int screenHeight = renderer->getScreenHeight();
         
@@ -494,6 +513,8 @@ private:
         float textWidth = strlen(instruction) * 8.0f;
         float textX = (screenWidth - textWidth) / 2.0f;
         renderer->drawText(instruction, textX, (float)(launcherY + launcherHeight + 15), 12.0f, Color(0.6f, 0.6f, 0.6f, 1.0f));
+
+        renderer->setTargetTree(nullptr);
     }
 };
 

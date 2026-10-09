@@ -84,17 +84,24 @@ public:
     void renderOverlay(void* rendererPtr) override {
         if (!m_enabled || !rendererPtr) return;
 
-        // Throttle the overlay to 4 Hz: its content changes every frame,
-        // so redrawing per frame re-damages the output at frame rate and
-        // spins the render loop (observed live: CPU-bound loop starving
-        // IPC and input on real sessions). 4 Hz is plenty for an FPS
-        // readout; the per-frame history deque keeps collecting.
+        // Draw into a PERSISTENT tree rebuilt at 4 Hz. The frame tree is
+        // cleared every frame (see havel_cpp_draw_overlays), so drawing
+        // there at 4 Hz would blink off between draws; a persistent
+        // tree keeps the panel on screen and costs 4 damage frames a
+        // second instead of one per frame (the original per-frame
+        // redraw spun the render loop at full CPU, starving IPC and
+        // input on real sessions).
         auto now = std::chrono::steady_clock::now();
-        if (m_lastOverlayDraw + std::chrono::milliseconds(250) > now) return;
+        if (m_tree && m_lastOverlayDraw + std::chrono::milliseconds(250) > now) return;
         m_lastOverlayDraw = now;
 
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
-        
+        m_renderer = renderer;
+        if (m_tree) renderer->destroyPersistentTree(&m_tree);
+        m_tree = renderer->createPersistentTree();
+        if (!m_tree) return;
+        renderer->setTargetTree(m_tree);
+
         int x = 10;
         int y = 10;
         int lineHeight = 18;
@@ -138,6 +145,8 @@ public:
             y += 5;
             drawFrameTimeGraph(renderer, x, y, 210, 40);
         }
+
+        renderer->setTargetTree(nullptr);
     }
 
     bool onKey(const KeyEvent& event) override {
@@ -173,6 +182,8 @@ private:
     std::deque<float> m_frameTimes;  // Frame times in ms
     std::chrono::steady_clock::time_point m_lastFrameTime;
     std::chrono::steady_clock::time_point m_lastOverlayDraw;  // 4 Hz overlay throttle
+    wlr_scene_tree_t* m_tree = nullptr;  // persistent panel tree (rebuilt at 4 Hz)
+    OverlayRenderer* m_renderer = nullptr;  // cached for toggle-time tree teardown
     int m_frameCount;
     float m_fps;
     uint64_t m_fpsUpdateTime;
@@ -184,6 +195,11 @@ private:
 
     void toggleOverlay() {
         m_enabled = !m_enabled;
+        // Drop the persistent tree on disable, or the last drawn panel
+        // stays on screen (nothing redraws while disabled).
+        if (!m_enabled && m_renderer && m_tree) {
+            m_renderer->destroyPersistentTree(&m_tree);
+        }
         printf("[FPSPlugin] Overlay %s\n", m_enabled ? "enabled" : "disabled");
     }
 
