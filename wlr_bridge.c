@@ -256,6 +256,7 @@ struct havel_wlr_server {
 
     uint32_t active_workspace;
     struct wl_list outputs; // havel_output::link
+    struct wl_list layer_surfaces; // havel_layer_surface::link (for usable-area recompute)
 
     // Global workspace trees (shared across all outputs)
     struct wlr_scene_tree *workspaces[HAVEL_WORKSPACE_COUNT];
@@ -1382,6 +1383,7 @@ struct havel_layer_surface {
     // false, and map only fires after the client got its configure.
     struct wl_listener commit;
     bool configured;
+    struct wl_list link;  // server->layer_surfaces (usable-area recompute)
 };
 
 // First commit: the layer surface has its initial state (anchors,
@@ -1391,6 +1393,42 @@ struct havel_layer_surface {
 // "Timed out waiting for initial .configure" - surface torn down, no
 // bar) and configuring any earlier trips the initialized assert (that
 // crash was observed live too).
+// Recompute the usable area (output minus every mapped layer surface's
+// exclusive zone) and push it to the C++ workspaces via
+// havel_cpp_set_output_geometry - that export existed but was never
+// called, so C++ placement/maximize ran on an empty rect. Called on
+// output enable and on layer map/unmap/destroy; waybar's top bar
+// (exclusive zone 30) moves the usable area origin below the bar.
+static void update_usable_area(struct havel_wlr_server *server) {
+    struct havel_output *output = NULL;
+    if (!wl_list_empty(&server->outputs)) {
+        output = wl_container_of(server->outputs.next, output, link);
+    }
+    if (!output || !output->output || !output->enable_ok) return;
+
+    struct wlr_box full_area = {0, 0, output->output->width, output->output->height};
+    struct wlr_box usable_area = full_area;
+
+    // Layer order matters: bottom layers consume usable area first
+    // (exactly what wlr_scene_layer_surface_v1_configure computes).
+    struct havel_layer_surface *lsurface;
+    wl_list_for_each(lsurface, &server->layer_surfaces, link) {
+        if (!lsurface->output || !lsurface->scene_layer_surface) continue;
+        if (!lsurface->scene_layer_surface->layer_surface->surface->mapped) continue;
+        wlr_scene_layer_surface_v1_configure(
+            lsurface->scene_layer_surface, &full_area, &usable_area);
+    }
+
+    for (int ws = 0; ws < HAVEL_WORKSPACE_COUNT; ws++) {
+        havel_cpp_set_output_geometry(server->cpp_server, ws,
+                                      usable_area.x, usable_area.y,
+                                      usable_area.width, usable_area.height);
+    }
+    LOG_INFO("[LayerShell] usable area now %dx%d+%d+%d",
+             usable_area.width, usable_area.height,
+             usable_area.x, usable_area.y);
+}
+
 static void layer_surface_handle_commit(struct wl_listener *listener, void *data) {
     struct havel_layer_surface *lsurface = wl_container_of(listener, lsurface, commit);
     (void)data;
@@ -1418,11 +1456,13 @@ static void layer_surface_handle_destroy(struct wl_listener *listener, void *dat
     if (!lsurface->configured) {
         wl_list_remove(&lsurface->commit.link);
     }
+    wl_list_remove(&lsurface->link);
 
     if (lsurface->scene_tree) {
         wlr_scene_node_destroy(&lsurface->scene_tree->node);
     }
 
+    update_usable_area(lsurface->server);
     free(lsurface);
 }
 
@@ -1434,12 +1474,9 @@ static void layer_surface_handle_map(struct wl_listener *listener, void *data) {
              lsurface->scene_layer_surface->layer_surface->namespace,
              lsurface->scene_layer_surface->layer_surface->current.layer);
 
-    // Configure now that surface is initialized - fixes assertion failure
-    if (output) {
-        struct wlr_box full_area = {0, 0, output->width, output->height};
-        struct wlr_box usable_area = {0, 0, output->width, output->height};
-        wlr_scene_layer_surface_v1_configure(lsurface->scene_layer_surface, &full_area, &usable_area);
-    }
+    // Recompute the usable area with this surface's exclusive zone -
+    // also configures the surface within the fresh arrangement.
+    update_usable_area(lsurface->server);
 
     // Raise to top when mapped
     wlr_scene_node_raise_to_top(&lsurface->scene_tree->node);
@@ -1449,6 +1486,8 @@ static void layer_surface_handle_unmap(struct wl_listener *listener, void *data)
     struct havel_layer_surface *lsurface = wl_container_of(listener, lsurface, unmap);
 
     LOG_INFO("[LayerShell] Surface unmapped");
+    // Its exclusive zone no longer applies.
+    update_usable_area(lsurface->server);
 }
 
 static void server_new_layer_surface(struct wl_listener *listener, void *data) {
@@ -1489,6 +1528,7 @@ static void server_new_layer_surface(struct wl_listener *listener, void *data) {
     // `initialized` (the assert crash was observed live).
     lsurface->commit.notify = layer_surface_handle_commit;
     wl_signal_add(&layer_surface->surface->events.commit, &lsurface->commit);
+    wl_list_insert(&server->layer_surfaces, &lsurface->link);
 
     // Add listeners
     lsurface->destroy.notify = layer_surface_handle_destroy;
@@ -1870,6 +1910,11 @@ static void output_try_enable(struct havel_output *output) {
     } else {
         output->enable_ok = true;
         LOG_INFO("[OUTPUT] %s enabled (mode committed)", wlr_output->name);
+        // Publish the output geometry to the C++ workspaces (the export
+        // existed but was never called - placement ran on an empty
+        // rect). Layer surfaces shrink this later via their exclusive
+        // zones (see update_usable_area).
+        update_usable_area(output->server);
         // Kick the frame loop: DRM chains frames via page-flip, but
         // headless outputs need an explicit first present or
         // events.frame never fires. Commit the (empty) scene once to
@@ -2440,6 +2485,7 @@ havel_wlr_server_t* havel_wlr_create(void) {
     server = server_local;  // Set global server pointer for overlay access
 
     wl_list_init(&server->outputs);
+    wl_list_init(&server->layer_surfaces);
     server->active_workspace = 0;
     server->grab.mode = INTERACTIVE_NONE;  // Initialize grab state
 
