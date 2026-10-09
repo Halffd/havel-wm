@@ -144,20 +144,31 @@ bool IPCServer::start(const std::string& socketPath) {
     }
 
     m_running = true;
+    // Register the listen fd with the wlr bridge's event-loop sources.
+    // No-op before the display loop exists (first boot collects it via
+    // havel_cpp_ipc_fds); on reloads this is what keeps IPC alive.
+    havel_wlr_notify_ipc_fd(m_serverFd, 1);
     printf("[IPC] Server started at %s\n", socketPath.c_str());
     return true;
 }
 
 void IPCServer::stop() {
-    // Close all clients
+    // Close all clients. Every fd watched by the wlr bridge's event-loop
+    // sources must be un-registered BEFORE close: a missed notify leaves
+    // a stale source on the fd number, and after fd reuse it swallows
+    // the next owner's events (observed live with a wayland client).
     for (int fd : m_clientFds) {
-        if (fd >= 0) close(fd);
+        if (fd >= 0) {
+            havel_wlr_notify_ipc_fd(fd, 0);
+            close(fd);
+        }
     }
     m_clientFds.clear();
     m_clientBuffers.clear();
     m_clientSubscriptions.clear();
 
     if (m_serverFd >= 0) {
+        havel_wlr_notify_ipc_fd(m_serverFd, 0);
         close(m_serverFd);
         m_serverFd = -1;
     }

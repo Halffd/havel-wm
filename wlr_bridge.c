@@ -394,6 +394,16 @@ struct havel_xwayland_view {
     void *scene_graph_view;  // Scene graph View (SceneView*)
 
     struct wl_listener destroy;
+    // An X window's wl_surface is NOT valid at new-surface time - it
+    // arrives with the associate event and leaves with dissociate
+    // ("struct wlr_surface is valid once the associate event is
+    // emitted" - wlr/xwayland.h). Creating the scene surface before
+    // association passes NULL and segfaults the compositor (observed
+    // live: SIGSEGV in wlr_scene_surface_create from
+    // server_new_xwayland_surface the moment an X client mapped).
+    struct wl_listener associate;
+    struct wl_listener dissociate;
+    bool scene_surface_created;
 };
 
 // Forward function declarations
@@ -1195,6 +1205,8 @@ static void xwayland_view_handle_destroy(struct wl_listener *listener, void *dat
     view->cpp_view = NULL;
     
     wl_list_remove(&view->destroy.link);
+    wl_list_remove(&view->associate.link);
+    wl_list_remove(&view->dissociate.link);
 
     // Notify C++ layer - C++ destroys View object
     // DO NOT access view-> members after this point!
@@ -1212,6 +1224,34 @@ static void xwayland_view_handle_destroy(struct wl_listener *listener, void *dat
     free(view);
 }
 
+static void xwayland_view_handle_associate(struct wl_listener *listener, void *data) {
+    struct havel_xwayland_view *view = wl_container_of(listener, view, associate);
+    (void)data;
+
+    // The listeners stay registered for the window's whole life: an X
+    // window can dissociate and re-associate repeatedly.
+    if (view->scene_surface_created) {
+        return;
+    }
+    LOG_INFO("[XWayland] surface associated: binding scene surface");
+    if (view->scene_tree && view->xsurface && view->xsurface->surface) {
+        wlr_scene_surface_create(view->scene_tree, view->xsurface->surface);
+        view->scene_surface_created = true;
+    } else {
+        LOG_WARN("[XWayland] associate fired without a usable surface");
+    }
+}
+
+static void xwayland_view_handle_dissociate(struct wl_listener *listener, void *data) {
+    struct havel_xwayland_view *view = wl_container_of(listener, view, dissociate);
+    (void)data;
+    LOG_INFO("[XWayland] surface dissociated (scene surface dies with it)");
+    // The wlr_scene_surface created on the old wl_surface is destroyed
+    // with it by wlroots. associate will fire again if the window
+    // re-binds (the associate listener stays registered).
+    view->scene_surface_created = false;
+}
+
 static void server_new_xwayland_surface(struct wl_listener *listener, void *data) {
     struct havel_wlr_server *server = wl_container_of(listener, server, new_xwayland_surface);
     struct wlr_xwayland_surface *xsurface = data;
@@ -1227,9 +1267,22 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
     xsurface->data = view;
     // NO workspace_id in C - C++ owns this
     
-    // Create scene tree first
+    // Create scene tree first. The wl_surface is not valid yet on every
+    // path - X windows bind theirs with the associate event (see the
+    // associate/dissociate listeners above). The scene surface is
+    // created either now (already associated) or on associate.
     view->scene_tree = wlr_scene_tree_create(&server->scene->tree);
-    wlr_scene_surface_create(view->scene_tree, xsurface->surface);
+    if (xsurface->surface) {
+        wlr_scene_surface_create(view->scene_tree, xsurface->surface);
+        view->scene_surface_created = true;
+    }
+    // Both lifecycle listeners register unconditionally: the associate
+    // handler is guarded by scene_surface_created (no double-create),
+    // and always linking keeps the destroy path's wl_list_remove safe.
+    view->associate.notify = xwayland_view_handle_associate;
+    wl_signal_add(&xsurface->events.associate, &view->associate);
+    view->dissociate.notify = xwayland_view_handle_dissociate;
+    wl_signal_add(&xsurface->events.dissociate, &view->dissociate);
 
     // Apply geometry
     bool has_position = (xsurface->x != 0 || xsurface->y != 0) &&
@@ -2688,7 +2741,12 @@ havel_wlr_server_t* havel_wlr_create(void) {
         LOG_INFO("[Foreign Toplevel List] ext_foreign_toplevel_list_v1 created (taskbar)");
     }
 
-    server->xwayland = wlr_xwayland_create(server->display, server->compositor, true);
+    // Eager xwayland (lazy=false): the lazy server spawns on first client
+    // connect and proved unreliable here - it accepted the connection,
+    // created the surface, then died ("Restarting Xwayland (lazy)" loop,
+    // clients got "X connection broken" - observed live). An eager server
+    // starts at compositor boot and stays up.
+    server->xwayland = wlr_xwayland_create(server->display, server->compositor, false);
     if (server->xwayland) {
         server->new_xwayland_surface.notify = server_new_xwayland_surface;
         wl_signal_add(&server->xwayland->events.new_surface, &server->new_xwayland_surface);
@@ -2764,10 +2822,32 @@ static struct wl_event_source *g_ipc_fd_src[IPC_FD_SOURCES_MAX];
 static int g_ipc_fd_num[IPC_FD_SOURCES_MAX];
 
 static int ipc_fd_event(int fd, uint32_t mask, void *data) {
-    (void)fd; (void)mask; (void)data;
-    if (g_ipc_ctx && g_ipc_ctx->cpp_server) {
-        havel_cpp_process_ipc_events(g_ipc_ctx->cpp_server);
+    (void)mask; (void)data;
+    struct havel_wlr_server *server = g_ipc_ctx;
+    if (!server || !server->cpp_server) return 0;
+
+    // Guard against fd-number collisions: evdev-style fd reuse means a
+    // stale source (its close notify missed somewhere) can fire for a
+    // fd that now belongs to someone else - observed live: this handler
+    // received a wayland client's fd whose events it swallowed while
+    // the real wl_client source starved (libwayland's epoll add failed
+    // EEXIST against our stale registration). If the fd is no longer an
+    // IPC fd, drop the stale source and stay silent - the current owner
+    // gets its own events once our stale registration is gone.
+    int ipc_fds[IPC_FD_SOURCES_MAX];
+    int n = havel_cpp_ipc_fds(server->cpp_server, ipc_fds, IPC_FD_SOURCES_MAX);
+    bool ours = false;
+    for (int i = 0; i < n; i++) {
+        if (ipc_fds[i] == fd) { ours = true; break; }
     }
+    if (!ours) {
+        LOG_WARN("[IPC] fd %d readable but not an IPC fd anymore (stale "
+                 "source after fd reuse) - removing", fd);
+        havel_wlr_notify_ipc_fd(fd, 0);
+        return 0;
+    }
+
+    havel_cpp_process_ipc_events(server->cpp_server);
     return 0;
 }
 
@@ -2777,6 +2857,18 @@ static int ipc_fd_event(int fd, uint32_t mask, void *data) {
 void havel_wlr_notify_ipc_fd(int fd, int added) {
     if (fd < 0 || !g_ipc_loop) return;
     if (added) {
+        // Dedup: an fd number must never hold two of our sources - the
+        // second epoll_ctl would fail EEXIST and leave a source that
+        // never fires while its fd's events go elsewhere (see the stale
+        // guard in ipc_fd_event).
+        for (int i = 0; i < IPC_FD_SOURCES_MAX; i++) {
+            if (g_ipc_fd_src[i] && g_ipc_fd_num[i] == fd) {
+                wl_event_source_remove(g_ipc_fd_src[i]);
+                g_ipc_fd_src[i] = NULL;
+                g_ipc_fd_num[i] = -1;
+                break;
+            }
+        }
         for (int i = 0; i < IPC_FD_SOURCES_MAX; i++) {
             if (!g_ipc_fd_src[i]) {
                 g_ipc_fd_num[i] = fd;
