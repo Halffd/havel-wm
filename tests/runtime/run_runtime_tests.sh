@@ -142,9 +142,11 @@ else
 fi
 if [ -n "$TERM_PROG" ]; then
 # poll for the map before testing it: client startup time varies under
-# load (previous fixed 5s sleep raced slow boots)
+# load. 20s expired twice on this box while a parallel session's builds
+# saturated the CPU - all six downstream checks cascaded from the one
+# late map (client/pixels/unmap/keys/teardown). 45s absorbs that.
 MAP_SEEN=1
-for _ in $(seq 1 20); do
+for _ in $(seq 1 45); do
     grep -q "onViewMapped" "$LOG" && { MAP_SEEN=0; break; }
     sleep 1
 done
@@ -211,9 +213,9 @@ if [ ! -x "$INJ" ]; then
 fi
 if [ -x "$INJ" ]; then
     WAYLAND_DISPLAY=wayland-0 "$INJ" +125 28 -125
-    report $(wait_for_log "TRIGGERED: spawn_terminal" 10 && echo 0 || echo 1) "Meta+Return triggers spawn_terminal"
+    report $(wait_for_log "TRIGGERED: spawn_terminal" 20 && echo 0 || echo 1) "Meta+Return triggers spawn_terminal"
     WAYLAND_DISPLAY=wayland-0 "$INJ" +125 3 -125
-    report $(wait_for_log "TRIGGERED: workspace_2" 10 && echo 0 || echo 1) "Meta+2 triggers workspace_2"
+    report $(wait_for_log "TRIGGERED: workspace_2" 20 && echo 0 || echo 1) "Meta+2 triggers workspace_2"
 else
     echo "SKIP: injector build failed (wayland-scanner missing?)"
 fi
