@@ -797,6 +797,25 @@ static void xdg_view_handle_map(struct wl_listener *listener, void *data) {
     // Notify C++ layer - C++ owns mapped state
     havel_cpp_on_view_mapped(view->server->cpp_server, view->cpp_view);
 
+    // Apply a maximize request that arrived before initialization:
+    // clients (firefox) set toplevel state, then commit, so the request
+    // signal fired while scheduling a configure would have asserted
+    // (see xdg_handle_request_maximize). At map the surface is
+    // initialized and the configure is legal.
+    if (view->xdg_surface->toplevel && view->xdg_surface->toplevel->requested.maximized) {
+        struct wlr_xdg_toplevel *toplevel = view->xdg_surface->toplevel;
+        LOG_INFO("[XDG] Applying deferred maximize for %p", (void*)view);
+        wlr_xdg_toplevel_set_maximized(toplevel, true);
+        if (!wl_list_empty(&view->server->outputs)) {
+            struct havel_output *output =
+                wl_container_of(view->server->outputs.next, output, link);
+            if (output && output->output) {
+                wlr_xdg_toplevel_set_size(toplevel,
+                                          output->output->width, output->output->height);
+            }
+        }
+    }
+
     // Force node to top and enabled
     wlr_scene_node_raise_to_top(&view->scene_tree->node);
     wlr_scene_node_set_enabled(&view->scene_tree->node, true);
@@ -920,15 +939,27 @@ static void xdg_handle_request_resize(struct wl_listener *listener, void *data) 
 // NEW: Maximize request handler
 static void xdg_handle_request_maximize(struct wl_listener *listener, void *data) {
     struct havel_xdg_view *view = wl_container_of(listener, view, request_maximize);
-    
+
     if (!view || !view->xdg_surface->toplevel) return;
-    
+
+    // Maximize requests can arrive before the surface's first commit -
+    // clients set toplevel state, THEN commit (firefox does exactly
+    // this). Scheduling a configure on an uninitialized surface
+    // asserts in wlroots and kills the compositor (observed live).
+    // wlroots records the request in toplevel->requested; the map
+    // handler applies it once the surface is initialized.
+    if (!view->xdg_surface->initialized) {
+        LOG_INFO("[XDG] Maximize request for %p before initialization - "
+                 "will apply on map", (void*)view);
+        return;
+    }
+
     LOG_INFO("[XDG] Maximize request for view %p", (void*)view);
 
     // Toggle maximized state and resize window
     struct wlr_xdg_toplevel *toplevel = view->xdg_surface->toplevel;
     bool maximized = toplevel->current.maximized;
-    
+
     if (!maximized) {
         // Maximize: set to output size
         wlr_xdg_toplevel_set_maximized(toplevel, true);
@@ -1345,7 +1376,36 @@ struct havel_layer_surface {
     struct wl_listener destroy;
     struct wl_listener map;
     struct wl_listener unmap;
+    // First-commit hook: the initial configure goes out on the layer
+    // surface's first commit (see layer_surface_handle_commit) - at
+    // new-surface time wlroots asserts surface->initialized is still
+    // false, and map only fires after the client got its configure.
+    struct wl_listener commit;
+    bool configured;
 };
+
+// First commit: the layer surface has its initial state (anchors,
+// desired size, exclusive zone) and wlroots has it `initialized` - the
+// earliest legal moment for wlr_layer_surface_v1_configure. Waybar
+// blocks on this configure before attaching its buffer (observed:
+// "Timed out waiting for initial .configure" - surface torn down, no
+// bar) and configuring any earlier trips the initialized assert (that
+// crash was observed live too).
+static void layer_surface_handle_commit(struct wl_listener *listener, void *data) {
+    struct havel_layer_surface *lsurface = wl_container_of(listener, lsurface, commit);
+    (void)data;
+    if (lsurface->configured || !lsurface->output) return;
+    lsurface->configured = true;
+    wl_list_remove(&lsurface->commit.link);
+
+    struct wlr_output *output = lsurface->output;
+    struct wlr_box full_area = {0, 0, output->width, output->height};
+    struct wlr_box usable_area = {0, 0, output->width, output->height};
+    wlr_scene_layer_surface_v1_configure(
+        lsurface->scene_layer_surface, &full_area, &usable_area);
+    LOG_INFO("[LayerShell] initial configure sent on first commit (%dx%d)",
+             full_area.width, full_area.height);
+}
 
 static void layer_surface_handle_destroy(struct wl_listener *listener, void *data) {
     struct havel_layer_surface *lsurface = wl_container_of(listener, lsurface, destroy);
@@ -1355,6 +1415,9 @@ static void layer_surface_handle_destroy(struct wl_listener *listener, void *dat
     wl_list_remove(&lsurface->destroy.link);
     wl_list_remove(&lsurface->map.link);
     wl_list_remove(&lsurface->unmap.link);
+    if (!lsurface->configured) {
+        wl_list_remove(&lsurface->commit.link);
+    }
 
     if (lsurface->scene_tree) {
         wlr_scene_node_destroy(&lsurface->scene_tree->node);
@@ -1420,6 +1483,12 @@ static void server_new_layer_surface(struct wl_listener *listener, void *data) {
         free(lsurface);
         return;
     }
+
+    // Initial configure on the surface's FIRST COMMIT - not here: at
+    // new-surface time wlroots asserts the surface is not yet
+    // `initialized` (the assert crash was observed live).
+    lsurface->commit.notify = layer_surface_handle_commit;
+    wl_signal_add(&layer_surface->surface->events.commit, &lsurface->commit);
 
     // Add listeners
     lsurface->destroy.notify = layer_surface_handle_destroy;
