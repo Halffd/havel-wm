@@ -802,18 +802,25 @@ static void xdg_view_handle_map(struct wl_listener *listener, void *data) {
     // clients (firefox) set toplevel state, then commit, so the request
     // signal fired while scheduling a configure would have asserted
     // (see xdg_handle_request_maximize). At map the surface is
-    // initialized and the configure is legal.
-    if (view->xdg_surface->toplevel && view->xdg_surface->toplevel->requested.maximized) {
+    // initialized and the configure is legal. Same for fullscreen
+    // (browsers with --kiosk / --start-fullscreen).
+    if (view->xdg_surface->toplevel) {
         struct wlr_xdg_toplevel *toplevel = view->xdg_surface->toplevel;
-        LOG_INFO("[XDG] Applying deferred maximize for %p", (void*)view);
-        wlr_xdg_toplevel_set_maximized(toplevel, true);
-        if (!wl_list_empty(&view->server->outputs)) {
-            struct havel_output *output =
-                wl_container_of(view->server->outputs.next, output, link);
-            if (output && output->output) {
-                wlr_xdg_toplevel_set_size(toplevel,
-                                          output->output->width, output->output->height);
+        if (toplevel->requested.maximized) {
+            LOG_INFO("[XDG] Applying deferred maximize for %p", (void*)view);
+            wlr_xdg_toplevel_set_maximized(toplevel, true);
+            if (!wl_list_empty(&view->server->outputs)) {
+                struct havel_output *output =
+                    wl_container_of(view->server->outputs.next, output, link);
+                if (output && output->output) {
+                    wlr_xdg_toplevel_set_size(toplevel,
+                                              output->output->width, output->output->height);
+                }
             }
+        }
+        if (toplevel->requested.fullscreen) {
+            LOG_INFO("[XDG] Applying deferred fullscreen for %p", (void*)view);
+            wlr_xdg_toplevel_set_fullscreen(toplevel, true);
         }
     }
 
@@ -1001,11 +1008,23 @@ static void xdg_handle_request_minimize(struct wl_listener *listener, void *data
 // NEW: Fullscreen request handler
 static void xdg_handle_request_fullscreen(struct wl_listener *listener, void *data) {
     struct havel_xdg_view *view = wl_container_of(listener, view, request_fullscreen);
-    
+
     if (!view || !view->xdg_surface->toplevel) return;
-    
+
+    // Same pre-initialization hazard as request_maximize: clients can
+    // request fullscreen before their first commit (browsers with
+    // --kiosk / --start-fullscreen do exactly this) and
+    // wlr_xdg_toplevel_set_fullscreen schedules a configure that
+    // asserts on an uninitialized surface. wlroots records the request
+    // in toplevel->requested; the map handler applies it.
+    if (!view->xdg_surface->initialized) {
+        LOG_INFO("[XDG] Fullscreen request for %p before initialization - "
+                 "will apply on map", (void*)view);
+        return;
+    }
+
     LOG_INFO("[XDG] Fullscreen request for view %p", (void*)view);
-    
+
     // Toggle fullscreen state
     struct wlr_xdg_toplevel *toplevel = view->xdg_surface->toplevel;
     bool fullscreen = toplevel->current.fullscreen;
