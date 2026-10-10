@@ -35,11 +35,19 @@ public:
     View* activeView() const { return m_activeView; }
     void setActiveView(View* view);
 
+    // Next cascade index for stacking spawn (wraps every 8 windows).
+    // Exposed for the layout cascade on Server::onViewMapped.
+    int nextCascadeIndex();
+
 private:
     uint32_t m_id;
     std::vector<View*> m_views;  // Non-owning raw pointers
-    bool m_tilingEnabled = true;
+    // Default floating/stacking: windows open as floating and get a
+    // stair-stepped spawn position (see Server::arrangeWorkspace). Tile
+    // mode is opt-in per workspace via workspaceToggleTiling.
+    bool m_tilingEnabled = false;
     View* m_activeView = nullptr;
+    int m_cascadeCounter = 0;
 };
 
 } // namespace havel

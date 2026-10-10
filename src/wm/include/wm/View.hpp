@@ -44,6 +44,12 @@ public:
 
     bool hasFloatGeom() const { return m_haveFloatGeom; }
 
+    // Stacking cascade index: negative means never placed by the
+    // spawn cascade (xwayland windows that set their own initial x/y
+    // keep it). 0-based; cycles every 8 before wrapping.
+    int floatCascadeIndex() const { return m_cascadeIndex; }
+    void setFloatCascadeIndex(int idx) { m_cascadeIndex = idx; }
+
     // State
     bool isMapped() const { return m_mapped; }
     void setMapped(bool mapped);
@@ -67,8 +73,13 @@ private:
     uint32_t m_workspaceId = 0;
     Rect m_geom;
     Rect m_floatGeom;
-    bool m_floating = false;
+    // compositor is a stacking WM: new windows open floating and spawn
+    // with a cascading offset so each new window lands a step down-right
+    // of the last (see onViewMapped: the spawn offset). Tiling is
+    // opt-in via Workspace::setTilingEnabled.
+    bool m_floating = true;
     bool m_haveFloatGeom = false;
+    int m_cascadeIndex = -1;
     bool m_mapped = false;
     float m_opacity = 1.0f;  // Opacity for animations (0.0 - 1.0)
     

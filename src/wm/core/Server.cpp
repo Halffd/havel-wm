@@ -301,6 +301,21 @@ void Server::onViewMapped(View* view) {
     auto* ws = activeWorkspace();
     if (ws && ws->isTilingEnabled()) {
         arrangeWorkspace(view->workspaceId());
+    } else if (ws) {
+        // Stacking spawn: each new floating window gets the next offset
+        // in a down-right cascade so successive windows do not stack
+        // identically. Wraps after the eighth diagonal; an xwayland
+        // window that set its own position overrides this (default -
+        //1,-1). 24px is the decoration titlebar height plus a margin.
+        int N = view->floatCascadeIndex();
+        if (N < 0) {
+            int idx = ws->nextCascadeIndex();
+            int x = 40 + (idx % 8) * 40;
+            int y = 40 + (idx % 8) * 40;
+            view->setFloatCascadeIndex(idx);
+            setViewPosition(view, x, y, false);
+            LOG_INFO("[Server] stacking spawn #%d at (%d,%d)", idx, x, y);
+        }
     }
 }
 
