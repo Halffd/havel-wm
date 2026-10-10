@@ -405,6 +405,19 @@ struct havel_xwayland_view {
     struct wl_listener associate;
     struct wl_listener dissociate;
     bool scene_surface_created;
+
+    // Cascade spawn: X clients (xred) silently request (40,40) with
+    // their OWN configure event, which wlroots honors by updating
+    // wlr_xwayland_surface->position at map commit. Without a late
+    // override hook, the compositor's cascade position gets clobbered
+    // by every such configure (observed live: all five windows landed
+    // at (40,40) despite the clue in the log showing stacking spawn
+    // #0..4 at (40,40),(80,80),(120,120),(160,160),(200,200)).
+    // The cascade offset is stored here; the configure handler re-
+    // applies it after honoring the client-side resize.
+    int pending_cascade_x;  // -1 while unset (no cascade)
+    int pending_cascade_y;
+    struct wl_listener request_configure;  // xsurface->events.request_configure
 };
 
 // Forward function declarations
@@ -429,8 +442,15 @@ static void cpp_impl_view_set_position(void* view, int x, int y) {
         }
     } else if (kind == HAVEL_VIEW_XWAYLAND) {
         struct havel_xwayland_view *xwl = (struct havel_xwayland_view*)view;
+        // Cascade spawn means this position wins over any client
+        // configure that lands later (see xwayland_view_handle_configure).
+        xwl->pending_cascade_x = x;
+        xwl->pending_cascade_y = y;
         wlr_xwayland_surface_configure(xwl->xsurface, x, y,
                                        xwl->xsurface->width, xwl->xsurface->height);
+        if (xwl->scene_tree) {
+            wlr_scene_node_set_position(&xwl->scene_tree->node, x, y);
+        }
     }
 }
 
@@ -446,8 +466,9 @@ static void cpp_impl_view_set_size(void* view, int w, int h) {
     } else if (kind == HAVEL_VIEW_XWAYLAND) {
         struct havel_xwayland_view *xwl = (struct havel_xwayland_view*)view;
         if (xwl->xsurface) {
-            wlr_xwayland_surface_configure(xwl->xsurface,
-                                           xwl->xsurface->x, xwl->xsurface->y, w, h);
+            int x = xwl->pending_cascade_x >= 0 ? xwl->pending_cascade_x : xwl->xsurface->x;
+            int y = xwl->pending_cascade_y >= 0 ? xwl->pending_cascade_y : xwl->xsurface->y;
+            wlr_xwayland_surface_configure(xwl->xsurface, x, y, w, h);
         }
     }
 }
@@ -775,8 +796,12 @@ static void xdg_view_set_position(struct havel_xdg_view *view, int x, int y) {
 }
 
 static void xwayland_view_set_position(struct havel_xwayland_view *view, int x, int y) {
-    if (!view || !view->scene_tree) return;
-    // Geometry stored in C++ View now, not in C struct
+    if (!view || !view->scene_tree || !view->xsurface) return;
+    // Client-initiated placements: xwayland honors the (x,y) request ->
+    // compositor forwards it to the client (waiting for the configure
+    // event handler to ack the final position).
+    wlr_xwayland_surface_configure(view->xsurface, x, y,
+                                   view->xsurface->width, view->xsurface->height);
     wlr_scene_node_set_position(&view->scene_tree->node, x, y);
 }
 
@@ -1258,6 +1283,7 @@ static void xwayland_view_handle_destroy(struct wl_listener *listener, void *dat
     wl_list_remove(&view->destroy.link);
     wl_list_remove(&view->associate.link);
     wl_list_remove(&view->dissociate.link);
+    wl_list_remove(&view->request_configure.link);
 
     // Notify C++ layer - C++ destroys View object
     // DO NOT access view-> members after this point!
@@ -1288,6 +1314,13 @@ static void xwayland_view_handle_associate(struct wl_listener *listener, void *d
     if (view->scene_tree && view->xsurface && view->xsurface->surface) {
         wlr_scene_surface_create(view->scene_tree, view->xsurface->surface);
         view->scene_surface_created = true;
+
+        // There is no xwayland events.map: surfaces are always mapped
+        // while they exist; the C++ layer is told now (spawn offset,
+        // focus, thumbnail).
+        if (view->cpp_view) {
+            havel_cpp_on_view_mapped(view->server->cpp_server, view->cpp_view);
+        }
     } else {
         LOG_WARN("[XWayland] associate fired without a usable surface");
     }
@@ -1301,6 +1334,28 @@ static void xwayland_view_handle_dissociate(struct wl_listener *listener, void *
     // with it by wlroots. associate will fire again if the window
     // re-binds (the associate listener stays registered).
     view->scene_surface_created = false;
+}
+
+static void xwayland_view_handle_configure(struct wl_listener *listener, void *data) {
+    struct havel_xwayland_view *view = wl_container_of(listener, view, request_configure);
+    struct wlr_xwayland_surface_configure_event *event = data;
+
+    // Cascade override: clients that set their own position (x,
+    // otherwise 0) cannot fight the spawn cascade after map. The
+    // compositor's stacked spawn offset wins for these xwayland
+    // windows; the client-configured size (w,h) still applies.
+    if (view->pending_cascade_x >= 0) {
+        int cx = view->pending_cascade_x;
+        int cy = view->pending_cascade_y;
+        wlr_scene_node_set_position(&view->scene_tree->node, cx, cy);
+        wlr_xwayland_surface_configure(view->xsurface, cx, cy,
+                                       view->xsurface->width, view->xsurface->height);
+        LOG_INFO("[XWayland] re-applying cascade %d,%d over client (%d,%d)",
+                 cx, cy, event->x, event->y);
+        return;
+    }
+    wlr_xwayland_surface_configure(view->xsurface, event->x, event->y,
+                                   event->width, event->height);
 }
 
 static void server_new_xwayland_surface(struct wl_listener *listener, void *data) {
@@ -1334,8 +1389,17 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
     wl_signal_add(&xsurface->events.associate, &view->associate);
     view->dissociate.notify = xwayland_view_handle_dissociate;
     wl_signal_add(&xsurface->events.dissociate, &view->dissociate);
+    view->request_configure.notify = xwayland_view_handle_configure;
+    wl_signal_add(&xsurface->events.request_configure, &view->request_configure);
+    view->pending_cascade_x = -1;
+    view->pending_cascade_y = -1;
 
-    // Apply geometry
+    // Apply geometry: only when the X client requested a specific
+    // position (not 0,0 and not the -1 sentinel). The cascade spawn
+    // positions the scene node later; a client that asks for (40,40)
+    // must not overwrite it on every map (observed live: five xred
+    // windows all rendered at (40,40) - the fixed stacking cascade
+    // offsets were all clobbered by this unconditional call).
     bool has_position = (xsurface->x != 0 || xsurface->y != 0) &&
                         (xsurface->x != -1 && xsurface->y != -1);
     bool position_valid = false;
@@ -1343,13 +1407,9 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
         struct wlr_output *wlr_out = wlr_output_layout_output_at(server->output_layout,
                                                                xsurface->x, xsurface->y);
         position_valid = (wlr_out != NULL);
-    }
-
-    if (position_valid) {
-        xwayland_view_set_position(view, xsurface->x, xsurface->y);
-    } else {
-        xwayland_view_set_position(view, xsurface->x, xsurface->y);
-        // Geometry stored in C++ View now, not in C struct
+        if (position_valid) {
+            xwayland_view_set_position(view, xsurface->x, xsurface->y);
+        }
     }
 
     // Get window metadata from XWayland surface
@@ -3482,7 +3542,18 @@ bool scene_view_focus(SceneView* view) {
 
 void havel_wlr_set_view_position(void* c_view, int x, int y) {
     if (!c_view) return;
-    
+
+    // xwayland views need their cascade explicitly marked so the
+    // configure handler can re-apply it after the client requests
+    // its own (0,0)/spawn position at map time - see
+    // xwayland_view_handle_configure.
+    enum havel_view_kind* tag = (enum havel_view_kind*)c_view;
+    if (*tag == HAVEL_VIEW_XWAYLAND) {
+        struct havel_xwayland_view* xw = (struct havel_xwayland_view*)c_view;
+        xw->pending_cascade_x = x;
+        xw->pending_cascade_y = y;
+    }
+
     // Call the registered callback
     if (g_view_set_position) {
         g_view_set_position(c_view, x, y);

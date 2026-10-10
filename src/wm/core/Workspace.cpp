@@ -61,4 +61,8 @@ void Workspace::setActiveView(View* view) {
     m_activeView = view;
 }
 
+int Workspace::nextCascadeIndex() {
+    return m_cascadeCounter++;
+}
+
 } // namespace havel
