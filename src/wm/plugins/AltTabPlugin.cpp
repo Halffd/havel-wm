@@ -573,7 +573,9 @@ private:
             m_lastSig = ~0ull;
         }
 
-        // Signature over everything the user can see
+        // Signature over everything the user can see. m_columns is in it
+        // so a live config change (plugin_config from config.hv) rebuilds
+        // the grid on the next frame.
         uint64_t sig = 0;
         for (size_t i = 0; i < m_windows.size(); i++) {
             sig = sig * 131 + std::hash<std::string>{}(m_windows[i].title);
@@ -582,6 +584,7 @@ private:
         sig = sig * 131 + (uint64_t)m_scrollRow;
         sig = sig * 131 + (uint64_t)m_hoverCell;
         sig = sig * 131 + (uint64_t)(int)m_hoverBtn;
+        sig = sig * 131 + (uint64_t)m_columns;
         if (sig == m_lastSig) return;
         m_lastSig = sig;
 

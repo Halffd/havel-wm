@@ -37,6 +37,9 @@ using havel::Server;
  *   get_windows()           array of {id, app_id, title, workspace}
  *   get_workspace()         current workspace index
  *   log(msg)                compositor log (INFO)
+ *   plugin_config(plugin, key, value)
+ *                           set a plugin setting at runtime and apply it
+ *                           live, e.g. plugin_config("alt_tab", "columns", 2)
  *   keybind(spec, fn)       register a keybinding; fn is a Havel
  *                           closure invoked when the binding fires.
  *                           spec: "Meta+Return", "Alt+Tab", ...

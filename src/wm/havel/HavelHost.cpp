@@ -188,12 +188,13 @@ static int hf_set_brightness(HavelState* H, void*) {
 
 static int hf_notify(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    const char* summary = arg_str(H, 0);
-    const char* body = havel_gettop(H) >= 2 ? arg_str(H, 1) : "";
-    if (ctx && ctx->server && summary && *summary) {
+    // Copy immediately: havel_tostring shares one static buffer.
+    std::string summary = arg_str(H, 0) ? arg_str(H, 0) : "";
+    std::string body = havel_gettop(H) >= 2 && arg_str(H, 1) ? arg_str(H, 1) : "";
+    if (ctx && ctx->server && !summary.empty()) {
         // Same path the IPC notify command uses
-        std::string args = "{\"summary\":\"" + std::string(summary) +
-                           "\",\"body\":\"" + (body ? body : "") + "\"}";
+        std::string args = "{\"summary\":\"" + summary +
+                           "\",\"body\":\"" + body + "\"}";
         ctx->server->ipcNotify(args);
     }
     havel_pushnil(H);
@@ -203,6 +204,48 @@ static int hf_notify(HavelState* H, void*) {
 static int hf_log(HavelState* H, void*) {
     const char* msg = arg_str(H, 0);
     LOG_INFO("[Havel] %s", msg ? msg : "");
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// plugin_config(plugin, key, value): set a plugin setting from config.hv
+// and apply it live. Values are strings; numbers/bools are converted
+// here so `plugin_config("alt_tab", "columns", 4)` works.
+//
+//   plugin_config("alt_tab", "columns", 2)
+//   plugin_config("alt_tab", "monitor", "main")
+//   plugin_config("alt_tab", "keybinding", "Meta+Tab")
+static int hf_plugin_config(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    // Copy immediately: havel_tostring returns a shared static buffer, so
+    // holding several arg pointers at once aliases them all to the last
+    // converted value.
+    std::string plugin = arg_str(H, 0) ? arg_str(H, 0) : "";
+    std::string key = arg_str(H, 1) ? arg_str(H, 1) : "";
+    if (!ctx || !ctx->server || plugin.empty() || key.empty()) {
+        havel_pushnil(H);
+        return HAVEL_OK;
+    }
+
+    std::string value;
+    if (havel_gettop(H) >= 3) {
+        if (havel_isboolean(H, 2)) {
+            value = havel_toboolean(H, 2) ? "true" : "false";
+        } else if (havel_isnumber(H, 2)) {
+            double d = havel_tonumber(H, 2);
+            char buf[64];
+            if (d == (long long)d) snprintf(buf, sizeof buf, "%lld", (long long)d);
+            else snprintf(buf, sizeof buf, "%g", d);
+            value = buf;
+        } else {
+            const char* s = arg_str(H, 2);
+            value = s ? s : "";
+        }
+    }
+
+    PluginConfig::getInstance().setValue(plugin, key, value);
+    ctx->server->pluginManager().reloadPluginSettings(plugin);
+    printf("[Havel] plugin_config(%s, %s, %s)\n", plugin.c_str(), key.c_str(), value.c_str());
     havel_pushnil(H);
     return HAVEL_OK;
 }
@@ -287,12 +330,12 @@ static int hf_keybind(HavelState* H, void*) {
         havel_pushboolean(H, 0);
         return HAVEL_OK;
     }
-    const char* rawSpec = arg_str(H, 0);
+    std::string rawSpec = arg_str(H, 0) ? arg_str(H, 0) : "";
     int arg1type = havel_type(H, 1);
     // Any non-nil value qualifies: closures arrive as FUNCTION_OBJ_ID
     // values which don't satisfy the capi's TFUNCTION mapping over the
     // bridge. The runtime decides callable-ness at callback time.
-    if (!rawSpec || !*rawSpec || arg1type == HAVEL_TNIL) {
+    if (rawSpec.empty() || arg1type == HAVEL_TNIL) {
         LOG_WARN("[Havel] keybind: needs (\"Mods+Key\", fn)");
         havel_pushboolean(H, 0);
         return HAVEL_OK;
@@ -412,6 +455,8 @@ void HavelHost::registerHostFunctions() {
     havel_pushcfunction_with_ctx(m_H, hf_notify, nullptr, "notify");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_log, nullptr, "log");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_plugin_config, nullptr, "plugin_config");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_get_workspace, nullptr, "get_workspace");
     havel_pop(m_H, 1);

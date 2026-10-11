@@ -127,6 +127,15 @@ public:
         return m_plugins.empty();
     }
 
+    // Override a setting at runtime (config.hv / IPC). Takes effect for
+    // plugins that re-read it via loadConfig - call
+    // PluginManager::reloadPluginSettings(name) after setting to make a
+    // live plugin pick the value up.
+    void setValue(const std::string& pluginName, const std::string& key,
+                  const std::string& value) {
+        m_plugins[pluginName][key] = value;
+    }
+
     PluginConfig() = default;
 
 private:

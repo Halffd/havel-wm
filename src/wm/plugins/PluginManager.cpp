@@ -401,6 +401,19 @@ bool PluginManager::reloadConfig() {
     return true;
 }
 
+bool PluginManager::reloadPluginSettings(const std::string& name) {
+    for (auto& plugin : m_plugins) {
+        if (plugin->getName() == name) {
+            // Plugins read the global PluginConfig directly; the path is
+            // only a fallback for file-based setters.
+            loadPluginSettings(*plugin);
+            return true;
+        }
+    }
+    LOG_WARN("[PluginManager] reloadPluginSettings: no plugin named '%s'", name.c_str());
+    return false;
+}
+
 bool PluginManager::isPluginEnabled(const std::string& name) const {
     return m_config.isEnabled(name);
 }

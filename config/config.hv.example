@@ -1,0 +1,47 @@
+// Havel WM startup config
+//
+// Copy to ~/.config/havel-wm/config.hv; the compositor runs it at start.
+// Scripts execute synchronously before the frame loop - config-style
+// quick operations only, no blocking loops.
+
+// ---------------------------------------------------------------------
+// Plugin settings
+//
+// plugin_config(plugin, key, value) writes the setting and applies it to
+// the running plugin immediately.
+// ---------------------------------------------------------------------
+
+// Alt-Tab task switcher (Windows-style grid)
+plugin_config("alt_tab", "columns", 3)          // grid columns (default 3)
+plugin_config("alt_tab", "monitor", "cursor")   // cursor | main | fixed
+plugin_config("alt_tab", "monitorIndex", 0)     // used when monitor = fixed
+plugin_config("alt_tab", "thumbnailWidth", 360) // cell width in px
+plugin_config("alt_tab", "thumbnailHeight", 240)// cell height in px
+plugin_config("alt_tab", "maxVisibleWindows", 12)
+plugin_config("alt_tab", "bgColor", "0,0,0,0.7")        // dim behind the grid
+plugin_config("alt_tab", "borderColor", "1,1,1,1")      // selected cell border
+plugin_config("alt_tab", "textColor", "0.92,0.92,0.92,1")
+plugin_config("alt_tab", "keybinding", "Alt+Tab")       // cycle + select on release
+
+// ---------------------------------------------------------------------
+// Keybindings
+//
+// keybind(spec, fn) - spec is "Mods+Key"; the closure runs on press.
+// Modifiers: Ctrl, Alt, Shift, Meta (also Super/Logo).
+// ---------------------------------------------------------------------
+
+keybind("Meta+Return", fn() {
+    spawn("foot")
+})
+
+keybind("Meta+1", fn() {
+    workspace(0)
+})
+
+keybind("Meta+2", fn() {
+    workspace(1)
+})
+
+keybind("Meta+Shift+W", fn() {
+    notify("havel-wm", "config.hv is live")
+})

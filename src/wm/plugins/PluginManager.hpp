@@ -137,6 +137,11 @@ public:
      * Reload configuration (hot-reload)
      */
     bool reloadConfig();
+
+    // Re-read one plugin's settings from the current PluginConfig (used
+    // after setValue so a live plugin applies the new value without a
+    // full reload). Returns false if no plugin has that name.
+    bool reloadPluginSettings(const std::string& name);
     
     /**
      * Check if plugin is enabled in config
