@@ -34,6 +34,7 @@ public:
     virtual std::vector<View*> getViewsInWorkspace(uint32_t workspaceId) = 0;
     virtual View* getViewById(uint64_t id) = 0;
     virtual void focusViewById(uint64_t id) = 0;
+    virtual void moveViewToWorkspace(View* view, uint32_t workspaceId) = 0;
 
     // Window metadata (from XDG surface)
     virtual std::string getViewAppId(View* view) = 0;

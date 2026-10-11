@@ -157,6 +157,7 @@ public:
     void closeView(View* view) override;
     void minimizeView(View* view) override;
     void toggleMaximizeView(View* view) override;
+    void moveViewToWorkspace(View* view, uint32_t workspaceId) override;
 
     // Window enumeration
     std::vector<View*> getAllViews() override;

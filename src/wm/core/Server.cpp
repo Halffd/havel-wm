@@ -943,6 +943,18 @@ void Server::moveViewToWorkspace(uint32_t ws) {
     }
 }
 
+void Server::moveViewToWorkspace(View* view, uint32_t ws) {
+    if (!view || ws >= WORKSPACE_COUNT) return;
+    auto* currentWs = m_workspaces[view->workspaceId()].get();
+    if (currentWs) currentWs->removeView(view);
+    view->setWorkspaceId(ws);
+    if (auto* targetWs = m_workspaces[ws].get()) {
+        targetWs->addView(view);
+        LOG_INFO("Moved view %p to workspace %u", (void*)view, ws);
+        arrangeWorkspace(ws);
+    }
+}
+
 void Server::moveViewToWorkspaceRelative(bool next) {
     auto* ws = activeWorkspace();
     if (ws && ws->activeView()) {
@@ -1383,6 +1395,30 @@ bool Server::startIPCServer(const std::string& socketPath) {
 
     m_ipcServer = std::make_unique<IPCServer>(m_windowManager);
 
+    // Cursor control: IPCServer owns the handlers (they lived as stubs in
+    // the command table), but only Server has the compositor handle, so
+    // the real wlr_cursor warp/query lives here and the handlers call
+    // back through these.
+    m_ipcServer->setCursorWarpCallback([this](int x, int y) -> bool {
+        if (!m_nativeHandle) return false;
+        havel_wlr_warp_pointer((struct havel_wlr_server*)m_nativeHandle,
+                               (double)x, (double)y);
+        return true;
+    });
+    m_ipcServer->setCursorQueryCallback([this](int* x, int* y) -> bool {
+        if (!m_nativeHandle || !x || !y) return false;
+        double px = -1, py = -1;
+        havel_wlr_get_pointer((struct havel_wlr_server*)m_nativeHandle, &px, &py);
+        *x = (int)px;
+        *y = (int)py;
+        return true;
+    });
+    m_ipcServer->setPointerClickCallback([this](uint32_t button, bool pressed) -> bool {
+        if (!m_nativeHandle) return false;
+        havel_wlr_click_pointer((struct havel_wlr_server*)m_nativeHandle, button, pressed);
+        return true;
+    });
+
     // Commands that are fully implemented inside IPCServer. The table pairs
     // each method name with its handler; args are passed through unchanged.
     struct SelfCommand {
@@ -1413,6 +1449,7 @@ bool Server::startIPCServer(const std::string& socketPath) {
         {"stop_recording",         nullptr, &IPCServer::handleStopRecording},
         {"get_cursor_position",    nullptr, &IPCServer::handleGetCursorPosition},
         {"warp_cursor",            nullptr, &IPCServer::handleWarpCursor},
+        {"click_pointer",          nullptr, &IPCServer::handleClickPointer},
         {"set_cursor_theme",       nullptr, &IPCServer::handleSetCursorTheme},
         {"set_cursor_size",        nullptr, &IPCServer::handleSetCursorSize},
         {"hide_cursor",            nullptr, &IPCServer::handleHideCursor},

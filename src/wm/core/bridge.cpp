@@ -237,7 +237,15 @@ void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int hei
     // persistent trees (OverlayRenderer::createPersistentTree) or
     // their content would blink off between draws.
     renderer->beginFrame(width, height);
-    pluginManager.renderOverlays(renderer);
+    // Render each plugin, then force the draw target back to the frame
+    // tree. A plugin that returns early between setTargetTree(tree) and
+    // setTargetTree(nullptr) would otherwise leak its persistent tree as
+    // the target, redirecting every later plugin's draws (observed: the
+    // Alt-Tab grid landed in a stale tree and never reached the screen).
+    for (auto& plugin : pluginManager.plugins()) {
+        plugin->renderOverlay(renderer);
+        renderer->setTargetTree(nullptr);
+    }
     renderer->endFrame();
 
 }

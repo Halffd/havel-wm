@@ -450,6 +450,12 @@ void PluginManager::toggleMaximizeView(View* view) {
     }
 }
 
+void PluginManager::moveViewToWorkspace(View* view, uint32_t workspaceId) {
+    if (!m_server || !view) return;
+    auto* server = static_cast<Server*>(m_server);
+    server->moveViewToWorkspace(view, workspaceId);
+}
+
 std::vector<View*> PluginManager::getAllViews() {
     if (!m_server) return {};
     auto* server = static_cast<Server*>(m_server);

@@ -1227,14 +1227,18 @@ std::string IPCServer::createErrorResponse(int code, const std::string& message)
 // ============================================================================
 
 std::string IPCServer::handleGetCursorPosition(const std::string& args) {
-    // Get cursor position from compositor
-    // This requires access to the cursor state from the C layer
-    // For now, return placeholder values
+    (void)args;
     json result;
+    if (!m_queryCursor) {
+        result["success"] = false;
+        result["error"] = "cursor query not wired to the compositor";
+        return result.dump();
+    }
+    int x = -1, y = -1;
+    m_queryCursor(&x, &y);
     result["success"] = true;
-    result["x"] = 0;
-    result["y"] = 0;
-    result["message"] = "Cursor position retrieval requires compositor integration";
+    result["x"] = x;
+    result["y"] = y;
     return result.dump();
 }
 
@@ -1248,15 +1252,36 @@ std::string IPCServer::handleWarpCursor(const std::string& args) {
     
     int x = extractJsonInt(args, "x", 0);
     int y = extractJsonInt(args, "y", 0);
-    
-    // Warp cursor to position
-    // This requires access to wlr_cursor from the C layer
-    // For now, return success message
+
     json result;
+    if (!m_warpCursor) {
+        result["success"] = false;
+        result["error"] = "cursor warp not wired to the compositor";
+        return result.dump();
+    }
+    m_warpCursor(x, y);
     result["success"] = true;
     result["x"] = x;
     result["y"] = y;
-    result["message"] = "Cursor warping requires compositor integration";
+    return result.dump();
+}
+
+std::string IPCServer::handleClickPointer(const std::string& args) {
+    int button = extractJsonInt(args, "button", 0x110);  // BTN_LEFT
+    bool pressed = extractJsonBool(args, "pressed", true);
+    bool release = extractJsonBool(args, "release", false);
+    if (release) pressed = false;
+
+    json result;
+    if (!m_clickPointer) {
+        result["success"] = false;
+        result["error"] = "pointer click not wired to the compositor";
+        return result.dump();
+    }
+    m_clickPointer((uint32_t)button, pressed);
+    result["success"] = true;
+    result["button"] = button;
+    result["pressed"] = pressed;
     return result.dump();
 }
 

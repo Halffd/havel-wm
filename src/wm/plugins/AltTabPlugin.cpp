@@ -70,10 +70,22 @@ public:
   void loadConfig(const std::string& configPath) override {
     auto& config = PluginConfig::getInstance();
 
-    m_thumbnailWidth = config.getIntValue("alt_tab", "thumbnailWidth", 500);
-        m_thumbnailHeight = config.getIntValue("alt_tab", "thumbnailHeight", 375);
-        m_maxVisibleWindows = config.getIntValue("alt_tab", "maxVisibleWindows", 5);
-        
+    m_thumbnailWidth = config.getIntValue("alt_tab", "thumbnailWidth", 360);
+        m_thumbnailHeight = config.getIntValue("alt_tab", "thumbnailHeight", 240);
+        m_maxVisibleWindows = config.getIntValue("alt_tab", "maxVisibleWindows", 12);
+        m_columns = std::max(1, config.getIntValue("alt_tab", "columns", 3));
+
+        // Monitor targeting: "cursor" (output under the pointer),
+        // "main"/"primary" (primary output), or a plain number =
+        // fixed output index. With one output all resolve identically;
+        // multi-output mapping lands when CompositorAPI enumerates
+        // outputs.
+        std::string mon = config.getValue("alt_tab", "monitor", "cursor");
+        if (mon == "main" || mon == "primary") m_monitor = Monitor::Main;
+        else if (mon == "fixed") m_monitor = Monitor::Fixed;
+        else m_monitor = Monitor::Cursor;
+        m_fixedMonitorIndex = std::max(0, config.getIntValue("alt_tab", "monitorIndex", 0));
+
     // Colors: "R,G,B,A"
     std::string bgColor = config.getValue("alt_tab", "backgroundColor", "0.0,0.0,0.0,0.7");
         sscanf(bgColor.c_str(), "%f,%f,%f,%f", 
@@ -87,8 +99,11 @@ public:
         sscanf(textColor.c_str(), "%f,%f,%f,%f", 
                &m_textColor[0], &m_textColor[1], &m_textColor[2], &m_textColor[3]);
         
-        printf("[AltTab] Config loaded (thumbnail=%dx%d, max=%d)\n",
-               m_thumbnailWidth, m_thumbnailHeight, m_maxVisibleWindows);
+        printf("[AltTab] Config loaded (cell=%dx%d, columns=%d, max=%d, monitor=%s)\n",
+               m_thumbnailWidth, m_thumbnailHeight, m_columns,
+               m_maxVisibleWindows,
+               m_monitor == Monitor::Cursor ? "cursor" :
+               m_monitor == Monitor::Main ? "main" : "fixed");
 
         // Configurable trigger binding (default Alt+Tab): the cycle keysym
         // is the keysym from the spec; the Alt modifier is derived from it.
@@ -138,10 +153,71 @@ public:
     case XKB_KEY_Return: // Enter
     case XKB_KEY_KP_Enter:
       select();
-                return true;
+      return true;
+
+    // Grid navigation: arrows move the selection (auto-scroll follows)
+    case XKB_KEY_Right:
+        navigate(1);
+        return true;
+    case XKB_KEY_Left:
+        navigate(-1);
+        return true;
+    case XKB_KEY_Down:
+        navigate(m_columns);
+        return true;
+    case XKB_KEY_Up:
+        navigate(-m_columns);
+        return true;
+    }
+
+    return false;
+    }
+
+    // ---- Mouse: hover, wheel scroll, button hit-testing ----------------
+    // Hit-testing goes through the same layout helpers as the renderer
+    // so clicks land exactly on the drawn pixels.
+    void onMouseMotion(int x, int y) override {
+        if (!m_visible) return;
+        int cell = -1;
+        HoverBtn btn = buttonAt(x, y, cell);
+        if (cell != m_hoverCell || btn != m_hoverBtn) {
+            m_hoverCell = cell;
+            m_hoverBtn = btn;
         }
-        
-        return false;
+    }
+
+    void onMouseButton(uint32_t button, bool pressed, int x, int y) override {
+        if (!m_visible || !pressed) return;
+
+        // Wheel: scroll the grid (button 4 = up, 5 = down)
+        if (button == 4 || button == 5) {
+            int dir = (button == 5) ? 1 : -1;
+            m_scrollRow += dir * 1;
+            clampScroll();
+            return;
+        }
+
+        // Left press only
+        if (button != 0x110) return;  // BTN_LEFT
+
+        int cell = -1;
+        HoverBtn btn = buttonAt(x, y, cell);
+        if (cell < 0) {
+            // Click outside the panel: cancel (Windows behavior)
+            hide();
+            return;
+        }
+        switch (btn) {
+            case HoverBtn::Close: closeEntry(cell); return;
+            case HoverBtn::Hide:  hideEntry(cell);  return;
+            case HoverBtn::Move:  moveEntry(cell);  return;
+            case HoverBtn::None:
+            default:
+                break;
+        }
+        // Click on the cell body: select + activate
+        m_selectedIndex = cell;
+        select();
     }
     
   void onViewMap(const ViewEvent& event) override {
@@ -180,11 +256,37 @@ private:
   float m_bgColor[4];
   float m_borderColor[4];
   float m_textColor[4];
+
+  // Grid layout (Windows-style task switcher)
+  int m_columns = 3;
+  enum class Monitor { Cursor, Main, Fixed };
+  Monitor m_monitor = Monitor::Cursor;
+  int m_fixedMonitorIndex = 0;
+
+  // Grid geometry cache (computed in layoutGrid; shared by render +
+  // mouse hit-testing so clicks land where the pixels are)
+  Rect m_panelRect;
+  Rect m_gridRect;
+  int m_visibleRows = 1;
+  int m_scrollRow = 0;
+  int m_hoverCell = -1;
+  enum class HoverBtn { None, Close, Hide, Move };
+  HoverBtn m_hoverBtn = HoverBtn::None;
+  static constexpr int BTN_CLOSE = 0;
+  static constexpr int BTN_HIDE = 1;
+  static constexpr int BTN_MOVE = 2;
+  static constexpr int BTN_COUNT = 3;
+
     
     void show() {
         m_visible = true;
         m_selectedIndex = 0;
         m_reverse = false;
+        m_scrollRow = 0;
+        m_hoverCell = -1;
+        m_hoverBtn = HoverBtn::None;
+        m_visibleRows = 2;  // default until the first layoutGrid pass
+        m_lastSig = ~0ull;
         
     collectWindows();
         
@@ -298,10 +400,142 @@ private:
         } else if (m_selectedIndex >= (int)m_windows.size()) {
             m_selectedIndex = 0;
         }
-        
+
+        // Auto-scroll: keep the selected cell inside the visible rows
+        // (Windows task-switcher behavior: the grid follows the
+        // selection instead of the selection leaving the viewport).
+        int selRow = m_selectedIndex / m_columns;
+        if (selRow < m_scrollRow) m_scrollRow = selRow;
+        if (selRow >= m_scrollRow + m_visibleRows) {
+            m_scrollRow = selRow - m_visibleRows + 1;
+        }
+        clampScroll();
         printf("[AltTab] Selected: %s (%d/%zu)\n",
                m_windows[m_selectedIndex].title.c_str(),
                m_selectedIndex + 1, m_windows.size());
+    }
+
+    // ---- Grid geometry + hit-testing ---------------------------------
+    // Single source of truth: renderOverlay and the mouse handlers both
+    // go through these, so clicks always land on what was drawn.
+
+    void layoutGrid(int screenW, int screenH) {
+        // Panel: centered, sized to the grid plus header/footer chrome,
+        // capped to the screen. columns shrink when fewer windows than
+        // columns exist.
+        int cols = std::min(m_columns, std::max(1, (int)m_windows.size()));
+        int gap = 12;
+        int headerH = 34;
+        int footerH = 30;
+
+        int gridW = cols * m_thumbnailWidth + (cols + 1) * gap;
+        int rows = (int)((m_windows.size() + cols - 1) / cols);
+        int gridH = rows * (m_thumbnailHeight + gap) + gap;
+
+        int panelW = std::min(screenW - 24, gridW + 2 * gap);
+        int panelH = std::min(screenH - 24, headerH + gridH + footerH + 2 * gap);
+        m_visibleRows = std::max(1, (panelH - headerH - footerH - 2 * gap - gap)
+                                     / (m_thumbnailHeight + gap));
+
+        clampScroll();
+
+        m_panelRect = Rect{(screenW - panelW) / 2, (screenH - panelH) / 2, panelW, panelH};
+        m_gridRect = Rect{m_panelRect.x + gap,
+                          m_panelRect.y + headerH + gap,
+                          panelW - 2 * gap - 14,   // 14px reserved for scrollbar
+                          panelH - headerH - footerH - 2 * gap};
+    }
+
+    Rect cellRect(int index) const {
+        int rel = index - m_scrollRow * m_columns;
+        if (rel < 0) return Rect{};
+        int col = rel % m_columns;
+        int row = rel / m_columns;
+        int gap = 12;
+        return Rect{m_gridRect.x + gap + col * (m_thumbnailWidth + gap),
+                    m_gridRect.y + gap + row * (m_thumbnailHeight + gap),
+                    m_thumbnailWidth, m_thumbnailHeight};
+    }
+
+    Rect buttonRect(int index, int button) const {
+        Rect cell = cellRect(index);
+        // Button strip across the cell's top-right; 22x18 each, 4px gap
+        int bw = 22, bh = 18;
+        int x = cell.x + cell.w - (BTN_COUNT - button) * (bw + 4) - 4;
+        int y = cell.y + 4;
+        return Rect{x, y, bw, bh};
+    }
+
+    int cellAt(int x, int y) const {
+        if (x < m_gridRect.x || y < m_gridRect.y ||
+            x >= m_gridRect.x + m_gridRect.w || y >= m_gridRect.y + m_gridRect.h) {
+            return -1;
+        }
+        int rel = (y - m_gridRect.y) / (m_thumbnailHeight + 12);
+        int col = (x - m_gridRect.x) / (m_thumbnailWidth + 12);
+        if (col >= m_columns) return -1;
+        int index = (m_scrollRow + rel) * m_columns + col;
+        if (index < 0 || index >= (int)m_windows.size()) return -1;
+        Rect r = cellRect(index);
+        if (x < r.x || y < r.y || x >= r.x + r.w || y >= r.y + r.h) return -1;
+        return index;
+    }
+
+    HoverBtn buttonAt(int x, int y, int& cell) const {
+        cell = cellAt(x, y);
+        if (cell < 0) return HoverBtn::None;
+        for (int b = 0; b < BTN_COUNT; b++) {
+            Rect r = buttonRect(cell, b);
+            if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) {
+                return (HoverBtn)(b + 1);  // enum starts at None
+            }
+        }
+        return HoverBtn::None;
+    }
+
+    void clampScroll() {
+        int rows = (int)((m_windows.size() + m_columns - 1) / m_columns);
+        int maxScroll = std::max(0, rows - m_visibleRows);
+        if (m_scrollRow > maxScroll) m_scrollRow = maxScroll;
+        if (m_scrollRow < 0) m_scrollRow = 0;
+    }
+
+    void closeEntry(int index) {
+        if (index < 0 || index >= (int)m_windows.size()) return;
+        if (View* v = (View*)m_windows[index].viewPtr) {
+            m_api->closeView(v);
+        }
+        removeEntry(index);
+    }
+
+    void hideEntry(int index) {
+        if (index < 0 || index >= (int)m_windows.size()) return;
+        if (View* v = (View*)m_windows[index].viewPtr) {
+            m_api->minimizeView(v);
+        }
+        removeEntry(index);
+    }
+
+    void moveEntry(int index) {
+        if (index < 0 || index >= (int)m_windows.size()) return;
+        uint32_t target = (m_api->getActiveWorkspace() + 1) % m_api->getWorkspaceCount();
+        if (View* v = (View*)m_windows[index].viewPtr) {
+            m_api->moveViewToWorkspace(v, target);
+        }
+        removeEntry(index);
+    }
+
+    void removeEntry(int index) {
+        if (index < 0 || index >= (int)m_windows.size()) return;
+        m_windows.erase(m_windows.begin() + index);
+        if (m_selectedIndex >= (int)m_windows.size()) {
+            m_selectedIndex = (int)m_windows.size() - 1;
+        }
+        if (m_selectedIndex < 0) m_selectedIndex = 0;
+        clampScroll();
+        m_hoverCell = -1;
+        m_hoverBtn = HoverBtn::None;
+        if (m_windows.empty()) hide();
     }
     
     void select() {
@@ -325,152 +559,175 @@ private:
     void renderOverlay(void* rendererPtr) override {
         if (!m_visible || !rendererPtr) return;
 
-        // Draw into a PERSISTENT tree, rebuilt only when the selection
-        // or window set changes. The frame tree is cleared every frame,
-        // so drawing there would either spin the render loop at full
-        // CPU (per-frame redraw of the full-screen dim - observed live)
-        // or blink between throttled draws.
+        // Draw into a PERSISTENT tree under the overlay layer. Rects drawn
+        // into the per-frame tree did not reach the output in this wlroots
+        // build (observed live), while persistent trees do - so the
+        // switcher follows the proven path. The tree is created lazily and
+        // its contents rebuilt only when the visible state (selection,
+        // hover, scroll, window set) changes.
+        OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+        m_renderer = renderer;
+        if (!m_tree) {
+            m_tree = renderer->createPersistentTree();
+            if (!m_tree) return;
+            m_lastSig = ~0ull;
+        }
+
+        // Signature over everything the user can see
         uint64_t sig = 0;
         for (size_t i = 0; i < m_windows.size(); i++) {
             sig = sig * 131 + std::hash<std::string>{}(m_windows[i].title);
         }
         sig = sig * 131 + (uint64_t)m_selectedIndex;
-        if (m_tree && sig == m_lastSig) return;
+        sig = sig * 131 + (uint64_t)m_scrollRow;
+        sig = sig * 131 + (uint64_t)m_hoverCell;
+        sig = sig * 131 + (uint64_t)(int)m_hoverBtn;
+        if (sig == m_lastSig) return;
         m_lastSig = sig;
 
-        OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
-        m_renderer = renderer;
-        if (m_tree) renderer->destroyPersistentTree(&m_tree);
+        // Rebuild: rect nodes cannot be cheaply re-laid-out, so drop the
+        // old tree and draw fresh content into a new one.
+        renderer->destroyPersistentTree(&m_tree);
         m_tree = renderer->createPersistentTree();
         if (!m_tree) return;
         renderer->setTargetTree(m_tree);
 
         int screenWidth = renderer->getScreenWidth();
         int screenHeight = renderer->getScreenHeight();
+        layoutGrid(screenWidth, screenHeight);
 
-    renderer->drawRect(0, 0, screenWidth, screenHeight, Color(m_bgColor[0], m_bgColor[1], m_bgColor[2], m_bgColor[3]));
-        
-    // Vignette
-    for (int i = 0; i < 3; i++) {
-            float vignetteAlpha = 0.08f * (i + 1);
-            int inset = i * 150;
-            renderer->drawRect(inset, inset, screenWidth - inset*2, screenHeight - inset*2, 
-                              Color(0.0f, 0.0f, 0.0f, vignetteAlpha));
+        // Full-screen dim
+        renderer->drawRect(0, 0, (float)screenWidth, (float)screenHeight,
+                           Color(m_bgColor[0], m_bgColor[1], m_bgColor[2], m_bgColor[3]));
+
+        // Panel background + border
+        renderer->drawRect((float)m_panelRect.x, (float)m_panelRect.y,
+                          (float)m_panelRect.w, (float)m_panelRect.h,
+                          Color(0.13f, 0.13f, 0.17f, 0.97f));
+        renderer->drawBorder(FloatRect((float)m_panelRect.x, (float)m_panelRect.y,
+                                       (float)m_panelRect.w, (float)m_panelRect.h),
+                             Color(m_borderColor[0]*0.6f, m_borderColor[1]*0.6f,
+                                   m_borderColor[2]*0.6f, 0.8f), 1.0f);
+
+        // Header: title + counter
+        char countText[48];
+        snprintf(countText, sizeof(countText), "Windows - %d / %zu",
+                 m_selectedIndex + 1, m_windows.size());
+        renderer->drawText(countText, (float)(m_panelRect.x + 12),
+                          (float)(m_panelRect.y + 10), 16.0f,
+                          Color(m_textColor[0], m_textColor[1], m_textColor[2], 1.0f));
+
+        if (m_windows.empty() || m_selectedIndex < 0 ||
+            m_selectedIndex >= (int)m_windows.size()) {
+            renderer->setTargetTree(nullptr);
+            return;
         }
 
-        if (m_windows.empty()) return;
+        // Visible cells: row-major grid, scrolled by m_scrollRow
+        int firstIdx = m_scrollRow * m_columns;
+        int lastIdx = std::min((int)m_windows.size(),
+                               (m_scrollRow + m_visibleRows) * m_columns);
+        for (int index = firstIdx; index < lastIdx; index++) {
+            const WindowEntry& entry = m_windows[index];
+            Rect cell = cellRect(index);
+            bool isSelected = (index == m_selectedIndex);
+            bool isHovered = (index == m_hoverCell);
 
-    if (m_selectedIndex < 0 || m_selectedIndex >= (int)m_windows.size()) {
-            m_selectedIndex = 0;
-        }
+            // Cell background
+            Color bg = isSelected ? Color(0.25f, 0.32f, 0.42f, 0.97f)
+                     : isHovered  ? Color(0.19f, 0.22f, 0.28f, 0.95f)
+                                  : Color(0.15f, 0.15f, 0.19f, 0.94f);
+            renderer->drawRect((float)cell.x, (float)cell.y,
+                              (float)cell.w, (float)cell.h, bg);
 
-    int thumbnailWidth = 500;
-    int thumbnailHeight = 375;
-    int spacing = 40;
-    int maxVisibleWindows = 5;
-    int visibleCount = std::min((int)m_windows.size(), maxVisibleWindows);
-    int totalWidth = visibleCount * (thumbnailWidth + spacing) - spacing;
-    int startX = (screenWidth - totalWidth) / 2;
-    int y = (screenHeight - thumbnailHeight) / 2 - 50;
-
-    int scrollOffset = 0;
-    if ((int)m_windows.size() > maxVisibleWindows) {
-      int firstVisible = std::max(0, m_selectedIndex - maxVisibleWindows / 2);
-            firstVisible = std::min(firstVisible, (int)m_windows.size() - maxVisibleWindows);
-            scrollOffset = firstVisible * (thumbnailWidth + spacing);
-        }
-
-    for (int i = 0; i < visibleCount; i++) {
-            int windowIndex = i + (scrollOffset / (thumbnailWidth + spacing));
-            if (windowIndex >= (int)m_windows.size()) break;
-            
-            int x = startX + i * (thumbnailWidth + spacing);
-            bool isSelected = (windowIndex == m_selectedIndex);
-            const WindowEntry& entry = m_windows[windowIndex];
-
-      // Drop shadow
-      float shadowAlpha = isSelected ? 0.4f : 0.3f;
-            for (int s = 3; s >= 1; s--) {
-                renderer->drawRect((float)(x + s*2), (float)(y + s*2 + 10), 
-                                  (float)thumbnailWidth, (float)thumbnailHeight,
-                                  Color(0.0f, 0.0f, 0.0f, shadowAlpha * (float)s / 3.0f));
-            }
-
-      // Fallback background
-      Color bgColor = isSelected ? Color(0.3f, 0.4f, 0.5f, 0.95f) : Color(0.2f, 0.2f, 0.2f, 0.92f);
-            renderer->drawRect((float)x, (float)y, (float)thumbnailWidth, (float)thumbnailHeight, bgColor);
-
-      if (entry.textureId != 0) {
-                renderer->drawTexture(entry.textureId,
-                                      (float)x, (float)y,
-                                      (float)thumbnailWidth, (float)thumbnailHeight,
-                                      1.0f);
-            }
-
-      if (isSelected) {
-        for (int g = 2; g >= 1; g--) {
-                    float glowAlpha = 0.4f * (float)g / 2.0f;
-                    int glowOffset = g * 2;
-                    renderer->drawRect((float)(x - glowOffset), (float)(y - glowOffset),
-                                      (float)(thumbnailWidth + glowOffset*2), (float)(thumbnailHeight + glowOffset*2),
-                                      Color(m_borderColor[0], m_borderColor[1], m_borderColor[2], glowAlpha));
-                }
-            }
-
-      Color borderColor = isSelected ? Color(m_borderColor[0], m_borderColor[1], m_borderColor[2], m_borderColor[3])
-                                           : Color(m_borderColor[0]*0.5f, m_borderColor[1]*0.5f, m_borderColor[2]*0.5f, m_borderColor[3]*0.5f);
-            renderer->drawBorder(FloatRect((float)x, (float)y, (float)thumbnailWidth, (float)thumbnailHeight), borderColor, isSelected ? 4.0f : 2.0f);
-
-      if (entry.iconTextureId != 0) {
-                int iconX = x + thumbnailWidth - entry.iconSize - 8;
-                int iconY = y + thumbnailHeight - entry.iconSize - 8;
+            // Icon (real icon pixels, else placeholder)
+            if (entry.iconTextureId != 0) {
                 AppIconLoader* icons = AppIconLoader::getInstance();
                 const uint32_t* iconPixels = icons ? icons->getIconPixels(entry.iconTextureId) : nullptr;
                 int iw = 0, ih = 0;
                 if (icons) icons->getIconDimensions(entry.iconTextureId, &iw, &ih);
+                int iconSize = 28;
                 if (iconPixels && iw > 0 && ih > 0) {
                     renderer->drawPixels(iconPixels, iw, ih,
-                                          (float)iconX, (float)iconY,
-                                          (float)entry.iconSize, (float)entry.iconSize);
+                                        (float)(cell.x + 8), (float)(cell.y + 8),
+                                        (float)iconSize, (float)iconSize);
                 } else {
-                    // Placeholder square in the hash color
-                    renderer->drawRect((float)iconX, (float)iconY,
-                                      (float)entry.iconSize, (float)entry.iconSize,
+                    renderer->drawRect((float)(cell.x + 8), (float)(cell.y + 8),
+                                      (float)iconSize, (float)iconSize,
                                       Color(0.4f, 0.4f, 0.45f, 1.0f));
                 }
             }
 
-      const std::string& name = entry.appId;
-            renderer->drawText(name.c_str(), (float)(x + 15), (float)(y + thumbnailHeight - 35), 20.0f, Color(m_textColor[0], m_textColor[1], m_textColor[2], m_textColor[3]));
+            // Title (truncated to the cell width)
+            std::string label = entry.appId.empty() ? entry.title : entry.appId;
+            float maxTextW = (float)cell.w - 16.0f;
+            float estW = (float)label.size() * 9.0f;
+            while (label.size() > 3 && estW > maxTextW) {
+                label.resize(label.size() - 4);
+                estW = (float)label.size() * 9.0f;
+            }
+            renderer->drawText(label.c_str(), (float)(cell.x + 8),
+                              (float)(cell.y + cell.h - 30.0f), 13.0f,
+                              Color(m_textColor[0], m_textColor[1],
+                                    m_textColor[2], 0.95f));
 
-      if (!entry.title.empty() && entry.title != name) {
-                renderer->drawText(entry.title.c_str(), (float)(x + 15), (float)(y + thumbnailHeight - 15), 14.0f, Color(m_textColor[0]*0.8f, m_textColor[1]*0.8f, m_textColor[2]*0.8f, m_textColor[3]));
+            // Action buttons: [X] close  [-] hide  [>] move-to-ws
+            const char* glyphs[BTN_COUNT] = {"X", "-", ">"};
+            for (int b = 0; b < BTN_COUNT; b++) {
+                Rect br = buttonRect(index, b);
+                bool btnHovered = (m_hoverBtn == (HoverBtn)(b + 1) && isHovered);
+                Color btnBg = btnHovered ? Color(0.85f, 0.3f, 0.25f, 0.95f)
+                                         : Color(0.32f, 0.32f, 0.38f, 0.9f);
+                if (b == BTN_HIDE && btnHovered)
+                    btnBg = Color(0.85f, 0.65f, 0.2f, 0.95f);
+                if (b == BTN_MOVE && btnHovered)
+                    btnBg = Color(0.3f, 0.6f, 0.85f, 0.95f);
+                renderer->drawRect((float)br.x, (float)br.y,
+                                  (float)br.w, (float)br.h, btnBg);
+                renderer->drawText(glyphs[b], (float)(br.x + 6),
+                                  (float)(br.y + 3), 11.0f,
+                                  Color(1.0f, 1.0f, 1.0f, 1.0f));
+            }
+
+            // Selected: accent border (the user-visible selection mark)
+            if (isSelected) {
+                renderer->drawBorder(FloatRect((float)cell.x - 2, (float)cell.y - 2,
+                                               (float)cell.w + 4, (float)cell.h + 4),
+                                     Color(m_borderColor[0], m_borderColor[1],
+                                           m_borderColor[2], 1.0f), 3.0f);
             }
         }
 
-    // Instruction bar
-    const char* instruction = "Alt+Tab: Cycle | Enter: Select | Esc: Cancel";
-        float textWidth = strlen(instruction) * 10.0f + 40.0f;
-        float textX = (screenWidth - textWidth) / 2.0f;
-        float textY = (float)(screenHeight - 55);
-        
-    renderer->drawRect(textX - 20.0f, textY - 5.0f, textWidth, 28.0f, Color(0.0f, 0.0f, 0.0f, 0.75f));
-        renderer->drawBorder(FloatRect(textX - 20.0f, textY - 5.0f, textWidth, 28.0f), Color(0.45f, 0.45f, 0.45f, 0.55f), 1.0f);
-        
-    renderer->drawText(instruction, textX + 20.0f, textY + 15.0f, 14.0f, Color(0.92f, 0.92f, 0.92f, 1.0f));
-        
-    // Window counter
-    char countText[32];
-        snprintf(countText, sizeof(countText), "%d / %zu", m_selectedIndex + 1, m_windows.size());
-        float countWidth = strlen(countText) * 10.0f + 30.0f;
-        float countX = screenWidth - countWidth - 20.0f;
-        
-    renderer->drawRect(countX - 15.0f, textY - 5.0f, countWidth, 28.0f, Color(0.1f, 0.1f, 0.15f, 0.85f));
-        renderer->drawBorder(FloatRect(countX - 15.0f, textY - 5.0f, countWidth, 28.0f), Color(m_borderColor[0], m_borderColor[1], m_borderColor[2], 0.55f), 1.0f);
-        
-    renderer->drawText(countText, countX + 15.0f, textY + 15.0f, 14.0f, Color(0.92f, 0.92f, 0.92f, 1.0f));
+        // Scrollbar (only when content overflows)
+        int totalRows = (int)((m_windows.size() + m_columns - 1) / m_columns);
+        if (totalRows > m_visibleRows) {
+            Rect track{m_gridRect.x + m_gridRect.w + 4, m_gridRect.y,
+                       8, m_gridRect.h};
+            renderer->drawRect((float)track.x, (float)track.y,
+                              (float)track.w, (float)track.h,
+                              Color(0.25f, 0.25f, 0.3f, 0.8f));
+            float frac = (float)m_visibleRows / totalRows;
+            int thumbH = std::max(24, (int)(track.h * frac));
+            int thumbY = track.y;
+            if (totalRows > m_visibleRows) {
+                thumbY += (int)((track.h - thumbH) *
+                                ((float)m_scrollRow / (totalRows - m_visibleRows)));
+            }
+            renderer->drawRect((float)track.x, (float)thumbY,
+                              (float)track.w, (float)thumbH,
+                              Color(0.55f, 0.6f, 0.7f, 0.9f));
+        }
 
-    renderer->setTargetTree(nullptr);
+        // Footer hints
+        const char* hint = "Enter: select | Esc: cancel | Wheel: scroll | X close | - hide | > move";
+        float hintW = strlen(hint) * 7.0f + 30.0f;
+        float hintX = m_panelRect.x + (m_panelRect.w - hintW) / 2.0f;
+        float hintY = m_panelRect.y + m_panelRect.h - 28.0f;
+        renderer->drawText(hint, hintX + 10.0f, hintY + 8.0f, 12.0f,
+                          Color(m_textColor[0]*0.75f, m_textColor[1]*0.75f,
+                                m_textColor[2]*0.75f, 0.9f));
+
+        renderer->setTargetTree(nullptr);
     }
 };
 

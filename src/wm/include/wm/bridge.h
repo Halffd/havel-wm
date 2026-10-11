@@ -152,6 +152,14 @@ uint32_t havel_wlr_capture_view_texture(void* c_view);
 // emits events.key, running the full compositor dispatch chain.
 void havel_wlr_inject_key(struct havel_wlr_server *server, uint32_t keycode, bool pressed);
 
+// Cursor control (IPC warp_cursor / click_pointer, io.* helpers). Moves
+// the real wlr_cursor and runs the same motion/button dispatch chain the
+// hardware path uses, so plugins (Alt-Tab hover/buttons, hot corners)
+// see it.
+void havel_wlr_warp_pointer(struct havel_wlr_server *server, double x, double y);
+void havel_wlr_click_pointer(struct havel_wlr_server *server, uint32_t button, bool pressed);
+void havel_wlr_get_pointer(struct havel_wlr_server *server, double *x, double *y);
+
 // Start the persistent self-injection keyboard (background wayland-client
 // connection to the compositor's own socket)
 void havel_self_kbd_start(void);

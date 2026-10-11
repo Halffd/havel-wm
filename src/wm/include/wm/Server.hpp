@@ -152,6 +152,9 @@ public:
     void setViewPosition(View* view, int x, int y, bool animate = true);
     void setViewOpacity(View* view, float alpha);
     void setViewGeometry(View* view, int x, int y, int w, int h);
+
+    // Move a specific view to a workspace (AltTab's move button)
+    void moveViewToWorkspace(View* view, uint32_t ws);
     
     // Background color (for wallpaper plugin)
     void setBackgroundColor(float r, float g, float b);

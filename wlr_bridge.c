@@ -1645,6 +1645,15 @@ static void handle_pointer_constraint(struct wl_listener *listener, void *data) 
 static void output_frame(struct wl_listener *listener, void *data) {
     struct havel_output *output = wl_container_of(listener, output, frame);
     struct havel_wlr_server *server = output->server;
+
+    // Keep the overlay layer on top of everything. wlroots appends new
+    // scene nodes (client surfaces, layer-shell surfaces) at the top,
+    // so an overlay that was raised once at init ends up underneath
+    // every window mapped afterwards - observed live: the Alt-Tab grid
+    // was drawn but clients painted over it.
+    if (server->overlay_layer) {
+        wlr_scene_node_raise_to_top(&server->overlay_layer->node);
+    }
     
     // Update workspace switch animation
     if (g_workspace_anim.animating) {
@@ -2060,12 +2069,16 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
 
     // Update XKB state
     if (keyboard->xkb_state) {
+        // xkb keymaps are indexed by evdev+8 (the X11 keycode offset);
+        // wlroots hands us raw evdev codes here, so the offset must be
+        // applied for the keysym/modifier lookup (observed live: Esc
+        // arrived as keycode 1 and resolved to keysym 0 without it).
         xkb_state_update_key(keyboard->xkb_state, event->keycode + 8,
                             event->state == WL_KEYBOARD_KEY_STATE_PRESSED ? XKB_KEY_DOWN : XKB_KEY_UP);
     }
 
     if (event->state == WL_KEYBOARD_KEY_STATE_PRESSED) {
-        const uint32_t keycode = event->keycode + 8;
+        const uint32_t keycode = event->keycode + 8;  // xkb evdev+8 index
         // Read modifiers from OUR xkb_state (updated above). wlroots's
         // keyboard->modifiers only refreshes on wlr_keyboard_notify_key,
         // which virtual keyboards never receive - so wlroots's copy stays
@@ -2181,7 +2194,7 @@ static void keyboard_handle_key(struct wl_listener *listener, void *data) {
     // select-on-alt-release depend on it). Releases are never "consumed"
     // for seat purposes: the matching press was already swallowed, so the
     // client never saw a press and must not see an orphan release.
-    const uint32_t keycode = event->keycode + 8;
+    const uint32_t keycode = event->keycode + 8;  // xkb evdev+8 index
     xkb_keysym_t keysym = 0;
     char key_char = 0;
     char utf8_buffer[8] = {0};
@@ -3770,7 +3783,7 @@ void havel_wlr_inject_key(struct havel_wlr_server *server, uint32_t keycode,
     if (!server) return;
 
     struct wlr_keyboard_key_event event = {0};
-    event.keycode = keycode;  // evdev convention; handler adds 8 for xkb
+    event.keycode = keycode;  // raw evdev; the key handler applies the +8 xkb offset
     event.state = pressed ? WL_KEYBOARD_KEY_STATE_PRESSED
                           : WL_KEYBOARD_KEY_STATE_RELEASED;
     event.time_msec = (uint32_t)get_monotonic_time_ms();
@@ -3797,6 +3810,38 @@ void havel_wlr_inject_key(struct havel_wlr_server *server, uint32_t keycode,
 
     LOG_WARN("[Inject] No keyboard available (self-keyboard not ready, no seat keyboard) - key 0x%x dropped",
              keycode);
+}
+
+// Cursor control. Moving wlr_cursor directly and running the same
+// dispatch chain as the hardware pointer keeps client focus, interactive
+// grabs and plugin overlays (Alt-Tab hover/buttons, hot corners) in sync.
+void havel_wlr_warp_pointer(struct havel_wlr_server *server, double x, double y) {
+    if (!server || !server->cursor) return;
+    wlr_cursor_warp(server->cursor, NULL, x, y);
+    havel_cpp_on_pointer_decoration_motion(server->cpp_server,
+                                           (int)server->cursor->x,
+                                           (int)server->cursor->y);
+    havel_cpp_on_pointer_motion(server->cpp_server, server->cursor->x, server->cursor->y);
+    process_cursor_motion(server, get_monotonic_time_ms());
+    LOG_DEBUG("[Inject] Pointer warped to (%.0f,%.0f)", server->cursor->x, server->cursor->y);
+}
+
+void havel_wlr_click_pointer(struct havel_wlr_server *server, uint32_t button, bool pressed) {
+    if (!server || !server->seat) return;
+    uint32_t t = (uint32_t)get_monotonic_time_ms();
+    wlr_seat_pointer_notify_button(server->seat, t, button,
+        pressed ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED);
+    havel_cpp_on_pointer_decoration_button(server->cpp_server, button, pressed,
+        (int)server->cursor->x, (int)server->cursor->y);
+    havel_cpp_on_pointer_button(server->cpp_server, button, pressed,
+        server->cursor->x, server->cursor->y);
+    LOG_DEBUG("[Inject] Pointer button 0x%x %s", button, pressed ? "down" : "up");
+}
+
+void havel_wlr_get_pointer(struct havel_wlr_server *server, double *x, double *y) {
+    if (!server || !server->cursor) { if (x) *x = -1; if (y) *y = -1; return; }
+    if (x) *x = server->cursor->x;
+    if (y) *y = server->cursor->y;
 }
 
 // Start the self-keyboard thread. Called from havel_wlr_run once the

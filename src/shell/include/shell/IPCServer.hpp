@@ -116,6 +116,13 @@ public:
     // Cursor Control
     std::string handleGetCursorPosition(const std::string& args);
     std::string handleWarpCursor(const std::string& args);
+    std::string handleClickPointer(const std::string& args);
+
+    // Cursor control hooks: the compositor side (Server) installs these so
+    // the IPC handlers can move the real wlr_cursor.
+    void setCursorWarpCallback(std::function<bool(int,int)> cb) { m_warpCursor = std::move(cb); }
+    void setCursorQueryCallback(std::function<bool(int*,int*)> cb) { m_queryCursor = std::move(cb); }
+    void setPointerClickCallback(std::function<bool(uint32_t,bool)> cb) { m_clickPointer = std::move(cb); }
     std::string handleSetCursorTheme(const std::string& args);
     std::string handleSetCursorSize(const std::string& args);
     std::string handleHideCursor(const std::string& args);
@@ -133,6 +140,11 @@ public:
     std::string createErrorResponse(int code, const std::string& message);
 
 private:
+
+    std::function<bool(int,int)> m_warpCursor;
+    std::function<bool(int*,int*)> m_queryCursor;
+    std::function<bool(uint32_t,bool)> m_clickPointer;
+
     // Message processing
     void processMessage(int clientFd, const std::string& msg);
     std::string processJsonRequest(const std::string& json);
