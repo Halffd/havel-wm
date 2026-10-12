@@ -7,7 +7,10 @@
 //   N    press+release N        (evdev keycode)
 //   +N   press N (hold)
 //   -N   release N
-// Example: havel-inject-keys +125 28 -125   (Meta down, Enter, Meta up)
+//   wN   wait N milliseconds
+// Example: inject_keys +125 28 -125        (Meta down, Enter, Meta up)
+// Example: inject_keys +56 15 w1500 -56    (hold Alt, tap Tab, wait 1.5s
+//          for a capture on the same keyboard, release Alt)
 //
 // The compositor's default keymap is requested implicitly: we send our
 // own xkb keymap so keysym computation matches the codes we inject.
@@ -111,6 +114,18 @@ int main(int argc, char** argv) {
         const char* a = argv[i];
         int hold = 0, release = 0;
         uint32_t code = 0;
+
+        // w<N>: wait N milliseconds without sending anything. Needed to
+        // hold a modifier across an external action - a harness capture,
+        // say - on the SAME virtual keyboard (a second injector would be
+        // a second keyboard, which does not share modifier state).
+        if (a[0] == 'w') {
+            int ms = atoi(a + 1);
+            if (ms > 0) usleep((useconds_t)ms * 1000);
+            t += (uint32_t)ms;
+            continue;
+        }
+
         if (a[0] == '+') { hold = 1; a++; }
         else if (a[0] == '-') { release = 1; a++; }
         code = (uint32_t)strtoul(a, NULL, 0);

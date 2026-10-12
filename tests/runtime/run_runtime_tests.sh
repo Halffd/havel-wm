@@ -333,6 +333,116 @@ kill "${PARITY_PID:-}" 2>/dev/null
 [ -n "${PARITY_HOME:-}" ] && rm -rf "$PARITY_HOME"
 LOG="${OLD_LOG:-$LOG}"
 
+# ---------------------------------------------------------------- phase 7
+echo "--- phase 7: alt-tab grid overlay"
+if [ ! -x "$INJ" ]; then
+    echo "SKIP: key injector not built"
+elif [ -z "$TERM_PROG" ]; then
+    echo "SKIP: no terminal client for switcher windows"
+else
+    # The switcher needs windows to list; earlier phases closed theirs.
+    MAPS_BEFORE=$(grep -acE "View mapped=true" "$LOG")
+    GRID_PIDS=""
+    for _ in 1 2; do
+        WAYLAND_DISPLAY=wayland-0 timeout 110 "$TERM_PROG" -e sh -c 'sleep 100' > /dev/null 2>&1 &
+        GRID_PIDS="$GRID_PIDS $!"
+        sleep 1
+    done
+    EMAP=1
+    for _ in $(seq 1 150); do
+        if [ "$(grep -acE 'View mapped=true' "$LOG")" -ge $((MAPS_BEFORE + 2)) ]; then
+            EMAP=0; break
+        fi
+        sleep 0.2
+    done
+    report "$EMAP" "two windows mapped for the switcher"
+
+    # Hold Alt, tap Tab, wait for the capture, release Alt - all on ONE
+    # virtual keyboard: modifier state is per keyboard, so a second
+    # injector would tap Tab without the Alt modifier.
+    WAYLAND_DISPLAY=wayland-0 timeout 30 "$INJ" +56 15 w2500 -56 > /dev/null 2>&1 &
+    INJ_PID=$!
+    sleep 1.0
+    GRID_UP="$(mktemp /tmp/havel-grid-up-XXXXXX.png)"
+    WAYLAND_DISPLAY=wayland-0 grim "$GRID_UP" 2>/dev/null
+    wait "$INJ_PID" 2>/dev/null
+    # The overlay must clear once the modifier lifts. Poll instead of a
+    # single fixed delay: the scene redraw after the node destroy lands
+    # within a frame or two, but the harness box is loaded.
+    GRID_DOWN="$(mktemp /tmp/havel-grid-down-XXXXXX.png)"
+    for _ in $(seq 1 10); do
+        WAYLAND_DISPLAY=wayland-0 grim "$GRID_DOWN" 2>/dev/null || { sleep 0.5; continue; }
+        CLEAR=$(python3 - "$GRID_DOWN" <<'CLEAR_PY'
+import sys
+from PIL import Image
+from collections import Counter
+try:
+    im = Image.open(sys.argv[1]).convert('RGB')
+    px = im.load(); w, h = im.size
+    c = Counter(px[x, y] for x in range(0, w, 3) for y in range(0, h, 3))
+    panel = c.get((33, 33, 43), 0) + c.get((64, 82, 108), 0)
+    print(1 if panel < 50 else 0)
+except Exception:
+    print(0)
+CLEAR_PY
+)
+        [ "${CLEAR:-0}" -eq 1 ] && break
+        sleep 0.5
+    done
+
+    GRID_STATS=$(python3 - "$GRID_UP" "$GRID_DOWN" <<'GRID_PY'
+import sys
+from PIL import Image
+from collections import Counter
+up, down = sys.argv[1], sys.argv[2]
+def census(f):
+    im = Image.open(f).convert('RGB')
+    px = im.load(); w, h = im.size
+    c = Counter(px[x, y] for x in range(0, w, 2) for y in range(0, h, 2))
+    return c, (w // 2) * (h // 2)
+def near(c, target, tol=6):
+    return sum(n for k, n in c.items() if all(abs(k[i] - target[i]) <= tol for i in range(3)))
+try:
+    c, total = census(up)
+except Exception as e:
+    print("dim=0 panel=0 cell=0 sel=0 total=1 gone=0"); sys.exit(0)
+dim   = near(c, (7, 7, 11))       # desktop under the 0.7 dim
+panel = near(c, (33, 33, 43))     # overlay panel
+cell  = near(c, (40, 40, 51))     # unselected cell
+sel   = near(c, (64, 82, 108))    # selected cell
+try:
+    c2, _ = census(down)
+    gone = 1 if (near(c2, (33, 33, 43)) < 50 and near(c2, (64, 82, 108)) < 50) else 0
+except Exception:
+    gone = 0
+print("dim=%d panel=%d cell=%d sel=%d total=%d gone=%d" % (dim, panel, cell, sel, total, gone))
+GRID_PY
+)
+    G() { echo "$GRID_STATS" | grep -o "$1=[0-9]*" | head -1 | cut -d= -f2; }
+    TOTAL=$(G total); TOTAL=${TOTAL:-1}
+    report $([ "$(G dim)"   -ge $((TOTAL / 5)) ] && echo 0 || echo 1) "overlay dimmed the desktop (dim=$(G dim)/$TOTAL)"
+    report $([ "$(G panel)" -ge $((TOTAL / 100)) ] && echo 0 || echo 1) "switcher panel drawn (panel=$(G panel))"
+    report $([ "$(G cell)"  -ge $((TOTAL / 200)) ] && echo 0 || echo 1) "switcher cells drawn (cells=$(G cell))"
+    report $([ "$(G sel)"   -ge $((TOTAL / 200)) ] && echo 0 || echo 1) "selected cell highlighted (sel=$(G sel))"
+    DOWNPANEL=$(python3 - "$GRID_DOWN" <<'DOWN_PY'
+import sys
+from PIL import Image
+from collections import Counter
+try:
+    im = Image.open(sys.argv[1]).convert('RGB'); px = im.load(); w, h = im.size
+    c = Counter(px[x, y] for x in range(0, w, 3) for y in range(0, h, 3))
+    print(c.get((33, 33, 43), 0) + c.get((64, 82, 108), 0))
+except Exception:
+    print(-1)
+DOWN_PY
+)
+    # CLEAR is the poll result (the capture right after the release can
+    # still show the last frame); it is the authoritative check.
+    report $([ "${CLEAR:-0}" -eq 1 ] && echo 0 || echo 1) "grid cleared after the modifier lifts (down_panel=$DOWNPANEL)"
+    rm -f "$GRID_UP" "$GRID_DOWN"
+    kill $GRID_PIDS 2>/dev/null
+fi
+
 # ---------------------------------------------------------------- teardown
 kill "$FOOT_PID" 2>/dev/null; FOOT_PID=""
 report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "zero crashes across all phases"
