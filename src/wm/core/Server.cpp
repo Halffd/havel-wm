@@ -1582,6 +1582,20 @@ bool Server::startIPCServer(const std::string& socketPath) {
         return ipcMoveToWorkspace(args);
     });
 
+    // Script/test helper: feed a scroll tick through the plugin dispatch
+    // path (the same route a real wheel takes via the C bridge).
+    m_ipcServer->registerCommand("scroll_pointer", [this](const std::string& args) -> std::string {
+        double dx = m_ipcServer->extractJsonFloat(args, "dx", 0.0f);
+        double dy = m_ipcServer->extractJsonFloat(args, "dy", 0.0f);
+        if (!m_nativeHandle) return m_ipcServer->createErrorResponse(-5, "no compositor handle");
+        havel_wlr_scroll_pointer((struct havel_wlr_server*)m_nativeHandle, dx, dy);
+        JsonObject r;
+        r["success"] = true;
+        r["dx"] = dx;
+        r["dy"] = dy;
+        return m_ipcServer->jsonToString(r);
+    });
+
     // ========================================================================
     // System Commands
     // ========================================================================

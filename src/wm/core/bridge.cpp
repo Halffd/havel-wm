@@ -178,6 +178,26 @@ void havel_cpp_on_pointer_decoration_button(struct havel_cpp_server* server, uin
     server->server->pluginManager().onMouseButton(button, pressed, x, y);
 }
 
+void havel_cpp_on_pointer_axis(struct havel_cpp_server* server, double dx, double dy) {
+    if (!server) return;
+    // Plugins consume scrolling through onMouseButton as wheel ticks
+    // (4 = up, 5 = down), the convention wlroots/X11 use for wheel
+    // buttons. One tick per axis event keeps the grid scroll step
+    // predictable regardless of the device's delta scaling.
+    uint32_t button = 0;
+    if (dy < 0) button = 4;
+    else if (dy > 0) button = 5;
+    else if (dx < 0) button = 4;   // horizontal scroll scrolls the grid too
+    else if (dx > 0) button = 5;
+    if (!button) return;
+
+    auto& pm = server->server->pluginManager();
+    int x = (int)server->server->cursorX();
+    int y = (int)server->server->cursorY();
+    pm.onMouseButton(button, true, x, y);
+    pm.onMouseButton(button, false, x, y);
+}
+
 void havel_cpp_set_output_geometry(struct havel_cpp_server* server, uint32_t workspace_id, int x, int y, int w, int h) {
     if (!server) return;
     havel::Rect geom{x, y, w, h};

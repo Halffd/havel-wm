@@ -2556,6 +2556,15 @@ static void server_cursor_axis(struct wl_listener *listener, void *data) {
     struct wlr_pointer_axis_event *event = data;
     wlr_seat_pointer_notify_axis(server->seat, event->time_msec, event->orientation,
         event->delta, event->delta_discrete, event->source, event->relative_direction);
+
+    // Forward scroll to plugins too: the seat notification above only
+    // reaches the focused client. Plugins (Alt-Tab grid, hot corners)
+    // consume wheel as scroll ticks - positive vertical delta = down.
+    if (event->orientation == WL_POINTER_AXIS_VERTICAL_SCROLL) {
+        havel_cpp_on_pointer_axis(server->cpp_server, 0.0, event->delta);
+    } else if (event->orientation == WL_POINTER_AXIS_HORIZONTAL_SCROLL) {
+        havel_cpp_on_pointer_axis(server->cpp_server, event->delta, 0.0);
+    }
 }
 
 static void server_cursor_frame(struct wl_listener *listener, void *data) {
@@ -3842,6 +3851,11 @@ void havel_wlr_get_pointer(struct havel_wlr_server *server, double *x, double *y
     if (!server || !server->cursor) { if (x) *x = -1; if (y) *y = -1; return; }
     if (x) *x = server->cursor->x;
     if (y) *y = server->cursor->y;
+}
+
+void havel_wlr_scroll_pointer(struct havel_wlr_server *server, double dx, double dy) {
+    if (!server || !server->cpp_server) return;
+    havel_cpp_on_pointer_axis(server->cpp_server, dx, dy);
 }
 
 // Start the self-keyboard thread. Called from havel_wlr_run once the

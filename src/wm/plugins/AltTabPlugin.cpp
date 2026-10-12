@@ -111,7 +111,11 @@ public:
         if (config.getKeybindingParsed("alt_tab", &mods, &sym)) {
             m_triggerMods = mods;
             m_triggerKeysym = sym;
-            m_selectOnModRelease = (mods & (1u << 3)) != 0;  // Alt in spec
+            // Select when the trigger modifier lifts. This is true for
+            // any modifier + key binding - the release path checks that
+            // the trigger mod is no longer held, so hardcoding Alt here
+            // (the old bug) broke Meta+Tab and other configs.
+            m_selectOnModRelease = (mods != 0);
             printf("[AltTab] Trigger binding from config: mods=0x%x keysym=0x%x\n",
                    mods, sym);
         }

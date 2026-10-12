@@ -59,6 +59,8 @@ void havel_cpp_on_view_destroyed(struct havel_cpp_server* server, void* c_view);
 bool havel_cpp_on_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char, const char* utf8);
 void havel_cpp_on_pointer_button(struct havel_cpp_server* server, uint32_t button, bool pressed, double x, double y);
 void havel_cpp_on_pointer_motion(struct havel_cpp_server* server, double x, double y);
+// Scroll ticks (wlr axis deltas). Positive dy = scroll down.
+void havel_cpp_on_pointer_axis(struct havel_cpp_server* server, double dx, double dy);
 void havel_cpp_on_pointer_decoration_motion(struct havel_cpp_server* server, int x, int y);
 void havel_cpp_on_pointer_decoration_button(struct havel_cpp_server* server, uint32_t button, bool pressed, int x, int y);
 
@@ -158,6 +160,8 @@ void havel_wlr_inject_key(struct havel_wlr_server *server, uint32_t keycode, boo
 // see it.
 void havel_wlr_warp_pointer(struct havel_wlr_server *server, double x, double y);
 void havel_wlr_click_pointer(struct havel_wlr_server *server, uint32_t button, bool pressed);
+// Feed a scroll tick through the plugin dispatch path (same as a wheel).
+void havel_wlr_scroll_pointer(struct havel_wlr_server *server, double dx, double dy);
 void havel_wlr_get_pointer(struct havel_wlr_server *server, double *x, double *y);
 
 // Start the persistent self-injection keyboard (background wayland-client
