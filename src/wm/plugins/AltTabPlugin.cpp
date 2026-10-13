@@ -245,9 +245,6 @@ private:
     bool m_reverse;
     std::vector<WindowEntry> m_windows;
     // Persistent overlay tree (rebuilt only on selection/window change)
-    wlr_scene_tree_t* m_tree = nullptr;
-    OverlayRenderer* m_renderer = nullptr;  // cached for hide-time teardown
-    uint64_t m_lastSig = ~0ull;  // window-set + selection redraw signature
     // Trigger binding (overridable via config "keybinding", default Alt+Tab)
     uint32_t m_triggerMods = 1u << 3;   // Mod1 (Alt)
     uint32_t m_triggerKeysym = XKB_KEY_Tab;
@@ -290,7 +287,6 @@ private:
         m_hoverCell = -1;
         m_hoverBtn = HoverBtn::None;
         m_visibleRows = 2;  // default until the first layoutGrid pass
-        m_lastSig = ~0ull;
         
     collectWindows();
         
@@ -306,12 +302,10 @@ private:
         m_visible = false;
         m_windows.clear();
         m_selectedIndex = 0;
-        m_lastSig = ~0ull;
-        // Drop the persistent overlay tree or the full-screen dim and
-        // thumbnails stay frozen on screen after the switch.
-        if (m_renderer && m_tree) {
-            m_renderer->destroyPersistentTree(&m_tree);
-        }
+        // The overlay lives in the per-frame tree, which is rebuilt every
+        // frame, so hiding is just dropping the visible flag - nothing to
+        // tear down (the old persistent tree needed an explicit destroy
+        // or the grid stayed frozen on screen).
         printf("[AltTab] Hidden\n");
     }
 
@@ -563,41 +557,17 @@ private:
     void renderOverlay(void* rendererPtr) override {
         if (!m_visible || !rendererPtr) return;
 
-        // Draw into a PERSISTENT tree under the overlay layer. Rects drawn
-        // into the per-frame tree did not reach the output in this wlroots
-        // build (observed live), while persistent trees do - so the
-        // switcher follows the proven path. The tree is created lazily and
-        // its contents rebuilt only when the visible state (selection,
-        // hover, scroll, window set) changes.
+        // Draw into the per-frame tree, like every other immediate-mode
+        // overlay (hot corners, notifications). The earlier claim that
+        // per-frame rects never reached the output was wrong: hot corners
+        // render through this same path, and what actually broke Alt-Tab
+        // was a draw-target leak - a plugin returning between
+        // setTargetTree(tree) and setTargetTree(nullptr) left later
+        // plugins drawing into its persistent tree. That leak is fixed in
+        // the render loop, so the switcher uses the plain path again.
+        // While the switcher is open its state is small and static, so
+        // redrawing the frame tree every frame costs nothing.
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
-        m_renderer = renderer;
-        if (!m_tree) {
-            m_tree = renderer->createPersistentTree();
-            if (!m_tree) return;
-            m_lastSig = ~0ull;
-        }
-
-        // Signature over everything the user can see. m_columns is in it
-        // so a live config change (plugin_config from config.hv) rebuilds
-        // the grid on the next frame.
-        uint64_t sig = 0;
-        for (size_t i = 0; i < m_windows.size(); i++) {
-            sig = sig * 131 + std::hash<std::string>{}(m_windows[i].title);
-        }
-        sig = sig * 131 + (uint64_t)m_selectedIndex;
-        sig = sig * 131 + (uint64_t)m_scrollRow;
-        sig = sig * 131 + (uint64_t)m_hoverCell;
-        sig = sig * 131 + (uint64_t)(int)m_hoverBtn;
-        sig = sig * 131 + (uint64_t)m_columns;
-        if (sig == m_lastSig) return;
-        m_lastSig = sig;
-
-        // Rebuild: rect nodes cannot be cheaply re-laid-out, so drop the
-        // old tree and draw fresh content into a new one.
-        renderer->destroyPersistentTree(&m_tree);
-        m_tree = renderer->createPersistentTree();
-        if (!m_tree) return;
-        renderer->setTargetTree(m_tree);
 
         int screenWidth = renderer->getScreenWidth();
         int screenHeight = renderer->getScreenHeight();
@@ -626,7 +596,6 @@ private:
 
         if (m_windows.empty() || m_selectedIndex < 0 ||
             m_selectedIndex >= (int)m_windows.size()) {
-            renderer->setTargetTree(nullptr);
             return;
         }
 
@@ -733,8 +702,6 @@ private:
         renderer->drawText(hint, hintX + 10.0f, hintY + 8.0f, 12.0f,
                           Color(m_textColor[0]*0.75f, m_textColor[1]*0.75f,
                                 m_textColor[2]*0.75f, 0.9f));
-
-        renderer->setTargetTree(nullptr);
     }
 };
 
