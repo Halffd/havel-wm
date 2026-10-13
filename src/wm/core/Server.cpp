@@ -945,6 +945,10 @@ void Server::moveViewToWorkspace(uint32_t ws) {
 
 void Server::moveViewToWorkspace(View* view, uint32_t ws) {
     if (!view || ws >= WORKSPACE_COUNT) return;
+    if (view->workspaceId() == ws) return;
+
+    // Move the compositor-side view between workspaces (this is what
+    // actually relocates the window on screen)...
     auto* currentWs = m_workspaces[view->workspaceId()].get();
     if (currentWs) currentWs->removeView(view);
     view->setWorkspaceId(ws);
@@ -952,6 +956,16 @@ void Server::moveViewToWorkspace(View* view, uint32_t ws) {
         targetWs->addView(view);
         LOG_INFO("Moved view %p to workspace %u", (void*)view, ws);
         arrangeWorkspace(ws);
+    }
+
+    // ...and keep the core window model in sync. The IPC window list
+    // (get_windows) reports Window::workspace(), while the screen follows
+    // the View; updating only one of them left the two disagreeing - the
+    // grid's move button relocated the window but get_windows still said
+    // workspace 0 (observed live), and the IPC move_to_workspace command
+    // changed the model without moving anything.
+    if (Window* window = m_coreWindowManager.getWindow(view)) {
+        window->setWorkspace(ws);
     }
 }
 
@@ -1949,7 +1963,15 @@ std::string Server::ipcMoveToWorkspace(const std::string& args) {
     if (!window) {
         return m_ipcServer->createErrorResponse(-5, "Window not found");
     }
-    m_coreWindowManager.moveWindowToWorkspace(window, static_cast<uint32_t>(workspace));
+    // Route through the one movement path so the compositor-side view
+    // follows the model. Calling the core manager alone only changed
+    // Window::workspace() and left the window on screen in its old
+    // workspace.
+    if (View* view = window->view()) {
+        moveViewToWorkspace(view, static_cast<uint32_t>(workspace));
+    } else {
+        m_coreWindowManager.moveWindowToWorkspace(window, static_cast<uint32_t>(workspace));
+    }
     return m_ipcServer->createSuccessResponse("Window moved to workspace " + std::to_string(workspace));
 }
 

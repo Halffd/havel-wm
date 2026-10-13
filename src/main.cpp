@@ -33,6 +33,13 @@ static void print_usage(const char* prog) {
 }
 
 int main(int argc, char* argv[]) {
+    // Line-buffer stdout so plugin/engine logging survives a redirect.
+    // printf output was block-buffered when stdout was a file, so the last
+    // few KB of diagnostics (Alt-Tab's showing/hidden lines, scene state)
+    // were lost whenever the compositor was killed rather than exited -
+    // which is exactly how it is run for testing and crash reports.
+    setvbuf(stdout, NULL, _IOLBF, 0);
+
     const char* startup_cmd = NULL;
     bool loading_screen_enabled = true;
     RendererBackend renderer = RENDERER_AUTO;
