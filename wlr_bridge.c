@@ -1962,8 +1962,17 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     output->destroy.notify = output_destroy;
     wl_signal_add(&wlr_output->events.destroy, &output->destroy);
 
-    // Fix dual monitor mirroring: position second monitor to the right
-    if (wl_list_empty(&server->outputs)) {
+    // A backend can announce the same output more than once (an enable or
+    // mode change re-emits new_output on some backends). Adding it to the
+    // layout again with add_auto parks it after everything already there,
+    // which is how a two-output headless boot ended up with the outputs at
+    // x=1280 and x=2560 and NOTHING at 0..1280 - every overlay drawn at the
+    // scene origin fell outside the layout and no plugin output was ever
+    // captured. Position each output once.
+    if (wlr_output_layout_get(server->output_layout, wlr_output)) {
+        LOG_DEBUG("[OUTPUT] %s already in the layout, keeping its position",
+                  wlr_output->name);
+    } else if (wl_list_empty(&server->outputs)) {
         // First monitor - position at (0,0)
         wlr_output_layout_add_auto(server->output_layout, wlr_output);
     } else {
