@@ -206,6 +206,7 @@ bool OverlayRenderer::initialize() {
     }
 
     m_frameTree = havel_scene_frame_tree_create(m_parent);
+    m_frameTrees[-1] = m_frameTree;
     if (!m_frameTree) {
         fprintf(stderr, "[OverlayRenderer] Failed to create frame tree\n");
         return false;
@@ -224,20 +225,31 @@ bool OverlayRenderer::initialize() {
 void OverlayRenderer::shutdown() {
     // Nodes/buffers are owned by the scene graph; it tears down with the
     // compositor. Clear our handles only.
-    havel_scene_frame_tree_destroy(&m_frameTree);
+    for (auto& entry : m_frameTrees) {
+        havel_scene_frame_tree_destroy(&entry.second);
+    }
+    m_frameTrees.clear();
+    m_frameTree = nullptr;
     m_text.reset();
     m_frameSceneBuffers.clear();
     m_initialized = false;
 }
 
-void OverlayRenderer::beginFrame(int screenWidth, int screenHeight) {
+void OverlayRenderer::beginFrame(int screenWidth, int screenHeight, int outputIndex) {
     if (!m_initialized) return;
     m_screenWidth = screenWidth;
     m_screenHeight = screenHeight;
 
-    // Clear last frame's nodes (immediate-mode plugins redraw every frame)
-    havel_scene_frame_tree_destroy(&m_frameTree);
-    m_frameTree = havel_scene_frame_tree_create(m_parent);
+    // Clear only THIS output's last frame (immediate-mode plugins redraw
+    // every frame). A single shared tree was cleared by every output's
+    // pass, so on a multi-monitor setup each output committed a tree the
+    // other pass had already emptied - no overlay ever reached the
+    // screen. One tree per output index fixes that and keeps memory
+    // bounded.
+    wlr_scene_tree_t** slot = &m_frameTrees[outputIndex];
+    havel_scene_frame_tree_destroy(slot);
+    *slot = havel_scene_frame_tree_create(m_parent);
+    m_frameTree = *slot;
     m_frameSceneBuffers.clear();
 }
 

@@ -74,7 +74,20 @@ void havel_cpp_update_animations(struct havel_cpp_server* server);
 void havel_cpp_get_background_color(struct havel_cpp_server* server, float* r, float* g, float* b);
 
 // Overlay rendering
-void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int height);
+// Which output the plugin overlay is being drawn for. The scene is global,
+// so overlays that need to sit on one monitor (Alt-Tab's monitor setting)
+// resolve against this: (x,y,w,h) is the output's box in scene
+// coordinates, index is its position in the output list, primary marks the
+// first output, under_cursor marks the output holding the pointer.
+struct havel_overlay_target {
+    int x, y, w, h;
+    int index;
+    int primary;
+    int under_cursor;
+};
+
+void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int height,
+                             const struct havel_overlay_target* target);
 
 // Application spawning (for App Launcher): fork+exec, no shell
 void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command);

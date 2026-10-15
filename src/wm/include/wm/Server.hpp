@@ -92,6 +92,21 @@ public:
     int getOutputHeight() const;
     void scheduleRedraw();
 
+    // Which output the current overlay pass is drawing for (set from the
+    // C side before plugins render). Plugins that target one monitor
+    // (Alt-Tab's monitor setting) resolve against this.
+    struct OverlayTarget {
+        int x = 0, y = 0, w = 0, h = 0;  // output box in scene coordinates
+        int index = 0;                   // position in the output list
+        bool primary = true;
+        bool underCursor = true;
+    };
+    void setOverlayTarget(int x, int y, int w, int h, int index,
+                          bool primary, bool underCursor) {
+        m_overlayTarget = OverlayTarget{x, y, w, h, index, primary, underCursor};
+    }
+    const OverlayTarget& overlayTarget() const { return m_overlayTarget; }
+
     // Native server handle for C bridge
     void setNativeHandle(void* handle) {
         m_nativeHandle = handle;
@@ -260,6 +275,7 @@ private:
     OverlayRenderer* m_overlayRenderer = nullptr;  // For plugin overlay rendering
 
     void* m_nativeHandle = nullptr;
+    OverlayTarget m_overlayTarget;
     std::unordered_map<uint32_t, Rect> m_outputGeoms;
     Animator m_animator;
     

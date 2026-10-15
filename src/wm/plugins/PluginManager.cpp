@@ -638,6 +638,21 @@ void PluginManager::scheduleRedraw() {
     // Handled by frame loop in C layer
 }
 
+CompositorAPI::OutputTarget PluginManager::currentOutputTarget() {
+    CompositorAPI::OutputTarget out;
+    if (!m_server) return out;
+    auto* server = static_cast<Server*>(m_server);
+    const auto& t = server->overlayTarget();
+    out.x = t.x;
+    out.y = t.y;
+    out.w = t.w;
+    out.h = t.h;
+    out.index = t.index;
+    out.primary = t.primary;
+    out.underCursor = t.underCursor;
+    return out;
+}
+
 void* PluginManager::getOverlayRenderer() {
     if (!m_server) return nullptr;
     auto* server = static_cast<Server*>(m_server);

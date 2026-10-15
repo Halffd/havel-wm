@@ -203,6 +203,7 @@ public:
     void setTemperatureForOutput(int output_index, int kelvin) override;
     void setBrightnessForOutput(int output_index, float brightness) override;
     void setZoomForOutput(int output_index, float zoom) override;
+    OutputTarget currentOutputTarget() override;
 
     void scheduleRedraw() override;
     void* getOverlayRenderer() override;

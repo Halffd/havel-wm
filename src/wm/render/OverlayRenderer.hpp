@@ -5,6 +5,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <unordered_map>
 
 // Opaque C-boundary types (see include/wm/render_c.h)
 typedef void wlr_scene_tree_t;
@@ -60,7 +61,12 @@ public:
     void shutdown();
 
     // Begin/end frame rendering
-    void beginFrame(int screenWidth, int screenHeight);
+    // outputIndex identifies the output being rendered. Each output keeps
+    // its own frame tree: one shared tree was destroyed by the next
+    // output's beginFrame before the first output committed, so with more
+    // than one monitor NO overlay reached the screen (observed live on a
+    // two-output headless setup). Pass -1 when there is no output context.
+    void beginFrame(int screenWidth, int screenHeight, int outputIndex = -1);
     void endFrame();
 
     // Primitive drawing
@@ -108,7 +114,10 @@ private:
     int m_screenHeight = 0;
 
     wlr_scene_tree_t* m_parent = nullptr;    // overlay layer (not owned)
-    wlr_scene_tree_t* m_frameTree = nullptr; // per-frame node container (scene-owned)
+    wlr_scene_tree_t* m_frameTree = nullptr; // frame tree of the output being drawn (scene-owned)
+    // One frame tree per output index, so each output's pass only clears
+    // its own container (see beginFrame).
+    std::unordered_map<int, wlr_scene_tree_t*> m_frameTrees;
     wlr_scene_tree_t* m_targetTree = nullptr; // active draw target override (not owned)
 
     // Text cache: rasterized lines keyed by (text, size, color)

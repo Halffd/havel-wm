@@ -227,8 +227,17 @@ void havel_cpp_get_background_color(struct havel_cpp_server* server, float* r, f
     server->server->getBackgroundColor(r, g, b);
 }
 
-void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int height) {
+void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int height,
+                             const struct havel_overlay_target* target) {
     if (!server || !server->server) return;
+
+    // Record which output this pass is for before plugins draw: overlays
+    // that target one monitor (Alt-Tab) read it through the plugin API.
+    if (target) {
+        server->server->setOverlayTarget(target->x, target->y, target->w, target->h,
+                                         target->index, target->primary != 0,
+                                         target->under_cursor != 0);
+    }
 
     // Get plugin manager and render overlays with the overlay renderer
     auto& pluginManager = server->server->pluginManager();
@@ -256,7 +265,7 @@ void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int hei
     // Plugins that redraw less often than every frame must draw into
     // persistent trees (OverlayRenderer::createPersistentTree) or
     // their content would blink off between draws.
-    renderer->beginFrame(width, height);
+    renderer->beginFrame(width, height, target ? target->index : -1);
     // Render each plugin, then force the draw target back to the frame
     // tree. A plugin that returns early between setTargetTree(tree) and
     // setTargetTree(nullptr) would otherwise leak its persistent tree as

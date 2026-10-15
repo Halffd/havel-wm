@@ -76,6 +76,18 @@ public:
     virtual void setBrightnessForOutput(int output_index, float brightness) = 0;
     virtual void setZoomForOutput(int output_index, float zoom) = 0;
     // Note: Scale requires scene graph extension (future)
+
+    // Output the current overlay pass is drawing for. renderOverlay runs
+    // once per output with the scene in global coordinates; overlays that
+    // belong on one monitor (Alt-Tab's monitor setting) pick the pass by
+    // index / primary / underCursor and offset their drawing by x,y.
+    struct OutputTarget {
+        int x = 0, y = 0, w = 0, h = 0;  // output box in scene coordinates
+        int index = 0;                   // position in the output list
+        bool primary = true;
+        bool underCursor = true;         // the pointer is on this output
+    };
+    virtual OutputTarget currentOutputTarget() = 0;
     
     // Rendering
     virtual void scheduleRedraw() = 0;

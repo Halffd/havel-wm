@@ -365,6 +365,11 @@ private:
             return;
         }
 
+        if (m_maxVisibleWindows > 0 && (int)m_windows.size() > m_maxVisibleWindows) {
+            m_windows.resize((size_t)m_maxVisibleWindows);
+            printf("[AltTab] Capped to maxVisibleWindows=%d\n", m_maxVisibleWindows);
+        }
+
         printf("[AltTab] Collected %zu windows on workspace %u\n", 
                m_windows.size(), currentWorkspace);
 
@@ -417,10 +422,12 @@ private:
     // Single source of truth: renderOverlay and the mouse handlers both
     // go through these, so clicks always land on what was drawn.
 
-    void layoutGrid(int screenW, int screenH) {
-        // Panel: centered, sized to the grid plus header/footer chrome,
-        // capped to the screen. columns shrink when fewer windows than
-        // columns exist.
+    void layoutGrid(int originX, int originY, int screenW, int screenH) {
+        // Panel: centered within the target output (originX/Y is that
+        // output's box in scene coordinates - the scene is global, so the
+        // grid must be offset or it lands on the first monitor). Sized to
+        // the grid plus header/footer chrome, capped to the output.
+        // Columns shrink when fewer windows than columns exist.
         int cols = std::min(m_columns, std::max(1, (int)m_windows.size()));
         int gap = 12;
         int headerH = 34;
@@ -437,7 +444,8 @@ private:
 
         clampScroll();
 
-        m_panelRect = Rect{(screenW - panelW) / 2, (screenH - panelH) / 2, panelW, panelH};
+        m_panelRect = Rect{originX + (screenW - panelW) / 2,
+                           originY + (screenH - panelH) / 2, panelW, panelH};
         m_gridRect = Rect{m_panelRect.x + gap,
                           m_panelRect.y + headerH + gap,
                           panelW - 2 * gap - 14,   // 14px reserved for scrollbar
@@ -569,12 +577,22 @@ private:
         // redrawing the frame tree every frame costs nothing.
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
 
-        int screenWidth = renderer->getScreenWidth();
-        int screenHeight = renderer->getScreenHeight();
-        layoutGrid(screenWidth, screenHeight);
+        // renderOverlay runs once per output. Pick the pass the configured
+        // monitor selects and skip the others, or the grid would appear on
+        // every monitor. Single-output setups satisfy all three modes.
+        CompositorAPI::OutputTarget out = m_api->currentOutputTarget();
+        bool wantOutput = false;
+        switch (m_monitor) {
+            case Monitor::Cursor: wantOutput = out.underCursor; break;
+            case Monitor::Main:   wantOutput = out.primary; break;
+            case Monitor::Fixed:  wantOutput = (out.index == m_fixedMonitorIndex); break;
+        }
+        if (!wantOutput) return;
 
-        // Full-screen dim
-        renderer->drawRect(0, 0, (float)screenWidth, (float)screenHeight,
+        layoutGrid(out.x, out.y, out.w, out.h);
+
+        // Dim the target output only
+        renderer->drawRect((float)out.x, (float)out.y, (float)out.w, (float)out.h,
                            Color(m_bgColor[0], m_bgColor[1], m_bgColor[2], m_bgColor[3]));
 
         // Panel background + border

@@ -1784,9 +1784,48 @@ static void output_frame(struct wl_listener *listener, void *data) {
         return;
     }
 
-    // Render overlays BEFORE committing scene
-    // This ensures overlays are composited into the frame
-    havel_cpp_draw_overlays(server->cpp_server, output->output->width, output->output->height);
+    // Overlays render before the scene commit so they composite into the
+    // frame. The target describes which output this is (scene box, index,
+    // primary, whether the pointer is on it) - plugin overlays that target
+    // one monitor need it.
+    struct havel_overlay_target overlay_target = {0, 0, output->output->width,
+                                                  output->output->height, 0, 1, 1};
+    {
+        // The output's own layout entry, not wlr_output_layout_get_box:
+        // get_box only takes a layout-wide or output box and returned the
+        // WHOLE layout rectangle for the primary (observed live: x=2560 on
+        // a 2560-wide dual-head layout), which laid the overlay out
+        // off-screen. The layout entry's x/y plus the output's mode size
+        // is the output's box.
+        struct wlr_output_layout_output *lo =
+            wlr_output_layout_get(server->output_layout, output->output);
+        if (lo) {
+            overlay_target.x = lo->x;
+            overlay_target.y = lo->y;
+            overlay_target.w = output->output->width;
+            overlay_target.h = output->output->height;
+        }
+        overlay_target.index = 0;
+        struct havel_output *o;
+        wl_list_for_each(o, &server->outputs, link) {
+            if (o == output) break;
+            overlay_target.index++;
+        }
+        overlay_target.primary = output->is_primary ? 1 : 0;
+        // With no cursor yet, fall back to the primary output: "cursor"
+        // must not mean "nowhere" before the pointer has moved.
+        if (server->cursor) {
+            struct wlr_output *cur_out = wlr_output_layout_output_at(
+                server->output_layout, server->cursor->x, server->cursor->y);
+            if (cur_out) {
+                overlay_target.under_cursor = (cur_out == output->output) ? 1 : 0;
+            } else {
+                overlay_target.under_cursor = overlay_target.primary;
+            }
+        }
+    }
+    havel_cpp_draw_overlays(server->cpp_server, output->output->width, output->output->height,
+                            &overlay_target);
 
     // Note: wlroots handles all actual screen rendering via wlr_scene_output_commit()
     // Our custom buffer import (SHM/DMA-BUF) is available for plugins that need
@@ -1928,24 +1967,34 @@ static void server_new_output(struct wl_listener *listener, void *data) {
         // First monitor - position at (0,0)
         wlr_output_layout_add_auto(server->output_layout, wlr_output);
     } else {
-        // Second (or subsequent) monitor - position to the right of previous
-        struct havel_output *last_output;
-        struct wlr_box last_box;
-        
-        // Get the last output in the list
-        struct wl_list *last_link = server->outputs.prev;
-        last_output = wl_container_of(last_link, last_output, link);
-        
-        // Get its position and size
-        wlr_output_layout_get_box(server->output_layout, last_output->output, &last_box);
-        
-        // Position this monitor to the right of the last one
-        int x = last_box.x + last_box.width;
-        int y = 0;
-        wlr_output_layout_add(server->output_layout, wlr_output, x, y);
-        
-        LOG_INFO("[OUTPUT] Positioned %s at (%d,%d) to the right of %s", 
-                 wlr_output->name, x, y, last_output->output->name);
+        // Second (or subsequent) monitor - position to the right of the
+        // previous one.
+        //
+        // The new output is already in server->outputs by now (inserted
+        // above), so reading the list tail measured the output against
+        // ITSELF: wlr_output_layout_get_box on an output that is not in
+        // the layout yet returns an empty box, every monitor after the
+        // first was placed at (0,0) and they all overlapped (observed
+        // live: "Positioned HEADLESS-1 at (0,0) to the right of
+        // HEADLESS-1"). Walk the list for the output before this one.
+        struct havel_output *prev = NULL;
+        struct havel_output *o;
+        wl_list_for_each(o, &server->outputs, link) {
+            if (o == output) break;
+            prev = o;
+        }
+        if (!prev) {
+            wlr_output_layout_add_auto(server->output_layout, wlr_output);
+        } else {
+            struct wlr_box prev_box;
+            wlr_output_layout_get_box(server->output_layout, prev->output, &prev_box);
+            int x = prev_box.x + prev_box.width;
+            int y = 0;
+            wlr_output_layout_add(server->output_layout, wlr_output, x, y);
+
+            LOG_INFO("[OUTPUT] Positioned %s at (%d,%d) to the right of %s",
+                     wlr_output->name, x, y, prev->output->name);
+        }
     }
 
     // Verify output state and scene graph
@@ -2711,6 +2760,17 @@ havel_wlr_server_t* havel_wlr_create(void) {
 
     server->output_layout = wlr_output_layout_create(server->display);
     server->scene = wlr_scene_create();
+
+    // Make the scene follow the output layout. Without this the scene has
+    // no idea where each output sits: every scene_output renders from
+    // (0,0), so on a multi-monitor setup anything positioned in layout
+    // coordinates - windows AND overlays - is drawn off-screen (observed
+    // live on a two-output headless boot: the layout is 2560 wide, windows
+    // were positioned at x=2801, and nothing from the second monitor
+    // reached the capture). Single-output boots never noticed because
+    // (0,0) is correct there. wlroots keeps scene_output positions in sync
+    // from here on, including output moves.
+    wlr_scene_attach_output_layout(server->scene, server->output_layout);
 
     // Background rect: created as the scene's FIRST child (bottom z),
     // before any workspace tree, so the wallpaper plugin's color
