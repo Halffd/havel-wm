@@ -36,6 +36,7 @@ static uint64_t get_monotonic_time_ms(void) {
 #include <wlr/types/wlr_input_device.h>
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_output.h>
+#include <wlr/types/wlr_damage_ring.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_pointer.h>
 #include <wlr/types/wlr_scene.h>
@@ -307,6 +308,7 @@ struct havel_output {
     struct wl_listener frame;
     struct wl_listener needs_frame;
     struct wl_listener destroy;
+    struct wl_listener damage;   // software-cursor / backend damage
 
     struct havel_wlr_server *server;
     bool is_primary;
@@ -1893,6 +1895,23 @@ static void output_frame(struct wl_listener *listener, void *data) {
 // frame committed. DRM chains frames via page-flip after a present, but
 // the headless backend never self-schedules - without this hook its
 // frame loop runs once and stalls.
+// Software cursors (and some backend logic) damage the output OUTSIDE the
+// scene graph: wlroots tells us about it here and expects us to repaint
+// that region. Without this the cursor is composited at each new position
+// but the previous one is never cleared - the pointer leaves a trail of
+// stale sprites across the screen (observed on DRM: repeated left_ptr
+// arrows in a capture after moving the pointer).
+static void output_damage(struct wl_listener *listener, void *data) {
+    struct havel_output *output = wl_container_of(listener, output, damage);
+    struct wlr_output_event_damage *event = data;
+    if (!output->scene_output || !event->damage) {
+        return;
+    }
+    // Buffer-local coordinates, same space the scene's damage ring uses.
+    wlr_damage_ring_add(&output->scene_output->damage_ring, event->damage);
+    wlr_output_schedule_frame(output->output);
+}
+
 static void output_needs_frame(struct wl_listener *listener, void *data) {
     struct havel_output *output = wl_container_of(listener, output, needs_frame);
     (void)data;
@@ -1990,6 +2009,9 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 
     output->needs_frame.notify = output_needs_frame;
     wl_signal_add(&wlr_output->events.needs_frame, &output->needs_frame);
+
+    output->damage.notify = output_damage;
+    wl_signal_add(&wlr_output->events.damage, &output->damage);
 
     output->destroy.notify = output_destroy;
     wl_signal_add(&wlr_output->events.destroy, &output->destroy);
