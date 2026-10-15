@@ -1596,6 +1596,21 @@ bool Server::startIPCServer(const std::string& socketPath) {
         return ipcMoveToWorkspace(args);
     });
 
+    // Cursor mode: "auto" lets wlroots use a hardware cursor plane when
+    // the backend has one, "software" forces the cursor to be composited
+    // into the framebuffer (visible on backends that only advertise a
+    // plane, and in captures).
+    m_ipcServer->registerCommand("set_cursor_mode", [this](const std::string& args) -> std::string {
+        std::string mode = m_ipcServer->extractJsonString(args, "mode", "auto");
+        bool software = (mode == "software" || mode == "soft");
+        if (!m_nativeHandle) return m_ipcServer->createErrorResponse(-5, "no compositor handle");
+        requestSoftwareCursor(software);
+        JsonObject r;
+        r["success"] = true;
+        r["mode"] = software ? "software" : "auto";
+        return m_ipcServer->jsonToString(r);
+    });
+
     // Script/test helper: feed a scroll tick through the plugin dispatch
     // path (the same route a real wheel takes via the C bridge).
     m_ipcServer->registerCommand("scroll_pointer", [this](const std::string& args) -> std::string {

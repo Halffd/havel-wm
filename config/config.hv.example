@@ -5,6 +5,19 @@
 // quick operations only, no blocking loops.
 
 // ---------------------------------------------------------------------
+// Pointer
+//
+// cursor_mode("auto")     hardware cursor plane when the backend has one
+//                         (wlroots' default choice)
+// cursor_mode("software") force the cursor into the framebuffer - use it
+//                         when the backend advertises a plane it does not
+//                         composite, or to have the cursor show up in
+//                         screen captures
+// ---------------------------------------------------------------------
+
+cursor_mode("auto")
+
+// ---------------------------------------------------------------------
 // Plugin settings
 //
 // plugin_config(plugin, key, value) writes the setting and applies it to

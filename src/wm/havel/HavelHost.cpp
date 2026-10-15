@@ -208,6 +208,29 @@ static int hf_log(HavelState* H, void*) {
     return HAVEL_OK;
 }
 
+// cursor_mode("auto"|"software"): how the pointer is composited. "auto"
+// lets wlroots use a hardware cursor plane when the backend has one;
+// "software" forces the cursor into the framebuffer, which is what shows
+// up on backends that only advertise a plane and in screen captures.
+//
+//   cursor_mode("software")
+extern "C" void havel_wlr_set_software_cursor(struct havel_wlr_server*, bool);
+static int hf_cursor_mode(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    std::string mode = arg_str(H, 0) ? arg_str(H, 0) : "";
+    bool software = (mode == "software" || mode == "soft");
+    if (ctx && ctx->server) {
+        // Goes through the compositor's request path so it works even if
+        // the C side is not wired up yet at config.hv time.
+        ctx->server->requestSoftwareCursor(software);
+    } else {
+        LOG_WARN("[Havel] cursor_mode: no compositor context, ignored");
+    }
+    printf("[Havel] cursor_mode(%s)\n", software ? "software" : "auto");
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
 // plugin_config(plugin, key, value): set a plugin setting from config.hv
 // and apply it live. Values are strings; numbers/bools are converted
 // here so `plugin_config("alt_tab", "columns", 4)` works.
@@ -457,6 +480,8 @@ void HavelHost::registerHostFunctions() {
     havel_pushcfunction_with_ctx(m_H, hf_log, nullptr, "log");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_plugin_config, nullptr, "plugin_config");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_cursor_mode, nullptr, "cursor_mode");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_get_workspace, nullptr, "get_workspace");
     havel_pop(m_H, 1);

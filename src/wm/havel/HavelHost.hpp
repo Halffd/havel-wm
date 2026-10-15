@@ -37,6 +37,9 @@ using havel::Server;
  *   get_windows()           array of {id, app_id, title, workspace}
  *   get_workspace()         current workspace index
  *   log(msg)                compositor log (INFO)
+ *   cursor_mode("auto"|"software")
+ *                           hardware cursor plane when available, or force
+ *                           the software cursor
  *   plugin_config(plugin, key, value)
  *                           set a plugin setting at runtime and apply it
  *                           live, e.g. plugin_config("alt_tab", "columns", 2)

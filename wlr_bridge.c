@@ -257,6 +257,13 @@ struct havel_wlr_server {
     struct wl_listener cursor_button;
     struct wl_listener cursor_axis;
     struct wl_listener cursor_frame;
+    // Cursor image sources: the seat tells us a client wants a cursor
+    // surface, the shape manager gives named shapes.
+    struct wl_listener request_set_cursor;
+    struct wl_listener request_set_shape;
+    // Force software cursors on every output (wlr_output_lock_software_cursors).
+    // Balanced: lock once when turning on, unlock once when off.
+    bool software_cursor_forced;
 
     uint32_t active_workspace;
     struct wl_list outputs; // havel_output::link
@@ -303,6 +310,8 @@ struct havel_output {
 
     struct havel_wlr_server *server;
     bool is_primary;
+    bool cursor_mode_logged;   // one-shot hardware/software cursor report
+    bool cursor_software_locked;
     struct wl_list link;
 
     // True once an enable commit succeeded. Native DRM boots with the
@@ -1854,6 +1863,25 @@ static void output_frame(struct wl_listener *listener, void *data) {
     }
     wlr_output_state_finish(&state);
 
+    // Honour a forced software cursor for outputs created after the switch.
+    if (output->server->software_cursor_forced &&
+        !output->cursor_software_locked) {
+        wlr_output_lock_software_cursors(output->output, true);
+        output->cursor_software_locked = true;
+    }
+
+    // Report once whether this output is driving a hardware cursor plane
+    // or wlroots' software cursor (set during the commit above).
+    if (!output->cursor_mode_logged) {
+        output->cursor_mode_logged = true;
+        LOG_INFO("[Cursor] %s: %s", output->output->name,
+                 output->cursor_software_locked
+                     ? "software cursor (forced)"
+                     : (output->output->hardware_cursor
+                            ? "hardware cursor plane"
+                            : "software cursor (no plane or fallback)"));
+    }
+
     // Drive the next frame. DRM outputs chain via page-flip; the
     // headless backend does not - without an explicit schedule the
     // frame loop runs exactly once and stalls (observed: Frame #1 then
@@ -2080,6 +2108,16 @@ static void output_try_enable(struct havel_output *output) {
     } else {
         output->enable_ok = true;
         LOG_INFO("[OUTPUT] %s enabled (mode committed)", wlr_output->name);
+
+        // A software-cursor request can arrive before this output exists
+        // (config.hv runs at startup), so honour it here as well as on
+        // demand.
+        if (output->server->software_cursor_forced && !output->cursor_software_locked) {
+            wlr_output_lock_software_cursors(output->output, true);
+            output->cursor_software_locked = true;
+            LOG_INFO("[Cursor] %s: software cursor forced (requested before output existed)",
+                     wlr_output->name);
+        }
         // Publish the output geometry to the C++ workspaces (the export
         // existed but was never called - placement ran on an empty
         // rect). Layer surfaces shrink this later via their exclusive
@@ -2654,6 +2692,31 @@ static void server_cursor_frame(struct wl_listener *listener, void *data) {
     wlr_seat_pointer_notify_frame(server->seat);
 }
 
+// A client asked for a cursor surface (wl_pointer.set_cursor). Any client
+// can send this, so only honour the one that currently has pointer focus.
+// wlr_cursor then shows it on whichever output the pointer is on -
+// hardware cursor plane where the backend has one, wlroots' software
+// cursor otherwise.
+static void seat_request_set_cursor(struct wl_listener *listener, void *data) {
+    struct havel_wlr_server *server = wl_container_of(listener, server, request_set_cursor);
+    struct wlr_seat_pointer_request_set_cursor_event *event = data;
+    if (event->seat_client == server->seat->pointer_state.focused_client) {
+        wlr_cursor_set_surface(server->cursor, event->surface,
+                               event->hotspot_x, event->hotspot_y);
+    }
+}
+
+// A client asked for a named cursor shape (cursor-shape-v1): "text",
+// "ew-resize", ... - same focus check, then the theme provides the image.
+static void cursor_shape_request_set_shape(struct wl_listener *listener, void *data) {
+    struct havel_wlr_server *server = wl_container_of(listener, server, request_set_shape);
+    struct wlr_cursor_shape_manager_v1_request_set_shape_event *event = data;
+    if (event->seat_client == server->seat->pointer_state.focused_client) {
+        wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr,
+                               wlr_cursor_shape_v1_name(event->shape));
+    }
+}
+
 // ============================================================================
 // Server Lifecycle
 // ============================================================================
@@ -3071,6 +3134,24 @@ havel_wlr_server_t* havel_wlr_create(void) {
     server->cursor = wlr_cursor_create();
     wlr_cursor_attach_output_layout(server->cursor, server->output_layout);
     server->cursor_mgr = wlr_xcursor_manager_create(NULL, 24);
+    setenv("XCURSOR_SIZE", "24", 1);
+
+    // Show a cursor before any client asks for one. Without an image the
+    // pointer was invisible: nothing in this compositor ever called
+    // set_xcursor at startup, and the two events that carry cursor images
+    // (seat request_set_cursor, shape manager request_set_shape) had no
+    // listeners at all - so client-supplied cursors and named shapes were
+    // dropped on the floor.
+    wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "left_ptr");
+
+    server->request_set_cursor.notify = seat_request_set_cursor;
+    wl_signal_add(&server->seat->events.request_set_cursor, &server->request_set_cursor);
+
+    if (server->cursor_shape_manager) {
+        server->request_set_shape.notify = cursor_shape_request_set_shape;
+        wl_signal_add(&server->cursor_shape_manager->events.request_set_shape,
+                      &server->request_set_shape);
+    }
 
     server->cursor_motion.notify = server_cursor_motion;
     wl_signal_add(&server->cursor->events.motion, &server->cursor_motion);
@@ -3939,6 +4020,22 @@ void havel_wlr_click_pointer(struct havel_wlr_server *server, uint32_t button, b
     havel_cpp_on_pointer_button(server->cpp_server, button, pressed,
         server->cursor->x, server->cursor->y);
     LOG_DEBUG("[Inject] Pointer button 0x%x %s", button, pressed ? "down" : "up");
+}
+
+// Force software cursors on every output (or restore wlroots' choice).
+// wlr_cursor shows a hardware cursor plane when the backend has one, which
+// is what you want normally; on backends that advertise a plane but never
+// composite it (headless does), or while capturing, the software cursor is
+// the one that actually reaches the framebuffer.
+void havel_wlr_set_software_cursor(struct havel_wlr_server *server, bool forced) {
+    if (!server) return;
+    if (forced == server->software_cursor_forced) return;
+    server->software_cursor_forced = forced;
+    struct havel_output *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        wlr_output_lock_software_cursors(output->output, forced);
+    }
+    LOG_INFO("[Cursor] software cursor %s", forced ? "forced" : "released");
 }
 
 void havel_wlr_get_pointer(struct havel_wlr_server *server, double *x, double *y) {

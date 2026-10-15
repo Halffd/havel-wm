@@ -108,8 +108,22 @@ public:
     const OverlayTarget& overlayTarget() const { return m_overlayTarget; }
 
     // Native server handle for C bridge
+    // Cursor mode request. Recorded even when the C handle is not up yet
+    // (config.hv runs early), then applied as soon as it exists and to
+    // every output as it is enabled.
+    void requestSoftwareCursor(bool forced) {
+        m_softwareCursorForced = forced;
+        if (m_nativeHandle) {
+            havel_wlr_set_software_cursor((struct havel_wlr_server*)m_nativeHandle, forced);
+        }
+    }
+    bool softwareCursorForced() const { return m_softwareCursorForced; }
+
     void setNativeHandle(void* handle) {
         m_nativeHandle = handle;
+        if (handle && m_softwareCursorForced) {
+            havel_wlr_set_software_cursor((struct havel_wlr_server*)handle, true);
+        }
         m_displaySettings.setApplyHandle(reinterpret_cast<havel_wlr_server_t*>(handle));
     }
     void* nativeHandle() const { return m_nativeHandle; }
@@ -275,6 +289,7 @@ private:
     OverlayRenderer* m_overlayRenderer = nullptr;  // For plugin overlay rendering
 
     void* m_nativeHandle = nullptr;
+    bool m_softwareCursorForced = false;
     OverlayTarget m_overlayTarget;
     std::unordered_map<uint32_t, Rect> m_outputGeoms;
     Animator m_animator;
