@@ -178,6 +178,10 @@ struct havel_wlr_server {
     // Overlay scene layer (for Alt-Tab, Overview, etc.)
     struct wlr_scene_tree *overlay_layer;
 
+    // Positions scene outputs from the output layout (set at scene
+    // creation; each scene output is registered with it below).
+    struct wlr_scene_output_layout *scene_output_layout;
+
     struct wlr_xwayland *xwayland;
     struct wl_listener new_xwayland_surface;
 
@@ -2006,6 +2010,26 @@ static void server_new_output(struct wl_listener *listener, void *data) {
         }
     }
 
+    // Register this scene output with the scene output layout so the
+    // output's position in the layout drives the scene output position.
+    // wlr_scene_attach_output_layout alone was not enough: it manages the
+    // scene outputs IT creates, while this compositor creates its own
+    // (wlr_scene_output_create above). Without the registration the scene
+    // output stayed at (0,0) - probe evidence on a two-output boot:
+    // scene_output->x,y=(0,0) for outputs the layout placed at 1280 and
+    // 2560 - so everything addressed in layout coordinates rendered on
+    // the same spot on every monitor, and overlays fell off-screen.
+    if (server->scene_output_layout) {
+        struct wlr_output_layout_output *lo =
+            wlr_output_layout_get(server->output_layout, wlr_output);
+        if (lo) {
+            wlr_scene_output_layout_add_output(server->scene_output_layout, lo,
+                                               output->scene_output);
+            LOG_INFO("[OUTPUT] %s registered with the scene output layout (pos %d,%d)",
+                     wlr_output->name, lo->x, lo->y);
+        }
+    }
+
     // Verify output state and scene graph
     LOG_INFO("[OUTPUT] %s setup COMPLETE (enabled=%d)",
              wlr_output->name, wlr_output->enabled);
@@ -2779,7 +2803,8 @@ havel_wlr_server_t* havel_wlr_create(void) {
     // reached the capture). Single-output boots never noticed because
     // (0,0) is correct there. wlroots keeps scene_output positions in sync
     // from here on, including output moves.
-    wlr_scene_attach_output_layout(server->scene, server->output_layout);
+    server->scene_output_layout =
+        wlr_scene_attach_output_layout(server->scene, server->output_layout);
 
     // Background rect: created as the scene's FIRST child (bottom z),
     // before any workspace tree, so the wallpaper plugin's color
