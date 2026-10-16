@@ -6,6 +6,9 @@
 #include <cstring>
 #include <cstdio>
 #include <cmath>
+#include <cstdlib>
+#include <algorithm>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <memory>
@@ -39,27 +42,83 @@ public:
     SceneText() = default;
     ~SceneText() { shutdown(); }
 
+    // Find a usable TTF. The old code listed five hardcoded paths and
+    // silently gave up when none existed - on a box with only Adwaita,
+    // Liberation and Noto that meant EVERY overlay rendered without text:
+    // the workspace bar was a blank black strip and the FPS/usage plugins
+    // were unlabelled squares (user report: "they dont tell anything have
+    // no text or info, or numbmers").
+    //
+    // Order: explicit override, then well-known families by preference,
+    // then any TTF in the usual font directories.
+    static std::string findFontFile() {
+        if (const char* env = getenv("HAVEL_FONT")) {
+            if (*env && std::filesystem::is_regular_file(env)) return env;
+        }
+
+        static const char* dirs[] = {
+            "/usr/share/fonts",
+            "/usr/local/share/fonts",
+            "/run/host/fonts",
+            nullptr
+        };
+        static const char* preferred[] = {
+            "DejaVuSans.ttf",
+            "LiberationSans-Regular.ttf",
+            "AdwaitaSans-Regular.ttf",
+            "NotoSans-Regular.ttf",
+            "FreeSans.ttf",
+            "Roboto-Regular.ttf",
+            nullptr
+        };
+
+        std::vector<std::string> ttf;
+        std::error_code ec;
+        for (int d = 0; dirs[d]; d++) {
+            if (!std::filesystem::is_directory(dirs[d], ec)) continue;
+            // A whole-tree walk is fine here: it runs once at startup.
+            for (auto it = std::filesystem::recursive_directory_iterator(
+                     dirs[d], std::filesystem::directory_options::skip_permission_denied, ec);
+                 !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+                if (!it->is_regular_file(ec)) continue;
+                const std::string p = it->path().string();
+                if (p.size() > 4 && p.compare(p.size() - 4, 4, ".ttf") == 0) {
+                    ttf.push_back(p);
+                }
+            }
+            ec.clear();
+        }
+        for (int p = 0; preferred[p]; p++) {
+            for (const auto& f : ttf) {
+                if (f.size() >= strlen(preferred[p]) &&
+                    f.compare(f.size() - strlen(preferred[p]), strlen(preferred[p]),
+                              preferred[p]) == 0) {
+                    return f;
+                }
+            }
+        }
+        if (!ttf.empty()) return ttf.front();
+        return {};
+    }
+
     bool initialize() {
         if (FT_Init_FreeType(&m_ft)) {
             fprintf(stderr, "[SceneText] FreeType init failed\n");
             return false;
         }
-        static const char* fontPaths[] = {
-            "/usr/share/fonts/TTF/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/gnu-free/FreeSans.ttf",
-            nullptr
-        };
-        for (int i = 0; fontPaths[i]; i++) {
-            if (FT_New_Face(m_ft, fontPaths[i], 0, &m_face) == 0) {
-                m_ok = true;
-                return true;
-            }
+        const std::string font = findFontFile();
+        if (font.empty()) {
+            fprintf(stderr, "[SceneText] No TTF font found - overlays will render without text. "
+                            "Set HAVEL_FONT=<path.ttf> to choose one explicitly.\n");
+            return false;
         }
-        fprintf(stderr, "[SceneText] No usable TTF font found\n");
-        return false;
+        if (FT_New_Face(m_ft, font.c_str(), 0, &m_face) != 0) {
+            fprintf(stderr, "[SceneText] Failed to load font %s\n", font.c_str());
+            return false;
+        }
+        fprintf(stderr, "[SceneText] Using font %s\n", font.c_str());
+        m_ok = true;
+        return true;
     }
 
     void shutdown() {
