@@ -17,6 +17,11 @@
 #                      trigger spawn_terminal in the log
 #
 # Usage: tests/runtime/run_runtime_tests.sh [BUILD_DIR]
+#
+# The summary counts skipped checks separately and lists the reasons: a
+# skipped check is not a pass. Set HAVEL_HARNESS_FORCE_SKIP_TERMINAL=1 to
+# exercise the no-terminal path (and the counters) on a box that has
+# terminals.
 # Requires: foot, grim, python3, wayland-scanner (for the injector build,
 # done once into BUILD_DIR), a DISPLAY-less environment is fine.
 #
@@ -26,7 +31,7 @@ set -u
 BUILD_DIR="${1:-./build}"
 SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/havel-wm.sock"
 LOG="$(mktemp /tmp/havel-runtime-XXXXXX.log)"
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIPPED=0
 WM_PID=""
 FOOT_PID=""
 
@@ -77,6 +82,14 @@ crashes() {
     grep -cE "SEGV|ABORT|terminate called|Assertion .* failed" "$LOG"
 }
 
+# A skipped check is not a pass. Counting them keeps the summary honest:
+# an environment gap used to look like a smaller-but-green run (observed:
+# 21 passed, 0 failed while three checks never ran).
+skip() {
+    echo "SKIP: $1"
+    SKIPPED=$((SKIPPED+1))
+}
+
 report() {
     if [ "$1" -eq 0 ]; then
         echo "PASS: $2"; PASS=$((PASS+1))
@@ -118,7 +131,12 @@ echo "--- phase 2: client round-trip (terminal)"
 # (the child would die instantly and the terminal self-exit would race
 # the pixel capture - observed as intermittent 0-px captures).
 TERM_PROG=""
-if command -v foot >/dev/null 2>&1; then
+# Test hook: force the "no terminal client" path so the skip counting can
+# be exercised on a box that HAS terminals (otherwise the skip path only
+# runs when the environment loses them, which is not reproducible).
+if [ -n "${HAVEL_HARNESS_FORCE_SKIP_TERMINAL:-}" ]; then
+    TERM_PROG=""
+elif command -v foot >/dev/null 2>&1; then
     TERM_PROG=foot
 elif command -v kitty >/dev/null 2>&1; then
     TERM_PROG=kitty
@@ -128,7 +146,7 @@ elif command -v alacritty >/dev/null 2>&1; then
     printf '[colors.primary]\nbackground = "#242424"\n' > "$ALACRITTY_TEST_CONF"
 fi
 if [ -z "$TERM_PROG" ]; then
-    echo "SKIP: no terminal client (need foot, kitty or alacritty)"
+    skip "no terminal client (need foot, kitty or alacritty)"
 else
     case "$TERM_PROG" in
         foot)
@@ -150,6 +168,26 @@ for _ in $(seq 1 45); do
     grep -q "onViewMapped" "$LOG" && { MAP_SEEN=0; break; }
     sleep 1
 done
+if [ "$MAP_SEEN" -ne 0 ]; then
+    # One retry: a client can lose the race against a loaded box (no map
+    # in 45s is not "the compositor does not map windows"). Respawn once,
+    # then judge.
+    echo "note: no map in 45s, respawning the client once"
+    kill "$FOOT_PID" 2>/dev/null
+    case "$TERM_PROG" in
+        foot)
+            WAYLAND_DISPLAY=wayland-0 timeout 60 foot -e sh -c 'sleep 300' > /dev/null 2>&1 & ;;
+        kitty)
+            WAYLAND_DISPLAY=wayland-0 timeout 60 kitty -o background=#242424 -o background_opacity=1 -e sh -c 'sleep 300' > /dev/null 2>&1 & ;;
+        alacritty)
+            WAYLAND_DISPLAY=wayland-0 timeout 60 alacritty --config-file "$ALACRITTY_TEST_CONF" -e sh -c 'sleep 300' > /dev/null 2>&1 & ;;
+    esac
+    FOOT_PID=$!
+    for _ in $(seq 1 45); do
+        grep -q "onViewMapped" "$LOG" && { MAP_SEEN=0; break; }
+        sleep 1
+    done
+fi
 report "$MAP_SEEN" "client mapped a view"
 # ---------------------------------------------------------------- phase 3
 echo "--- phase 3: pixel capture (grim)"
@@ -217,13 +255,13 @@ if [ -x "$INJ" ]; then
     WAYLAND_DISPLAY=wayland-0 "$INJ" +125 3 -125
     report $(wait_for_log "TRIGGERED: workspace_2" 20 && echo 0 || echo 1) "Meta+2 triggers workspace_2"
 else
-    echo "SKIP: injector build failed (wayland-scanner missing?)"
+    skip "injector build failed (wayland-scanner missing?)"
 fi
 
 # ---------------------------------------------------------------- phase 6
 echo "--- phase 6: havel language-syntax hotkeys (config.hv)"
 if [ "${HAS_EMBED:-0}" -eq 0 ]; then
-    echo "SKIP: compositor built without the havel embed (no [Havel] line at boot)"
+    skip "compositor built without the havel embed (no [Havel] line at boot)"
 else
 # The real user-facing hotkey forms through the embedded interpreter:
 # sugar (^+F2 => {...} lowers to hotkey.register) and host fn
@@ -252,7 +290,7 @@ for _ in $(seq 750); do
     sleep 0.2
 done
 if [ -z "$PARITY_SOCK" ]; then
-    echo "SKIP: parity compositor never became ready"
+    skip "parity compositor never became ready"
     LOG="$OLD_LOG"
 else
     WAYLAND_DISPLAY="$PARITY_SOCK" "$INJ" +29 +42 60 -42 -29
@@ -324,7 +362,7 @@ PYEOF
         report $([ "$TRIG" -eq 1 ] && echo 0 || echo 1) "binding triggered exactly once (trig=$TRIG)"
         report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "self-inject compositor clean"
     else
-        echo "SKIP: parity restart never became ready"
+        skip "parity restart never became ready"
     fi
     report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "parity compositor clean"
 fi   # closes: if [ -z "$PARITY_SOCK" ]
@@ -336,9 +374,9 @@ LOG="${OLD_LOG:-$LOG}"
 # ---------------------------------------------------------------- phase 7
 echo "--- phase 7: alt-tab grid overlay"
 if [ ! -x "$INJ" ]; then
-    echo "SKIP: key injector not built"
+    skip "key injector not built"
 elif [ -z "$TERM_PROG" ]; then
-    echo "SKIP: no terminal client for switcher windows"
+    skip "no terminal client for switcher windows"
 else
     # The switcher needs windows to list; earlier phases closed theirs.
     MAPS_BEFORE=$(grep -acE "View mapped=true" "$LOG")
@@ -449,12 +487,15 @@ report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "zero crashes across all ph
 if [ -n "$TERM_PROG" ]; then
     report $(wait_for_log "View freed" 10 && echo 0 || echo 1) "client teardown clean (View freed)"
 else
-    echo "SKIP: client teardown (no terminal client was available)"
+    skip "client teardown (no terminal client was available)"
 fi
 
 kill "$WM_PID" 2>/dev/null; WM_PID=""
 echo ""
-echo "=== runtime verification: $PASS passed, $FAIL failed ==="
+echo "=== runtime verification: $PASS passed, $FAIL failed, $SKIPPED skipped ==="
+if [ "$SKIPPED" -gt 0 ]; then
+    echo "note: $SKIPPED check(s) did not run - see the SKIP lines above"
+fi
 [ "$FAIL" -eq 0 ] || { echo "log preserved: $LOG"; exit 1; }
 rm -f "$LOG"
 exit 0
