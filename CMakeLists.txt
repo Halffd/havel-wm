@@ -180,6 +180,8 @@ set(WM_CORE_SOURCES
     # src/wm/core/XWaylandDnD.hpp
     src/wm/core/LoadingScreen.c
     src/wm/core/LoadingScreen.h
+    src/ui/font/Font.hpp
+    src/ui/font/Font.cpp
     src/wm/render/render_c_wrappers.c
     src/wm/render/OverlayRenderer.cpp
     src/wm/render/OverlayRenderer.hpp
@@ -562,6 +564,18 @@ if(PANEL_ENABLED)
 
     # Build and install lock screen
     add_subdirectory(src/shell/lockscreen)
+
+    # Font module test: bitmap (generated BDF) + vector (installed TTF)
+    # faces through the one FreeType path, plus honest-failure checks.
+    add_executable(test-font tests/test_font.cpp src/ui/font/Font.cpp)
+    target_include_directories(test-font PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+        ${FREETYPE_INCLUDE_DIRS}
+    )
+    target_link_libraries(test-font PRIVATE ${FREETYPE_LIBRARIES})
+    # Font.cpp uses the logger for its one-time face/failure reports.
+    target_sources(test-font PRIVATE src/utils/Logger.c)
 
     # Build utilities test
     add_executable(test-utilities tests/test_utilities.c)

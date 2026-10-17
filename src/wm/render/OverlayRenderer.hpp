@@ -26,7 +26,9 @@ struct FloatRect {
     constexpr FloatRect(const Rect& r) : x((float)r.x), y((float)r.y), w((float)r.w), h((float)r.h) {}
 };
 
-class SceneText;  // CPU text rasterization + cache (defined in the .cpp)
+// CPU text rasterization (TTF/OTF vector or PCF/BDF bitmap faces):
+// ui/font/Font.hpp.
+namespace font { class Font; }
 
 /**
  * Scene-graph overlay renderer.
@@ -120,8 +122,8 @@ private:
     std::unordered_map<int, wlr_scene_tree_t*> m_frameTrees;
     wlr_scene_tree_t* m_targetTree = nullptr; // active draw target override (not owned)
 
-    // Text cache: rasterized lines keyed by (text, size, color)
-    std::unique_ptr<SceneText> m_text;
+    // The compositor's font (see ui/font).
+    std::unique_ptr<font::Font> m_font;
     // Scene buffers created this frame (cleared on next beginFrame)
     std::vector<wlr_scene_buffer_t*> m_frameSceneBuffers;
 };

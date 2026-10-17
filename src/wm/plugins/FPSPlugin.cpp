@@ -115,8 +115,7 @@ public:
 
         int x = 10;
         int y = 10;
-        int lineHeight = 18;
-        
+
         // Draw background panel
         int panelW = 220;
         int panelH = 80;
