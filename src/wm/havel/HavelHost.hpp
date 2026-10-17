@@ -40,6 +40,8 @@ using havel::Server;
  *   cursor_mode("auto"|"software")
  *                           hardware cursor plane when available, or force
  *                           the software cursor
+ *   lock_screen()            lock the screen (PAM overlay)
+ *   set_wallpaper(path)      PNG wallpaper behind all windows ("" clears)
  *   plugin_config(plugin, key, value)
  *                           set a plugin setting at runtime and apply it
  *                           live, e.g. plugin_config("alt_tab", "columns", 2)

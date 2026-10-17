@@ -1,6 +1,7 @@
 #pragma once
 
 #include <wm/Types.hpp>
+#include <ui/lock/ScreenLock.hpp>
 #include <wm/Workspace.hpp>
 #include <wm/Focus.hpp>
 #include <wm/Animator.hpp>
@@ -108,6 +109,12 @@ public:
     const OverlayTarget& overlayTarget() const { return m_overlayTarget; }
 
     // Native server handle for C bridge
+    // Screen lock (compositor-internal, intercepts all input when locked)
+    class ScreenLock* screenLock() const { return m_screenLock; }
+    void lockScreen();
+    void unlockScreen();
+    bool isScreenLocked() const;
+
     // Cursor mode request. Recorded even when the C handle is not up yet
     // (config.hv runs early), then applied as soon as it exists and to
     // every output as it is enabled.
@@ -295,6 +302,7 @@ private:
 
     void* m_nativeHandle = nullptr;
     bool m_softwareCursorForced = false;
+    class ScreenLock* m_screenLock = nullptr;
     OverlayTarget m_overlayTarget;
     std::unordered_map<uint32_t, Rect> m_outputGeoms;
     Animator m_animator;

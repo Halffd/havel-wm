@@ -1,5 +1,6 @@
 #include <wm/Server.hpp>
 #include <wm/render/AppIconLoader.hpp>
+#include <ui/lock/ScreenLock.hpp>
 #include <wm/Layout.hpp>
 #include <wm/plugins/Plugins.hpp>
 #include <shell/IPCServer.hpp>
@@ -424,6 +425,14 @@ void Server::onViewDestroyed(View* view) {
 }
 
 bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char, const char* utf8) {
+    // Screen lock intercepts ALL keyboard input when active — before
+    // keybindings and plugins, so the lock screen is impenetrable.
+    if (m_screenLock && m_screenLock->isLocked()) {
+        std::string utf8Str = utf8 ? utf8 : "";
+        m_screenLock->handleKey(keysym, pressed, utf8Str);
+        return true;  // consumed: no keybinding, no plugin, no client
+    }
+
     // Keybindings are press-only
     if (pressed && m_keybindingManager.handleKey(keysym, pressed, modifiers)) {
         return true;
@@ -1409,6 +1418,7 @@ bool Server::startIPCServer(const std::string& socketPath) {
     }
 
     m_ipcServer = std::make_unique<IPCServer>(m_windowManager);
+    m_screenLock = new ScreenLock();
 
     // Cursor control: IPCServer owns the handlers (they lived as stubs in
     // the command table), but only Server has the compositor handle, so
@@ -1621,6 +1631,33 @@ bool Server::startIPCServer(const std::string& socketPath) {
         JsonObject r;
         r["success"] = true;
         r["mode"] = software ? "software" : "auto";
+        return m_ipcServer->jsonToString(r);
+    });
+
+    // Screen lock: PAM-authenticated overlay that intercepts all input
+    m_ipcServer->registerCommand("lock_screen", [this](const std::string& args) -> std::string {
+        (void)args;
+        lockScreen();
+        JsonObject r;
+        r["success"] = true;
+        r["locked"] = true;
+        return m_ipcServer->jsonToString(r);
+    });
+
+    m_ipcServer->registerCommand("unlock_screen", [this](const std::string& args) -> std::string {
+        (void)args;
+        unlockScreen();
+        JsonObject r;
+        r["success"] = true;
+        r["locked"] = false;
+        return m_ipcServer->jsonToString(r);
+    });
+
+    m_ipcServer->registerCommand("is_screen_locked", [this](const std::string& args) -> std::string {
+        (void)args;
+        JsonObject r;
+        r["success"] = true;
+        r["locked"] = isScreenLocked();
         return m_ipcServer->jsonToString(r);
     });
 
@@ -2014,6 +2051,18 @@ std::string Server::ipcMoveToWorkspace(const std::string& args) {
         m_coreWindowManager.moveWindowToWorkspace(window, static_cast<uint32_t>(workspace));
     }
     return m_ipcServer->createSuccessResponse("Window moved to workspace " + std::to_string(workspace));
+}
+
+void Server::lockScreen() {
+    if (m_screenLock) m_screenLock->lock();
+}
+
+void Server::unlockScreen() {
+    if (m_screenLock) m_screenLock->unlock();
+}
+
+bool Server::isScreenLocked() const {
+    return m_screenLock && m_screenLock->isLocked();
 }
 
 bool Server::setWallpaperFromFile(const std::string& path) {

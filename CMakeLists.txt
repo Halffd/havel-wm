@@ -16,6 +16,15 @@ pkg_check_modules(XKB REQUIRED xkbcommon)
 pkg_check_modules(PIXMAN REQUIRED pixman-1)
 pkg_check_modules(FMT REQUIRED fmt)
 pkg_check_modules(FREETYPE REQUIRED freetype2)
+pkg_check_modules(PAM QUIET pam)
+if(NOT PAM_FOUND)
+    find_library(PAM_LIB pam)
+    if(PAM_LIB)
+        set(PAM_LIBRARIES ${PAM_LIB})
+    endif()
+else()
+    set(PAM_LIBRARIES ${PAM_LIBRARIES})
+endif()
 pkg_check_modules(PNG REQUIRED libpng)
 pkg_check_modules(CURL REQUIRED libcurl)
 
@@ -182,6 +191,8 @@ set(WM_CORE_SOURCES
     src/wm/core/LoadingScreen.h
     src/ui/font/Font.hpp
     src/ui/font/Font.cpp
+    src/ui/lock/ScreenLock.hpp
+    src/ui/lock/ScreenLock.cpp
     src/wm/render/render_c_wrappers.c
     src/wm/render/OverlayRenderer.cpp
     src/wm/render/OverlayRenderer.hpp
@@ -478,6 +489,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${PIXMAN_LIBRARIES}
     ${FMT_LIBRARIES}
     ${FREETYPE_LIBRARIES}
+    ${PAM_LIBRARIES}
     ${PNG_LIBRARIES}
     ${CURL_LIBRARIES}
     ${GLIB_LIBRARIES}

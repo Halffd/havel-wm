@@ -266,6 +266,18 @@ void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int hei
     // persistent trees (OverlayRenderer::createPersistentTree) or
     // their content would blink off between draws.
     renderer->beginFrame(width, height, target ? target->index : -1);
+
+    // Screen lock renders FIRST (over everything, under nothing): when
+    // locked, its overlay is the only thing that should be visible.
+    if (server->server->isScreenLocked()) {
+        auto* lock = server->server->screenLock();
+        const auto& out = server->server->overlayTarget();
+        if (lock) {
+            const auto& t = server->server->overlayTarget();
+            lock->render(renderer, t.x, t.y, t.w, t.h);
+        }
+    }
+
     // Render each plugin, then force the draw target back to the frame
     // tree. A plugin that returns early between setTargetTree(tree) and
     // setTargetTree(nullptr) would otherwise leak its persistent tree as

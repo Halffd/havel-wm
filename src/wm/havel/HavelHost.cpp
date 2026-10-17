@@ -231,6 +231,26 @@ static int hf_cursor_mode(HavelState* H, void*) {
     return HAVEL_OK;
 }
 
+// lock_screen(): lock the screen (PAM-authenticated overlay that
+// intercepts all input).
+static int hf_lock_screen(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    if (ctx && ctx->server) ctx->server->lockScreen();
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// set_wallpaper(path): PNG wallpaper behind all windows; "" clears
+// back to the solid background colour.
+static int hf_set_wallpaper(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    std::string path = arg_str(H, 0) ? arg_str(H, 0) : "";
+    bool ok = ctx && ctx->server && ctx->server->setWallpaperFromFile(path);
+    printf("[Havel] set_wallpaper(%s) -> %s\n", path.c_str(), ok ? "ok" : "failed");
+    havel_pushboolean(H, ok ? 1 : 0);
+    return HAVEL_OK;
+}
+
 // plugin_config(plugin, key, value): set a plugin setting from config.hv
 // and apply it live. Values are strings; numbers/bools are converted
 // here so `plugin_config("alt_tab", "columns", 4)` works.
@@ -482,6 +502,10 @@ void HavelHost::registerHostFunctions() {
     havel_pushcfunction_with_ctx(m_H, hf_plugin_config, nullptr, "plugin_config");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_cursor_mode, nullptr, "cursor_mode");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_lock_screen, nullptr, "lock_screen");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_set_wallpaper, nullptr, "set_wallpaper");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_get_workspace, nullptr, "get_workspace");
     havel_pop(m_H, 1);
