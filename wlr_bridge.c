@@ -2036,8 +2036,14 @@ static void server_new_output(struct wl_listener *listener, void *data) {
         LOG_DEBUG("[OUTPUT] %s already in the layout, keeping its position",
                   wlr_output->name);
     } else if (wl_list_empty(&server->outputs)) {
-        // First monitor - position at (0,0)
-        wlr_output_layout_add_auto(server->output_layout, wlr_output);
+        // First monitor - position explicitly at (0,0). add_auto would
+        // let wlroots re-position the output whenever the layout changes:
+        // when the second output is manually placed at (1280,0), the
+        // auto-placed first output gets moved to the right of everything
+        // (observed live: HEADLESS-2 ended up at (2560,0) on a two-output
+        // headless boot, leaving 0..1280 empty and every layout-relative
+        // coordinate off by 1280).
+        wlr_output_layout_add(server->output_layout, wlr_output, 0, 0);
     } else {
         // Second (or subsequent) monitor - position to the right of the
         // previous one.
@@ -2056,7 +2062,7 @@ static void server_new_output(struct wl_listener *listener, void *data) {
             prev = o;
         }
         if (!prev) {
-            wlr_output_layout_add_auto(server->output_layout, wlr_output);
+            wlr_output_layout_add(server->output_layout, wlr_output, 0, 0);
         } else {
             struct wlr_box prev_box;
             wlr_output_layout_get_box(server->output_layout, prev->output, &prev_box);

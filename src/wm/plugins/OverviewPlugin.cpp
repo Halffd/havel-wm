@@ -393,11 +393,18 @@ private:
         float alpha = m_animOpacity;
         if (alpha <= 0.01f) return;  // Too transparent to see
 
-        int screenWidth = renderer->getScreenWidth();
-        int screenHeight = renderer->getScreenHeight();
+        // The overview covers the monitor the cursor is on. renderOverlay
+        // runs once per output pass; skip the passes for other monitors.
+        CompositorAPI::OutputTarget out = m_api->currentOutputTarget();
+        if (!out.underCursor) return;
+        const int originX = out.x, originY = out.y;
+        const int screenWidth = out.w;
+        const int screenHeight = out.h;
 
         // Draw semi-transparent background with animation opacity
-        renderer->drawRect(0, 0, screenWidth, screenHeight, Color(0.0f, 0.0f, 0.0f, 0.8f * alpha));
+        renderer->drawRect((float)originX, (float)originY,
+                          (float)screenWidth, (float)screenHeight,
+                          Color(0.0f, 0.0f, 0.0f, 0.8f * alpha));
 
         // Calculate workspace grid layout
         int wsCount = (int)m_workspaces.size();
@@ -413,8 +420,8 @@ private:
             OverviewWorkspace& ws = m_workspaces[i];
             int col = ws.gridX;
             int row = ws.gridY;
-            int x = 50 + col * (wsWidth + spacing);
-            int y = 50 + row * (wsHeight + spacing);
+            int x = originX + 50 + col * (wsWidth + spacing);
+            int y = originY + 50 + row * (wsHeight + spacing);
 
             bool isSelected = ((int)i == m_selectedWorkspace);
 
