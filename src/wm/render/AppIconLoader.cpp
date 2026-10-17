@@ -151,51 +151,50 @@ AppIconLoader::IconCacheEntry AppIconLoader::loadIconFromFile(const std::string&
     return generatePlaceholderIcon(appId);
 }
 
-AppIconLoader::IconCacheEntry AppIconLoader::loadIconFromPath(const std::string& path) {
-    IconCacheEntry entry;
-
-    // Check file extension
-    if (path.length() < 4) return entry;
+// Full-size PNG decode into ARGB8888 little-endian pixels. Shared by the
+// icon loader and the wallpaper path - the wallpaper must NOT go through
+// the icon loader, which only searches theme directories and falls back
+// to a 32x32 placeholder (observed: an absolute wallpaper path produced
+// a stretched hash-coloured square).
+bool loadPngPixels(const std::string& path,
+                   std::vector<uint32_t>& pixels, int* outW, int* outH) {
+    pixels.clear();
+    if (outW) *outW = 0;
+    if (outH) *outH = 0;
+    if (path.length() < 4) return false;
     std::string ext = path.substr(path.length() - 4);
-
-    // Only load PNG files (SVG would need librsvg; placeholder is used)
-    if (ext != ".png" && ext != ".PNG") {
-        if (ext == ".svg" || ext == ".SVG") {
-            return generatePlaceholderIcon(path);
-        }
-        return entry;
-    }
+    if (ext != ".png" && ext != ".PNG") return false;
 
     // Open PNG file
     FILE* f = fopen(path.c_str(), "rb");
-    if (!f) return entry;
+    if (!f) return false;
 
     // Check PNG signature
     unsigned char header[8];
     size_t readCount = fread(header, 1, 8, f);
     if (readCount != 8 || png_sig_cmp(header, 0, 8) != 0) {
         fclose(f);
-        return entry;
+        return false;
     }
 
     // Create PNG read struct
     png_structp png = png_create_read_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
     if (!png) {
         fclose(f);
-        return entry;
+        return false;
     }
 
     png_infop info = png_create_info_struct(png);
     if (!info) {
         png_destroy_read_struct(&png, nullptr, nullptr);
         fclose(f);
-        return entry;
+        return false;
     }
 
     if (setjmp(png_jmpbuf(png))) {
         png_destroy_read_struct(&png, &info, nullptr);
         fclose(f);
-        return entry;
+        return false;
     }
 
     png_init_io(png, f);
@@ -232,14 +231,14 @@ AppIconLoader::IconCacheEntry AppIconLoader::loadIconFromPath(const std::string&
         // Unexpected packing; bail honestly
         png_destroy_read_struct(&png, &info, nullptr);
         fclose(f);
-        return entry;
+        return false;
     }
 
-    // Read image data into the entry's pixel array (ARGB8888 little-endian)
-    entry.pixels.resize((size_t)width * height);
+    // Read image data (ARGB8888 little-endian)
+    pixels.resize((size_t)width * height);
     std::vector<png_bytep> rowPointers(height);
     for (png_uint_32 y = 0; y < height; y++) {
-        rowPointers[y] = reinterpret_cast<png_bytep>(&entry.pixels[(size_t)y * width]);
+        rowPointers[y] = reinterpret_cast<png_bytep>(&pixels[(size_t)y * width]);
     }
     png_read_image(png, rowPointers.data());
     png_read_end(png, nullptr);
@@ -247,11 +246,25 @@ AppIconLoader::IconCacheEntry AppIconLoader::loadIconFromPath(const std::string&
     png_destroy_read_struct(&png, &info, nullptr);
     fclose(f);
 
-    entry.width = (int)width;
-    entry.height = (int)height;
-    entry.handle = m_nextHandle++;
+    if (outW) *outW = (int)width;
+    if (outH) *outH = (int)height;
+    return true;
+}
 
-    LOG_DEBUG("[AppIconLoader] Loaded PNG icon: %s (%ux%u)", path.c_str(), width, height);
+AppIconLoader::IconCacheEntry AppIconLoader::loadIconFromPath(const std::string& path) {
+    IconCacheEntry entry;
+    // SVG would need librsvg; the icon loader uses a placeholder for it.
+    if (path.length() >= 4) {
+        std::string ext = path.substr(path.length() - 4);
+        if (ext == ".svg" || ext == ".SVG") {
+            return generatePlaceholderIcon(path);
+        }
+    }
+    if (loadPngPixels(path, entry.pixels, &entry.width, &entry.height)) {
+        entry.handle = m_nextHandle++;
+        LOG_DEBUG("[AppIconLoader] Loaded PNG icon: %s (%dx%d)",
+                  path.c_str(), entry.width, entry.height);
+    }
     return entry;
 }
 

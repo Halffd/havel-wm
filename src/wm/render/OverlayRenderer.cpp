@@ -417,4 +417,36 @@ void OverlayRenderer::drawTextCentered(const char* text, float cx, float cy, flo
     if (sb && !m_targetTree) m_frameSceneBuffers.push_back(sb);
 }
 
+// C-callable text rasterization, for overlays that live on the C side of
+// the bridge (the boot splash) and cannot reach OverlayRenderer. Uses its
+// own SceneText instance so it works before any renderer exists; the
+// font search logs which file it picked, same as the renderer's.
+extern "C" int havel_text_rasterize(const char* text, int px, const float color[4],
+                                     uint32_t** out_pixels, int* out_w, int* out_h) {
+    using namespace havel;
+    if (!text || !out_pixels || !out_w || !out_h || px <= 0) return 0;
+    static SceneText st;
+    static bool tried = false;
+    if (!tried) {
+        tried = true;
+        st.initialize();
+    }
+    if (!st.ok()) return 0;
+
+    SceneText::Rasterized rz = st.rasterize(
+        text, (uint32_t)px, Color(color[0], color[1], color[2], color[3]));
+    if (rz.pixels.empty()) return 0;
+
+    *out_pixels = (uint32_t*)malloc(rz.pixels.size() * sizeof(uint32_t));
+    if (!*out_pixels) return 0;
+    memcpy(*out_pixels, rz.pixels.data(), rz.pixels.size() * sizeof(uint32_t));
+    *out_w = rz.w;
+    *out_h = rz.h;
+    return 1;
+}
+
+extern "C" void havel_text_pixels_free(uint32_t* pixels) {
+    free(pixels);
+}
+
 } // namespace havel

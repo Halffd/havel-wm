@@ -7,6 +7,12 @@
 
 namespace havel {
 
+// Full-size PNG decode into ARGB8888 little-endian pixels (shared by the
+// icon loader and the wallpaper path). False when the file is not a
+// decodable PNG.
+bool loadPngPixels(const std::string& path,
+                   std::vector<uint32_t>& pixels, int* outW, int* outH);
+
 /**
  * App Icon Loader
  *

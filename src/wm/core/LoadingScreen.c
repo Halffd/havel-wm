@@ -1,6 +1,7 @@
 // Loading Screen Implementation
 
 #include "LoadingScreen.h"
+#include <wm/render_c.h>
 #include <Logger.h>
 #include <wlr/types/wlr_scene.h>
 #include <wlr/types/wlr_output.h>
@@ -21,6 +22,10 @@ static struct {
     struct wlr_scene_rect* progress_bar_fg;
     struct wlr_scene_rect* status_box;
     struct wlr_scene_rect* tip_box;
+    struct wlr_scene_buffer* status_text_node;
+    struct wlr_scene_buffer* tip_text_node;
+    int screen_w;
+    int screen_h;
     
     bool visible;
     int progress;
@@ -182,6 +187,66 @@ void loading_screen_hide(void) {
     g_loading_screen.visible = false;
 }
 
+// Center the splash on the real output size. At creation time no output
+// exists yet, so the original hardcoded 1920x1080 background and the
+// boxes all parked at (0,0) - the status text had nowhere sensible to
+// be and the whole splash sat crammed in the top-left corner.
+void loading_screen_refresh_text(void);
+
+void loading_screen_layout(int w, int h) {
+    if (w <= 0 || h <= 0) return;
+    g_loading_screen.screen_w = w;
+    g_loading_screen.screen_h = h;
+
+    if (g_loading_screen.background) {
+        wlr_scene_rect_set_size(g_loading_screen.background, w, h);
+    }
+    if (g_loading_screen.logo_box) {
+        wlr_scene_node_set_position(&g_loading_screen.logo_box->node,
+                                    (w - 300) / 2, (h - 150) / 2 - 60);
+    }
+    if (g_loading_screen.progress_bar_bg) {
+        wlr_scene_node_set_position(&g_loading_screen.progress_bar_bg->node,
+                                    (w - 400) / 2, (h - 150) / 2 + 110);
+    }
+    // status text sits under the progress bar; the fg bar shares the
+    // container so it follows automatically
+    loading_screen_refresh_text();
+}
+
+// (Re)draw the status and tip text. The status was previously only
+// stored and logged - nothing ever rendered it, so the splash looked
+// frozen ("loading screen not changing"). Text renders through the same
+// font pipeline as every other overlay; if no font is up yet it is
+// skipped and retried on the next status.
+void loading_screen_refresh_text(void) {
+    if (!g_loading_screen.root || !g_loading_screen.visible) return;
+    int w = g_loading_screen.screen_w > 0 ? g_loading_screen.screen_w : 1280;
+    int h = g_loading_screen.screen_h > 0 ? g_loading_screen.screen_h : 800;
+
+    if (g_loading_screen.status_text_node) {
+        wlr_scene_node_destroy(&g_loading_screen.status_text_node->node);
+        g_loading_screen.status_text_node = NULL;
+    }
+    if (g_loading_screen.tip_text_node) {
+        wlr_scene_node_destroy(&g_loading_screen.tip_text_node->node);
+        g_loading_screen.tip_text_node = NULL;
+    }
+
+    if (g_loading_screen.status_text[0]) {
+        g_loading_screen.status_text_node = havel_scene_text(
+            g_loading_screen.root, g_loading_screen.status_text,
+            (w - 400) / 2, (h - 150) / 2 + 145, 18,
+            (float[4]){0.92f, 0.92f, 0.92f, 1.0f});
+    }
+    if (g_loading_screen.tip_text[0]) {
+        g_loading_screen.tip_text_node = havel_scene_text(
+            g_loading_screen.root, g_loading_screen.tip_text,
+            40, h - 60, 14,
+            (float[4]){0.55f, 0.6f, 0.7f, 1.0f});
+    }
+}
+
 void loading_screen_set_progress(int percent) {
     if (percent < 0) percent = 0;
     if (percent > 100) percent = 100;
@@ -199,7 +264,8 @@ void loading_screen_set_status(const char* text) {
     
     strncpy(g_loading_screen.status_text, text, sizeof(g_loading_screen.status_text) - 1);
     g_loading_screen.status_text[sizeof(g_loading_screen.status_text) - 1] = '\0';
-    
+
+    loading_screen_refresh_text();
     LOG_INFO("[LoadingScreen] Status: %s", text);
 }
 

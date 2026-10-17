@@ -171,6 +171,13 @@ struct havel_wlr_server {
     // is rendered as the scene's bottom-most rect, created here BEFORE
     // the workspace trees so it stays first child.
     struct wlr_scene_rect *bg_rect;
+    // Wallpaper image: a tree created BETWEEN bg_rect and the workspace
+    // trees, so the image renders above the solid background colour and
+    // below every window. Updated via havel_wlr_set_wallpaper.
+    struct wlr_scene_tree *wallpaper_tree;
+    struct wlr_scene_buffer *wallpaper_buffer;
+    uint32_t *wallpaper_pixels;   // last-set image, ARGB8888 (owned copy)
+    int wallpaper_w, wallpaper_h;
 
     struct wlr_xdg_shell *xdg_shell;
     struct wl_listener new_xdg_toplevel;
@@ -1942,6 +1949,7 @@ static void output_destroy(struct wl_listener *listener, void *data) {
 // Forward: the enable logic (defined after server_new_output; also
 // called by session_active_cb for the post-VT-switch retry).
 static void output_try_enable(struct havel_output *output);
+static void wallpaper_fit_output(struct havel_wlr_server *server);
 
 static void server_new_output(struct wl_listener *listener, void *data) {
     struct havel_wlr_server *server = wl_container_of(listener, server, new_output);
@@ -2140,6 +2148,14 @@ static void output_try_enable(struct havel_output *output) {
             LOG_INFO("[Cursor] %s: software cursor forced (requested before output existed)",
                      wlr_output->name);
         }
+        // The splash was created before any output existed, so it ran on
+        // hardcoded 1920x1080 geometry with every box parked at (0,0).
+        // Now that a real mode is committed, give it the real size.
+        if (loading_screen_is_visible()) {
+            loading_screen_layout(wlr_output->width, wlr_output->height);
+        }
+        wallpaper_fit_output(output->server);
+
         // Publish the output geometry to the C++ workspaces (the export
         // existed but was never called - placement ran on an empty
         // rect). Layer surfaces shrink this later via their exclusive
@@ -2899,6 +2915,10 @@ havel_wlr_server_t* havel_wlr_create(void) {
         server->bg_rect = wlr_scene_rect_create(
             &server->scene->tree, 1, 1, black);
     }
+
+    // Wallpaper tree: second child of the scene (after bg_rect, before
+    // the workspace trees), so an image wallpaper lands behind windows.
+    server->wallpaper_tree = wlr_scene_tree_create(&server->scene->tree);
 
     // Screencopy protocol: one line, unlocks grim / wf-recorder /
     // xdg-desktop-portal-wlr screen sharing. (The old C++ ScreenCapture /
@@ -4093,6 +4113,64 @@ void havel_wlr_set_cursor_theme(struct havel_wlr_server *server,
     }
     LOG_INFO("[Cursor] theme set to '%s' size %d",
              (theme && *theme) ? theme : "default", size);
+}
+
+// Set a wallpaper image (ARGB8888 CPU pixels). The compositor keeps a copy
+// so outputs enabled later can be covered too. Pass NULL to clear (back
+// to the solid background colour). The buffer is sized to the whole
+// output layout; the caller scales the image to fit.
+void havel_wlr_set_wallpaper(struct havel_wlr_server *server,
+                              const uint32_t *pixels, int w, int h) {
+    if (!server || !server->wallpaper_tree) return;
+
+    free(server->wallpaper_pixels);
+    server->wallpaper_pixels = NULL;
+    server->wallpaper_w = 0;
+    server->wallpaper_h = 0;
+
+    if (server->wallpaper_buffer) {
+        wlr_scene_node_destroy(&server->wallpaper_buffer->node);
+        server->wallpaper_buffer = NULL;
+    }
+
+    if (!pixels || w <= 0 || h <= 0) {
+        LOG_INFO("[Wallpaper] cleared");
+        return;
+    }
+
+    size_t n = (size_t)w * h;
+    server->wallpaper_pixels = malloc(n * sizeof(uint32_t));
+    if (!server->wallpaper_pixels) return;
+    memcpy(server->wallpaper_pixels, pixels, n * sizeof(uint32_t));
+    server->wallpaper_w = w;
+    server->wallpaper_h = h;
+
+    // Fit the layout box if it is known; otherwise the first output
+    // enable re-creates the node (see output_try_enable).
+    struct wlr_box box = {0};
+    wlr_output_layout_get_box(server->output_layout, NULL, &box);
+    if (box.width > 0 && box.height > 0) {
+        server->wallpaper_buffer = havel_scene_pixels(
+            server->wallpaper_tree, server->wallpaper_pixels, w, h,
+            box.x, box.y, box.width, box.height);
+    }
+    LOG_INFO("[Wallpaper] set: %dx%d image", w, h);
+}
+
+// Cover a newly enabled output with the current wallpaper.
+static void wallpaper_fit_output(struct havel_wlr_server *server) {
+    if (!server || !server->wallpaper_tree || !server->wallpaper_pixels) return;
+    struct wlr_box box = {0};
+    wlr_output_layout_get_box(server->output_layout, NULL, &box);
+    if (box.width <= 0 || box.height <= 0) return;
+    if (server->wallpaper_buffer) {
+        wlr_scene_node_destroy(&server->wallpaper_buffer->node);
+        server->wallpaper_buffer = NULL;
+    }
+    server->wallpaper_buffer = havel_scene_pixels(
+        server->wallpaper_tree, server->wallpaper_pixels,
+        server->wallpaper_w, server->wallpaper_h,
+        box.x, box.y, box.width, box.height);
 }
 
 void havel_wlr_get_pointer(struct havel_wlr_server *server, double *x, double *y) {

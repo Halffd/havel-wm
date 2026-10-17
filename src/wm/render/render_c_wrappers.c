@@ -77,6 +77,19 @@ wlr_scene_rect_t* havel_scene_rect(wlr_scene_tree_t* parent, int x, int y,
     return (wlr_scene_rect_t*)r;
 }
 
+wlr_scene_buffer_t* havel_scene_text(wlr_scene_tree_t* parent, const char* text,
+                                     int x, int y, int px, const float color[4]) {
+    if (!parent || !text || !color) return NULL;
+    uint32_t* pixels = NULL;
+    int w = 0, h = 0;
+    if (!havel_text_rasterize(text, px, color, &pixels, &w, &h)) {
+        return NULL;
+    }
+    wlr_scene_buffer_t* sb = havel_scene_pixels(parent, pixels, w, h, x, y, w, h);
+    havel_text_pixels_free(pixels);
+    return sb;
+}
+
 wlr_scene_buffer_t* havel_scene_pixels(wlr_scene_tree_t* parent,
                                         const uint32_t* pixels, int pw, int ph,
                                         int x, int y, int width, int height) {

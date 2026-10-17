@@ -34,6 +34,10 @@ void loading_screen_hide(void);
 // Update progress (0-100)
 void loading_screen_set_progress(int percent);
 
+// Center the splash on the real output size (call when the first output
+// is enabled; the splash is created before any output exists).
+void loading_screen_layout(int w, int h);
+
 // Set status text
 void loading_screen_set_status(const char* text);
 

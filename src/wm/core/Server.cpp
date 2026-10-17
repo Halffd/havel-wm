@@ -1,4 +1,5 @@
 #include <wm/Server.hpp>
+#include <wm/render/AppIconLoader.hpp>
 #include <wm/Layout.hpp>
 #include <wm/plugins/Plugins.hpp>
 #include <shell/IPCServer.hpp>
@@ -1623,6 +1624,19 @@ bool Server::startIPCServer(const std::string& socketPath) {
         return m_ipcServer->jsonToString(r);
     });
 
+    // Wallpaper image (PNG), drawn behind every window. Empty path
+    // clears back to the solid background colour.
+    m_ipcServer->registerCommand("set_wallpaper", [this](const std::string& args) -> std::string {
+        std::string path = m_ipcServer->extractJsonString(args, "path", "");
+        if (!setWallpaperFromFile(path)) {
+            return m_ipcServer->createErrorResponse(-5, "cannot decode wallpaper file");
+        }
+        JsonObject r;
+        r["success"] = true;
+        r["path"] = path;
+        return m_ipcServer->jsonToString(r);
+    });
+
     // Script/test helper: feed a scroll tick through the plugin dispatch
     // path (the same route a real wheel takes via the C bridge).
     m_ipcServer->registerCommand("scroll_pointer", [this](const std::string& args) -> std::string {
@@ -2000,6 +2014,26 @@ std::string Server::ipcMoveToWorkspace(const std::string& args) {
         m_coreWindowManager.moveWindowToWorkspace(window, static_cast<uint32_t>(workspace));
     }
     return m_ipcServer->createSuccessResponse("Window moved to workspace " + std::to_string(workspace));
+}
+
+bool Server::setWallpaperFromFile(const std::string& path) {
+    if (path.empty()) {
+        if (m_nativeHandle) {
+            havel_wlr_set_wallpaper((struct havel_wlr_server*)m_nativeHandle,
+                                     nullptr, 0, 0);
+        }
+        return true;
+    }
+    std::vector<uint32_t> pixels;
+    int w = 0, h = 0;
+    if (!loadPngPixels(path, pixels, &w, &h)) {
+        LOG_ERROR("[Wallpaper] cannot decode '%s'", path.c_str());
+        return false;
+    }
+    if (!m_nativeHandle) return false;
+    havel_wlr_set_wallpaper((struct havel_wlr_server*)m_nativeHandle,
+                            pixels.data(), w, h);
+    return true;
 }
 
 std::string Server::ipcGetVersion() {

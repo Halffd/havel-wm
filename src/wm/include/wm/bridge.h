@@ -184,6 +184,10 @@ void havel_wlr_set_cursor_theme(struct havel_wlr_server *server,
                                 const char *theme, int size);
 // Force software cursors on all outputs (false = let wlroots use planes).
 void havel_wlr_set_software_cursor(struct havel_wlr_server *server, bool forced);
+// Wallpaper image (ARGB8888 CPU pixels), rendered behind all windows.
+// Pass NULL to clear back to the solid background colour.
+void havel_wlr_set_wallpaper(struct havel_wlr_server *server,
+                             const uint32_t* pixels, int w, int h);
 
 // Start the persistent self-injection keyboard (background wayland-client
 // connection to the compositor's own socket)

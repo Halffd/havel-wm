@@ -119,6 +119,11 @@ public:
     }
     bool softwareCursorForced() const { return m_softwareCursorForced; }
 
+    // Wallpaper from a PNG file, rendered behind all windows. Empty path
+    // clears back to the solid background colour. Returns false when the
+    // file cannot be decoded.
+    bool setWallpaperFromFile(const std::string& path);
+
     void setNativeHandle(void* handle) {
         m_nativeHandle = handle;
         if (handle && m_softwareCursorForced) {
