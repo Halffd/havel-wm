@@ -54,6 +54,9 @@ public:
         
         m_lastCorner = -1;
         m_cornerEnterTime = 0;
+        m_pointerMoved = false;
+        m_haveFirstPos = false;
+        m_firstX = 0; m_firstY = 0;
         
         printf("[HotCorners] Initialized (delay: %dms)\n", m_triggerDelay);
     }
@@ -69,8 +72,29 @@ public:
         printf("[HotCorners] Config loaded\n");
     }
     
+    void onMouseMotion(int x, int y) override {
+        // Corner detection reacts to the pointer position, and at boot the
+        // pointer IS at a corner (initial absolute position (0,0) from the
+        // tablet, delivered as a real motion event when the device
+        // attaches). Arming on "any motion" therefore still painted a
+        // 100x100 blue highlight over the desktop before the user had
+        // touched anything, and armed the corner action's dwell timer.
+        // Arm only once the pointer has actually travelled away from the
+        // position it started in.
+        if (!m_pointerMoved) {
+            if (!m_haveFirstPos) {
+                m_firstX = x; m_firstY = y;
+                m_haveFirstPos = true;
+            } else if (x - m_firstX > 15 || m_firstX - x > 15 ||
+                       y - m_firstY > 15 || m_firstY - y > 15) {
+                m_pointerMoved = true;
+            }
+        }
+    }
+
     void onOutputFrame(const OutputFrameEvent& event) override {
         if (!m_enabled) return;
+        if (!m_pointerMoved) return;
         
         // Get cursor position from API
         int cursorX = (int)m_api->getCursorX();
@@ -156,6 +180,9 @@ public:
     
 private:
     CompositorAPI* m_api = nullptr;
+    bool m_pointerMoved = false;
+    bool m_haveFirstPos = false;
+    int m_firstX = 0, m_firstY = 0;
     bool m_enabled;
     uint32_t m_triggerDelay;  // ms before trigger
     uint64_t m_lastTriggerTime;
@@ -174,6 +201,15 @@ private:
     CornerAction m_cornerActions[4];  // TL, TR, BL, BR
     
     enum Corner {
+        // CORNER_NONE is the plugin's "pointer is not in any corner"
+        // sentinel: m_lastCorner < 0 suppresses both the highlight and the
+        // dwell timer. detectCorner used to return CORNER_TOP_LEFT as a
+        // "default" for every non-corner position, so the pointer could
+        // never leave the top-left corner - the highlight never cleared
+        // and the dwell timer armed anywhere, auto-triggering the
+        // top-left action after the delay while the pointer just sat
+        // still.
+        CORNER_NONE = -1,
         CORNER_TOP_LEFT = 0,
         CORNER_TOP_RIGHT = 1,
         CORNER_BOTTOM_LEFT = 2,
@@ -193,7 +229,7 @@ private:
         if (bottom && left) return CORNER_BOTTOM_LEFT;
         if (bottom && right) return CORNER_BOTTOM_RIGHT;
         
-        return CORNER_TOP_LEFT;  // Default
+        return CORNER_NONE;
     }
     
     void triggerAction(CornerAction action) {
