@@ -60,6 +60,16 @@ public:
     void renderOverlay(void* rendererPtr) override {
         if (!m_visible || !rendererPtr) return;
 
+        // Remember every output that renders a pass, so the bar can be
+        // drawn once per monitor. Without this the single bar sat at
+        // scene (0,0) with the first output's width and the second
+        // monitor had no taskbar at all.
+        CompositorAPI::OutputTarget out = m_api->currentOutputTarget();
+        if (out.w > 0 && out.h > 0) {
+            m_outputs.resize(std::max(m_outputs.size(), (size_t)out.index + 1));
+            m_outputs[out.index] = out;
+        }
+
         // Draw into a PERSISTENT tree rebuilt at 1 Hz (content - workspace
         // label, window count, clock minute - changes at most once a
         // second). The frame tree is cleared every frame, so a throttled
@@ -78,12 +88,6 @@ public:
         if (!m_tree) return;
         renderer->setTargetTree(m_tree);
 
-        int screenWidth = renderer->getScreenWidth();
-
-        renderer->drawRect(0, 0, screenWidth, m_barHeight, m_bgColor);
-        renderer->drawRect(0, 0, screenWidth, 1, Color(m_bgColor.r*1.2f, m_bgColor.g*1.2f, m_bgColor.b*1.2f, m_bgColor.a));
-        renderer->drawRect(0, m_barHeight - 1, screenWidth, 1, Color(0.0f, 0.0f, 0.0f, 0.4f));
-
         uint32_t currentWs = m_api->getActiveWorkspace();
         int windowCount = getWindowCountOnWorkspace(currentWs);
 
@@ -93,17 +97,27 @@ public:
         char wsStr[64];
         snprintf(wsStr, sizeof(wsStr), "Workspace %u", currentWs + 1);
         float wsWidth = getTextWidth(wsStr, 16.0f) + 20.0f;
-        
-        renderer->drawRect(8, 5, wsWidth, m_barHeight - 10, Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 0.4f));
-        renderer->drawText(wsStr, 18, 8, 16.0f, m_accentColor);
 
         char winStr[64];
         snprintf(winStr, sizeof(winStr), "  |  %d window%s", windowCount, windowCount != 1 ? "s" : "");
-        renderer->drawText(winStr, 18 + wsWidth, 8, 16.0f, Color(m_fgColor.r, m_fgColor.g, m_fgColor.b, m_fgColor.a * 0.85f));
 
         float timeWidth = getTextWidth(timeStr, 16.0f) + 20.0f;
-        renderer->drawRect(screenWidth - timeWidth - 8, 5, timeWidth, m_barHeight - 10, Color(0.0f, 0.0f, 0.0f, 0.4f));
-        renderer->drawText(timeStr, screenWidth - timeWidth + 2, 8, 16.0f, m_fgColor);
+
+        size_t drawn = 0;
+        for (const auto& out : m_outputs) {
+            if (out.w <= 0 || out.h <= 0) continue;
+            drawBar(renderer, out, wsStr, wsWidth, winStr, timeStr, timeWidth);
+            drawn++;
+        }
+        // Outputs not seen yet (first pass, index gap): fall back to the
+        // current pass's screen so the bar never vanishes entirely.
+        if (!drawn) {
+            CompositorAPI::OutputTarget out = m_api->currentOutputTarget();
+            out.x = 0; out.y = 0;
+            out.w = renderer->getScreenWidth();
+            out.h = renderer->getScreenHeight();
+            drawBar(renderer, out, wsStr, wsWidth, winStr, timeStr, timeWidth);
+        }
 
         renderer->setTargetTree(nullptr);
     }
@@ -128,6 +142,7 @@ public:
     }
 
 private:
+    std::vector<CompositorAPI::OutputTarget> m_outputs;
     CompositorAPI* m_api = nullptr;
     bool m_visible;
     // Toggle binding (overridable via config "keybinding", default Meta+Shift+B)
@@ -151,6 +166,24 @@ private:
         time_t now = time(nullptr);
         struct tm* tm_info = localtime(&now);
         strftime(buffer, size, "%H:%M", tm_info);
+    }
+
+    void drawBar(OverlayRenderer* renderer, const CompositorAPI::OutputTarget& out,
+                 const char* wsStr, float wsWidth, const char* winStr,
+                 const char* timeStr, float timeWidth) {
+        const int x0 = out.x, y0 = out.y, w = out.w;
+        renderer->drawRect((float)x0, (float)y0, (float)w, (float)m_barHeight, m_bgColor);
+        renderer->drawRect((float)x0, (float)y0, (float)w, 1, Color(m_bgColor.r*1.2f, m_bgColor.g*1.2f, m_bgColor.b*1.2f, m_bgColor.a));
+        renderer->drawRect((float)x0, (float)(y0 + m_barHeight - 1), (float)w, 1, Color(0.0f, 0.0f, 0.0f, 0.4f));
+
+        renderer->drawRect((float)(x0 + 8), (float)(y0 + 5), wsWidth, (float)(m_barHeight - 10),
+                           Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 0.4f));
+        renderer->drawText(wsStr, (float)(x0 + 18), (float)(y0 + 8), 16.0f, m_accentColor);
+        renderer->drawText(winStr, (float)(x0 + 18 + wsWidth), (float)(y0 + 8), 16.0f,
+                           Color(m_fgColor.r, m_fgColor.g, m_fgColor.b, m_fgColor.a * 0.85f));
+        renderer->drawRect((float)(x0 + w - timeWidth - 8), (float)(y0 + 5), timeWidth,
+                           (float)(m_barHeight - 10), Color(0.0f, 0.0f, 0.0f, 0.4f));
+        renderer->drawText(timeStr, (float)(x0 + w - timeWidth + 2), (float)(y0 + 8), 16.0f, m_fgColor);
     }
 
     float getTextWidth(const char* text, float fontSize) {
