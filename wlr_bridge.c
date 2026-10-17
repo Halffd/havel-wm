@@ -2875,22 +2875,16 @@ havel_wlr_server_t* havel_wlr_create(void) {
     }
     LOG_INFO("[ALLOCATOR] Allocator created successfully");
     
-    // Update loading screen
-    if (loading_screen_is_visible()) {
-        loading_screen_set_status("Initializing shell and plugins...");
-        loading_screen_set_progress(50);
-    }
+    // (No loading-screen update here: the loading screen is only
+    // created further down, after the overlay layer exists - status
+    // calls this early were dead code, and their labels described work
+    // that had already finished: "Creating allocator" ran after the
+    // allocator was created.)
     server->compositor = wlr_compositor_create(server->display, 5, server->renderer);
     struct wlr_subcompositor *sub = wlr_subcompositor_create(server->display);
     fprintf(stderr, "subcompositor_create: %p\n", (void *)sub);
     // wl_shm is auto-created by wlroots 0.20 with renderer - don't create twice
     wlr_data_device_manager_create(server->display);
-
-    // Update loading screen
-    if (loading_screen_is_visible()) {
-        loading_screen_set_status("Creating allocator and compositor...");
-        loading_screen_set_progress(30);
-    }
 
     server->output_layout = wlr_output_layout_create(server->display);
     server->scene = wlr_scene_create();

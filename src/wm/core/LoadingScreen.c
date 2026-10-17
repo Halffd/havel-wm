@@ -18,6 +18,7 @@ static struct {
     struct wlr_scene_tree* root;
     struct wlr_scene_rect* background;
     struct wlr_scene_rect* logo_box;
+    struct wlr_scene_tree* progress_container;
     struct wlr_scene_rect* progress_bar_bg;
     struct wlr_scene_rect* progress_bar_fg;
     struct wlr_scene_rect* status_box;
@@ -107,6 +108,7 @@ void loading_screen_init(struct wlr_scene_tree* parent, struct wl_event_loop* lo
     
     // Progress container (tree to hold progress bars)
     struct wlr_scene_tree* progress_container = wlr_scene_tree_create(g_loading_screen.root);
+    g_loading_screen.progress_container = progress_container;
     
     // Progress bar background
     g_loading_screen.progress_bar_bg = wlr_scene_rect_create(
@@ -205,9 +207,16 @@ void loading_screen_layout(int w, int h) {
         wlr_scene_node_set_position(&g_loading_screen.logo_box->node,
                                     (w - 300) / 2, (h - 150) / 2 - 60);
     }
+    // The fg bar lives in progress_container; moving the bg alone left
+    // the fg drawing at the screen origin (0,0..400,20) - the bar read as
+    // empty while a stray blue strip sat in the top-left corner.
+    if (g_loading_screen.progress_container) {
+        wlr_scene_node_set_position(&g_loading_screen.progress_container->node,
+                                    (w - 400) / 2, (h - 150) / 2 + 110);
+    }
     if (g_loading_screen.progress_bar_bg) {
         wlr_scene_node_set_position(&g_loading_screen.progress_bar_bg->node,
-                                    (w - 400) / 2, (h - 150) / 2 + 110);
+                                    0, 0);
     }
     // status text sits under the progress bar; the fg bar shares the
     // container so it follows automatically
