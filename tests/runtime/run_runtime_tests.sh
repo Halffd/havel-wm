@@ -446,6 +446,28 @@ else
     done
     report "$EMAP" "two windows mapped for the switcher"
 
+    # Thumbnail probe: a third window with a distinctive solid background.
+    # Its cell then shows the captured content (red pixels inside the
+    # grid); before the capture path existed, cells were flat
+    # placeholders. kitty needs LIBGL_ALWAYS_SOFTWARE on the headless
+    # compositor (its EGL/ZINK init fails otherwise - observed: instant
+    # exit, no map).
+    THUMB_RED=1
+    if command -v kitty >/dev/null 2>&1; then
+        WAYLAND_DISPLAY=wayland-0 LIBGL_ALWAYS_SOFTWARE=1 timeout 110 kitty \
+            -o background=#ff0000 -o background_opacity=1 \
+            -e sh -c 'sleep 100' > /dev/null 2>&1 &
+        GRID_PIDS="$GRID_PIDS $!"
+        for _ in $(seq 1 100); do
+            if [ "$(grep -acE 'View mapped=true' "$LOG")" -ge $((MAPS_BEFORE + 3)) ]; then
+                break
+            fi
+            sleep 0.2
+        done
+    else
+        THUMB_RED=0
+    fi
+
     # Hold Alt, tap Tab, wait for the capture, release Alt - all on ONE
     # virtual keyboard: modifier state is per keyboard, so a second
     # injector would tap Tab without the Alt modifier.
@@ -513,6 +535,21 @@ GRID_PY
     report $([ "$(G panel)" -ge $((TOTAL / 100)) ] && echo 0 || echo 1) "switcher panel drawn (panel=$(G panel))"
     report $([ "$(G cell)"  -ge $((TOTAL / 200)) ] && echo 0 || echo 1) "switcher cells drawn (cells=$(G cell))"
     report $([ "$(G sel)"   -ge $((TOTAL / 200)) ] && echo 0 || echo 1) "selected cell highlighted (sel=$(G sel))"
+
+    # Thumbnail: red pixels inside the grid area = the red window's
+    # captured content showing in its cell (only when the probe window
+    # was spawned). Grid area on 1280x800: panel x 64..1216, y 224..576.
+    # REDPX: 0 unless the red probe window was spawned (see above)
+    REDPX=0
+    REDPX=$(python3 -c "
+from PIL import Image
+im = Image.open('$GRID_UP').convert('RGB'); px = im.load(); w, h = im.size
+print(sum(1 for y in range(int(h*0.30), int(h*0.70), 2)
+          for x in range(int(w*0.06), int(w*0.94), 2)
+          if px[x, y][0] > 200 and px[x, y][1] < 80 and px[x, y][2] < 80))" 2>/dev/null || echo 0)
+    if [ "$THUMB_RED" -eq 1 ]; then
+        report $([ "${REDPX:-0}" -gt 300 ] && echo 0 || echo 1) "window thumbnail rendered in cell (red px: ${REDPX:-err})"
+    fi
     DOWNPANEL=$(python3 - "$GRID_DOWN" <<'DOWN_PY'
 import sys
 from PIL import Image
