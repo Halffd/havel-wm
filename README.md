@@ -142,8 +142,16 @@ Create `~/.config/havel-wm/plugins.json`:
   },
   "alt_tab": {
     "enabled": true,
-    "thumbnailWidth": 500,
-    "thumbnailHeight": 375
+    "columns": 3,
+    "monitor": "cursor",
+    "monitorIndex": 0,
+    "thumbnailWidth": 360,
+    "thumbnailHeight": 240,
+    "maxVisibleWindows": 12,
+    "bgColor": "0,0,0,0.7",
+    "borderColor": "1,1,1,1",
+    "textColor": "0.92,0.92,0.92,1",
+    "keybinding": "Alt+Tab"
   },
   "hot_corners": {
     "enabled": true,
@@ -154,6 +162,24 @@ Create `~/.config/havel-wm/plugins.json`:
     "color": "#1a1a2e"
   }
 }
+```
+
+Set a wallpaper image (PNG behind all windows) at runtime:
+
+```bash
+echo '{"method":"set_wallpaper","params":{"path":"/path/to/image.png"}}' | \
+  socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
+```
+
+Or from `config.hv`:
+
+```havel
+set_wallpaper("/path/to/image.png")
+cursor_mode("software")  # or "auto" for hardware cursor plane
+plugin_config("alt_tab", "columns", 2)
+```
+
+See `config/config.hv.example` for the full reference.
 ```
 
 See `plugins.json.example` for all options.
@@ -178,6 +204,26 @@ echo '{"method":"subscribe","params":{"events":["window_created"]}}' | \
 
 # Take screenshot
 echo '{"method":"screenshot","params":{"path":"~/pic.png"}}' | \
+  socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
+
+# Set wallpaper (PNG behind all windows; "" clears)
+echo '{"method":"set_wallpaper","params":{"path":"/path/to/img.png"}}' | \
+  socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
+
+# Cursor control (hardware plane or forced software)
+echo '{"method":"set_cursor_mode","params":{"mode":"software"}}' | \
+  socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
+echo '{"method":"warp_cursor","params":{"x":100,"y":200}}' | \
+  socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
+echo '{"method":"click_pointer","params":{"button":272,"pressed":true}}' | \
+  socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
+echo '{"method":"scroll_pointer","params":{"dy":1}}' | \
+  socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
+echo '{"method":"get_cursor_position"}' | \
+  socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
+echo '{"method":"hide_cursor"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
+echo '{"method":"show_cursor"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
+echo '{"method":"set_cursor_theme","params":{"theme":"default","size":32}}' | \
   socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
 ```
 
