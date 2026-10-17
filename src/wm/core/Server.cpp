@@ -1419,6 +1419,19 @@ bool Server::startIPCServer(const std::string& socketPath) {
                                (double)x, (double)y);
         return true;
     });
+    m_ipcServer->setCursorVisibilityCallback([this](bool visible) {
+        if (!m_nativeHandle) return;
+        if (visible) {
+            havel_wlr_show_cursor((struct havel_wlr_server*)m_nativeHandle);
+        } else {
+            havel_wlr_hide_cursor((struct havel_wlr_server*)m_nativeHandle);
+        }
+    });
+    m_ipcServer->setCursorThemeCallback([this](const std::string& theme, int size) {
+        if (!m_nativeHandle) return;
+        havel_wlr_set_cursor_theme((struct havel_wlr_server*)m_nativeHandle,
+                                   theme.c_str(), size);
+    });
     m_ipcServer->setCursorQueryCallback([this](int* x, int* y) -> bool {
         if (!m_nativeHandle || !x || !y) return false;
         double px = -1, py = -1;
@@ -1468,7 +1481,6 @@ bool Server::startIPCServer(const std::string& socketPath) {
         {"set_cursor_size",        nullptr, &IPCServer::handleSetCursorSize},
         {"hide_cursor",            nullptr, &IPCServer::handleHideCursor},
         {"show_cursor",            nullptr, &IPCServer::handleShowCursor},
-        {"set_cursor_warp",        nullptr, &IPCServer::handleSetCursorWarp},
         {"subscribe",              nullptr, &IPCServer::handleSubscribe},
         {"unsubscribe",            nullptr, &IPCServer::handleUnsubscribe},
     };

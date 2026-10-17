@@ -4060,6 +4060,41 @@ void havel_wlr_set_software_cursor(struct havel_wlr_server *server, bool forced)
     LOG_INFO("[Cursor] software cursor %s", forced ? "forced" : "released");
 }
 
+// Hide the pointer image until something sets one again (show_cursor or a
+// client request). wlr_cursor_unset_image is the supported way.
+void havel_wlr_hide_cursor(struct havel_wlr_server *server) {
+    if (!server || !server->cursor) return;
+    wlr_cursor_unset_image(server->cursor);
+    LOG_INFO("[Cursor] hidden by request");
+}
+
+// Restore the default pointer image.
+void havel_wlr_show_cursor(struct havel_wlr_server *server) {
+    if (!server || !server->cursor || !server->cursor_mgr) return;
+    wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "left_ptr");
+    LOG_INFO("[Cursor] shown by request");
+}
+
+// Swap the xcursor theme/size live: replace the manager and re-set the
+// image so the new theme is visible immediately.
+void havel_wlr_set_cursor_theme(struct havel_wlr_server *server,
+                                const char *theme, int size) {
+    if (!server || size < 16 || size > 128) return;
+    if (server->cursor_mgr) {
+        wlr_xcursor_manager_destroy(server->cursor_mgr);
+    }
+    server->cursor_mgr = wlr_xcursor_manager_create(
+        (theme && *theme) ? theme : NULL, size);
+    char sz[8];
+    snprintf(sz, sizeof sz, "%d", size);
+    setenv("XCURSOR_SIZE", sz, 1);
+    if (server->cursor && server->cursor_mgr) {
+        wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "left_ptr");
+    }
+    LOG_INFO("[Cursor] theme set to '%s' size %d",
+             (theme && *theme) ? theme : "default", size);
+}
+
 void havel_wlr_get_pointer(struct havel_wlr_server *server, double *x, double *y) {
     if (!server || !server->cursor) { if (x) *x = -1; if (y) *y = -1; return; }
     if (x) *x = server->cursor->x;

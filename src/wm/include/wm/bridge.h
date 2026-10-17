@@ -176,6 +176,12 @@ void havel_wlr_click_pointer(struct havel_wlr_server *server, uint32_t button, b
 // Feed a scroll tick through the plugin dispatch path (same as a wheel).
 void havel_wlr_scroll_pointer(struct havel_wlr_server *server, double dx, double dy);
 void havel_wlr_get_pointer(struct havel_wlr_server *server, double *x, double *y);
+// Cursor visibility and theme (IPC hide_cursor / show_cursor /
+// set_cursor_theme).
+void havel_wlr_hide_cursor(struct havel_wlr_server *server);
+void havel_wlr_show_cursor(struct havel_wlr_server *server);
+void havel_wlr_set_cursor_theme(struct havel_wlr_server *server,
+                                const char *theme, int size);
 // Force software cursors on all outputs (false = let wlroots use planes).
 void havel_wlr_set_software_cursor(struct havel_wlr_server *server, bool forced);
 

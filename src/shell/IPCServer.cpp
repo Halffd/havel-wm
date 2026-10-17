@@ -1295,14 +1295,20 @@ std::string IPCServer::handleSetCursorTheme(const std::string& args) {
     
     std::string theme = extractJsonString(args, "theme", "default");
     int size = extractJsonInt(args, "size", 24);
-    
-    // Set cursor theme via XCursor manager
-    // This requires reloading the cursor manager
+
+    if (size < 16 || size > 128) {
+        return createError(0, -2, "Cursor size must be between 16 and 128");
+    }
     json result;
+    if (!m_cursorTheme) {
+        result["success"] = false;
+        result["error"] = "cursor theme not wired to the compositor";
+        return result.dump();
+    }
+    m_cursorTheme(theme, size);
     result["success"] = true;
     result["theme"] = theme;
     result["size"] = size;
-    result["message"] = "Cursor theme change requires compositor restart";
     return result.dump();
 }
 
@@ -1315,50 +1321,48 @@ std::string IPCServer::handleSetCursorSize(const std::string& args) {
     }
     
     int size = extractJsonInt(args, "size", 24);
-    
+
     if (size < 16 || size > 128) {
         return createError(0, -2, "Cursor size must be between 16 and 128");
     }
-    
+
     json result;
+    if (!m_cursorTheme) {
+        result["success"] = false;
+        result["error"] = "cursor theme not wired to the compositor";
+        return result.dump();
+    }
+    // Keep the current theme; only the size changes.
+    m_cursorTheme("", size);
     result["success"] = true;
     result["size"] = size;
-    result["message"] = "Cursor size change requires compositor restart";
     return result.dump();
 }
 
 std::string IPCServer::handleHideCursor(const std::string& args) {
-    // Hide cursor until next motion
-    // This requires cursor state management
+    (void)args;
     json result;
+    if (!m_cursorVisible) {
+        result["success"] = false;
+        result["error"] = "cursor visibility not wired to the compositor";
+        return result.dump();
+    }
+    m_cursorVisible(false);
     result["success"] = true;
-    result["message"] = "Cursor hide requires compositor integration";
     return result.dump();
 }
 
 std::string IPCServer::handleShowCursor(const std::string& args) {
-    // Show cursor if hidden
+    (void)args;
     json result;
+    if (!m_cursorVisible) {
+        result["success"] = false;
+        result["error"] = "cursor visibility not wired to the compositor";
+        return result.dump();
+    }
+    m_cursorVisible(true);
     result["success"] = true;
-    result["message"] = "Cursor show requires compositor integration";
     return result.dump();
 }
 
-std::string IPCServer::handleSetCursorWarp(const std::string& args) {
-    json j;
-    try {
-        j = json::parse(args);
-    } catch (...) {
-        return createError(0, -1, "Invalid JSON");
-    }
-    
-    bool enabled = extractJsonBool(args, "enabled", true);
-    
-    // Enable/disable cursor warping on focus change
-    json result;
-    result["success"] = true;
-    result["enabled"] = enabled;
-    result["message"] = "Cursor warp setting requires compositor integration";
-    return result.dump();
-}
 } // namespace havel

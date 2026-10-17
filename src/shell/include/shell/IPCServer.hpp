@@ -121,13 +121,14 @@ public:
     // Cursor control hooks: the compositor side (Server) installs these so
     // the IPC handlers can move the real wlr_cursor.
     void setCursorWarpCallback(std::function<bool(int,int)> cb) { m_warpCursor = std::move(cb); }
+    void setCursorVisibilityCallback(std::function<void(bool)> cb) { m_cursorVisible = std::move(cb); }
+    void setCursorThemeCallback(std::function<void(const std::string&,int)> cb) { m_cursorTheme = std::move(cb); }
     void setCursorQueryCallback(std::function<bool(int*,int*)> cb) { m_queryCursor = std::move(cb); }
     void setPointerClickCallback(std::function<bool(uint32_t,bool)> cb) { m_clickPointer = std::move(cb); }
     std::string handleSetCursorTheme(const std::string& args);
     std::string handleSetCursorSize(const std::string& args);
     std::string handleHideCursor(const std::string& args);
     std::string handleShowCursor(const std::string& args);
-    std::string handleSetCursorWarp(const std::string& args);
 
     // JSON helpers (public for use in Server.cpp lambdas)
     std::string extractJsonString(const std::string& json, const std::string& key, const std::string& defaultValue = "");
@@ -144,6 +145,8 @@ private:
     std::function<bool(int,int)> m_warpCursor;
     std::function<bool(int*,int*)> m_queryCursor;
     std::function<bool(uint32_t,bool)> m_clickPointer;
+    std::function<void(bool)> m_cursorVisible;
+    std::function<void(const std::string&,int)> m_cursorTheme;
 
     // Message processing
     void processMessage(int clientFd, const std::string& msg);
