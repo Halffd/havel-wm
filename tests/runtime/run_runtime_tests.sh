@@ -111,6 +111,28 @@ wait_for_log "Havel Compositor running" 40 && wait_for_log "Auto-hide timeout re
     wait_for_log "\[FRAME\] Frame #1" 5 && BOOT_OK=0
 report $([ "$(crashes)" -eq 0 ] && [ "$BOOT_OK" -eq 0 ] && echo 0 || echo 1) "clean boot, event loop running"
 report $(grep -q "Auto-hide timeout reached" "$LOG" && echo 0 || echo 1) "loading-screen auto-hide timer fires"
+
+# The splash hiding is a full-screen repaint: the cursor-damage class of
+# bug (repaint regions never reaching the output) left its background on
+# screen as a stale dark region with hard edges - a user screenshot
+# showed exactly that. Assert the framebuffer no longer contains the
+# splash background colour once the hide has fired.
+LSCAP="$(mktemp /tmp/havel-ls-XXXXXX.png)"
+if WAYLAND_DISPLAY=wayland-0 grim "$LSCAP" 2>/dev/null && [ -s "$LSCAP" ]; then
+    LSPX=$(python3 -c "
+from PIL import Image
+from collections import Counter
+im = Image.open('$LSCAP').convert('RGB'); px = im.load(); w, h = im.size
+c = Counter(px[x, y] for x in range(0, w, 8) for y in range(0, h, 8))
+print(sum(n for k, n in c.items()
+         if abs(k[0]-13) < 4 and abs(k[1]-13) < 4 and abs(k[2]-26) < 5))
+" 2>/dev/null || echo -1)
+    report $([ "${LSPX:-1}" -eq 0 ] && echo 0 || echo 1) "splash cleared from the framebuffer (stale px: ${LSPX:-err})"
+    rm -f "$LSCAP"
+else
+    rm -f "$LSCAP"
+    skip "splash framebuffer check (no capture)"
+fi
 report $(grep -q "\[FRAME\] Frame #1" "$LOG" && echo 0 || echo 1) "frame loop started"
 report $(grep -qE "Conflict: .* already bound" "$LOG" && echo 1 || echo 0) "no keybinding registration conflicts"
 # Embed detection for phase 6: the harness must pass on CI builds without
