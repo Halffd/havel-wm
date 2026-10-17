@@ -7,8 +7,9 @@
 # frame loop, IPC crashes, modifier state).
 #
 # Phases:
-#   0. unit          - compositor-free unit suites (font module: bitmap
-#                     and vector faces through the one FreeType path)
+#   0. unit          - compositor-free unit suites: font module (bitmap
+#                     and vector faces through the one FreeType path),
+#                     Common.h utilities, keybinding parser
 #   1. boot          - compositor starts, loading screen lifecycle, no crashes
 #   2. client        - foot round-trip: connect/map/focus/render/disconnect
 #   3. pixels        - grim captures a frame; window content must be present
@@ -112,7 +113,7 @@ echo "--- phase 0: unit tests (no compositor needed)"
 # Pure unit binaries built alongside the compositor. The font module's
 # test generates its own bitmap font at run time, so it needs nothing
 # from the environment.
-for U in "$BUILD_DIR/test-font"; do
+for U in "$BUILD_DIR/test-font" "$BUILD_DIR/test-utilities" "$BUILD_DIR/test-keybinding"; do
     NAME=$(basename "$U")
     if [ -x "$U" ]; then
         if timeout 60 "$U" > /tmp/havel-unit-"$NAME".log 2>&1; then
