@@ -49,6 +49,14 @@ public:
 
     // Window texture for thumbnails (returns OpenGL texture ID, 0 if not available)
     virtual uint32_t getViewTextureId(View* view) = 0;
+
+    // Capture a view's current buffer as CPU pixels (ARGB8888
+    // little-endian, premultiplied) for thumbnail rendering. False when
+    // the buffer is not CPU-readable (DMA-BUF) or is transformed/scaled
+    // - callers draw their placeholder instead.
+    virtual bool captureViewPixels(View* view,
+                                   std::vector<uint32_t>& pixels,
+                                   int* w, int* h) = 0;
     virtual int getViewTextureWidth(View* view) = 0;
     virtual int getViewTextureHeight(View* view) = 0;
 

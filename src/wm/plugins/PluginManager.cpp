@@ -435,6 +435,22 @@ void PluginManager::focusView(View* view) {
     server->focusView(view);
 }
 
+bool PluginManager::captureViewPixels(View* view,
+                                       std::vector<uint32_t>& pixels,
+                                       int* w, int* h) {
+    if (!m_server || !view || !w || !h) return false;
+    uint32_t* raw = nullptr;
+    int rw = 0, rh = 0;
+    if (!havel_wlr_capture_view_pixels(view->nativeHandle(), &raw, &rw, &rh)) {
+        return false;
+    }
+    pixels.assign(raw, raw + (size_t)rw * rh);
+    havel_wlr_capture_pixels_free(raw);
+    *w = rw;
+    *h = rh;
+    return true;
+}
+
 void PluginManager::closeView(View* view) {
     if (!m_server || !view) return;
     // Route the close request through the C bridge — same path as

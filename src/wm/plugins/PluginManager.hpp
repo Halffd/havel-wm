@@ -160,6 +160,8 @@ public:
     View* getFocusedView() override;
     void focusView(View* view) override;
     void closeView(View* view) override;
+    bool captureViewPixels(View* view, std::vector<uint32_t>& pixels,
+                           int* w, int* h) override;
     void minimizeView(View* view) override;
     void toggleMaximizeView(View* view) override;
     void moveViewToWorkspace(View* view, uint32_t workspaceId) override;

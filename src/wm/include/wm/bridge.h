@@ -189,6 +189,13 @@ void havel_wlr_set_software_cursor(struct havel_wlr_server *server, bool forced)
 void havel_wlr_set_wallpaper(struct havel_wlr_server *server,
                              const uint32_t* pixels, int w, int h);
 
+// Capture a view's current buffer as CPU ARGB8888 (premultiplied)
+// pixels - window thumbnails for the Alt-Tab grid. false/NULL when the
+// buffer is not CPU-readable (DMA-BUF) or transformed/scaled.
+bool havel_wlr_capture_view_pixels(void* c_view,
+                                   uint32_t** out_pixels, int* out_w, int* out_h);
+void havel_wlr_capture_pixels_free(uint32_t* pixels);
+
 // Start the persistent self-injection keyboard (background wayland-client
 // connection to the compositor's own socket)
 void havel_self_kbd_start(void);

@@ -28,6 +28,11 @@ struct WindowEntry {
     uint32_t textureId = 0;   // View capture handle (0 = no thumbnail, placeholder drawn)
     uint32_t iconTextureId = 0;  // AppIconLoader handle (CPU pixel data)
     int iconSize = 32;  // Icon display size
+    // Live window preview (CPU pixels, ARGB8888 premultiplied), already
+    // downscaled to fit the cell's preview area. Empty = no capture
+    // (DMA-BUF client, transformed/scaled buffer) -> placeholder.
+    std::vector<uint32_t> thumbPixels;
+    int thumbW = 0, thumbH = 0;
 };
 
 /**
@@ -356,6 +361,7 @@ private:
                    entry.appId.c_str(), entry.title.c_str(),
                    view->isMapped(), view->isFloating());
 
+            captureThumbnail(entry);
             m_windows.push_back(entry);
         }
 
@@ -416,6 +422,46 @@ private:
         printf("[AltTab] Selected: %s (%d/%zu)\n",
                m_windows[m_selectedIndex].title.c_str(),
                m_selectedIndex + 1, m_windows.size());
+    }
+
+    // ---- Window thumbnails -------------------------------------------
+    // Capture the view's committed buffer as CPU pixels and nearest-
+    // neighbour downscale it to fit the cell's preview area (aspect
+    // preserved, letterboxed). Full-size capture is transient (freed on
+    // return); only the small result is kept per entry.
+    void captureThumbnail(WindowEntry& entry) {
+        entry.thumbPixels.clear();
+        entry.thumbW = entry.thumbH = 0;
+
+        std::vector<uint32_t> full;
+        int fw = 0, fh = 0;
+        if (!m_api->captureViewPixels((View*)entry.viewPtr, full, &fw, &fh)) {
+            return;
+        }
+        if (fw <= 0 || fh <= 0) return;
+
+        // Preview area inside the cell (matches the render layout):
+        //   x: +8 .. w-8,  y: +44 .. h-36
+        const int areaW = m_thumbnailWidth - 16;
+        const int areaH = m_thumbnailHeight - 44 - 36;
+        if (areaW <= 0 || areaH <= 0) return;
+
+        float scale = std::min((float)areaW / fw, (float)areaH / fh);
+        if (scale > 1.0f) scale = 1.0f;   // never upscale tiny windows
+        const int tw = std::max(1, (int)(fw * scale));
+        const int th = std::max(1, (int)(fh * scale));
+
+        entry.thumbPixels.resize((size_t)tw * th);
+        entry.thumbW = tw;
+        entry.thumbH = th;
+        for (int y = 0; y < th; y++) {
+            const int sy = (int)((y + 0.5f) * fh / th);
+            const uint32_t* srcRow = &full[(size_t)sy * fw];
+            uint32_t* dstRow = &entry.thumbPixels[(size_t)y * tw];
+            for (int x = 0; x < tw; x++) {
+                dstRow[x] = srcRow[(int)((x + 0.5f) * fw / tw)];
+            }
+        }
     }
 
     // ---- Grid geometry + hit-testing ---------------------------------
@@ -649,6 +695,33 @@ private:
                     renderer->drawRect((float)(cell.x + 8), (float)(cell.y + 8),
                                       (float)iconSize, (float)iconSize,
                                       Color(0.4f, 0.4f, 0.45f, 1.0f));
+                }
+            }
+
+            // Window preview (live capture, else placeholder). The area
+            // matches captureThumbnail's letterbox target.
+            {
+                const int areaW = cell.w - 16;
+                const int areaY = cell.y + 44;
+                const int areaH = cell.h - 44 - 36;
+                renderer->drawRect((float)(cell.x + 8), (float)areaY,
+                                  (float)areaW, (float)areaH,
+                                  Color(0.10f, 0.10f, 0.13f, 0.95f));
+                if (entry.thumbW > 0 && entry.thumbH > 0) {
+                    // centered (letterbox already baked into the thumb size)
+                    const int px = cell.x + 8 + (areaW - entry.thumbW) / 2;
+                    const int py = areaY + (areaH - entry.thumbH) / 2;
+                    renderer->drawPixels(entry.thumbPixels.data(),
+                                         entry.thumbW, entry.thumbH,
+                                         (float)px, (float)py,
+                                         (float)entry.thumbW, (float)entry.thumbH);
+                } else {
+                    const char* noPreview = "no preview";
+                    renderer->drawText(noPreview,
+                                       (float)(cell.x + 8 + areaW / 2 - 27),
+                                       (float)(areaY + areaH / 2 - 6), 11.0f,
+                                       Color(m_textColor[0]*0.5f, m_textColor[1]*0.5f,
+                                             m_textColor[2]*0.5f, 0.8f));
                 }
             }
 

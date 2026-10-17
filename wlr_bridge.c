@@ -8,6 +8,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <drm_fourcc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -3885,6 +3886,90 @@ uint32_t havel_wlr_capture_view_texture(void* c_view) {
     // Texture capture not fully implemented (needs renderer access from the
     // C++ layer); Alt-Tab uses fallback colored rectangles.
     return 0;
+}
+
+// Capture a view's CURRENT committed buffer as CPU pixels (ARGB8888
+// little-endian, premultiplied - the wl_shm convention, and what the
+// scene buffers expect). Works with the software renderer and plain shm
+// clients, which is what Alt-Tab thumbnails need; DMA-BUF (GL clients)
+// and transformed/scaled buffers fall back to the placeholder honestly
+// instead of rendering something garbled.
+//
+// *out_pixels is malloc'd (free with havel_wlr_capture_pixels_free);
+// returns 0 with *out_pixels = NULL when capture is not possible.
+// Iterator callback: keep the first buffer node (the toplevel surface).
+static void first_buffer_iter(struct wlr_scene_buffer *buf, int sx, int sy, void *data) {
+    (void)sx; (void)sy;
+    struct wlr_scene_buffer **out = (struct wlr_scene_buffer**)data;
+    if (!*out) *out = buf;
+}
+
+bool havel_wlr_capture_view_pixels(void* c_view,
+                                    uint32_t** out_pixels, int* out_w, int* out_h) {
+    if (!c_view || !out_pixels || !out_w || !out_h) return false;
+    *out_pixels = NULL; *out_w = 0; *out_h = 0;
+
+    enum havel_view_kind kind = *(enum havel_view_kind*)c_view;
+    struct wlr_scene_tree *scene_tree = NULL;
+    if (kind == HAVEL_VIEW_XDG) {
+        scene_tree = ((struct havel_xdg_view*)c_view)->scene_tree;
+    } else if (kind == HAVEL_VIEW_XWAYLAND) {
+        scene_tree = ((struct havel_xwayland_view*)c_view)->scene_tree;
+    }
+    if (!scene_tree) return false;
+
+    // The view tree wraps the surface: find its buffer node. (The tree
+    // node itself is a TREE, not a BUFFER - the original capture code
+    // checked the tree node and always bailed.)
+    struct wlr_scene_buffer *scene_buffer = NULL;
+    wlr_scene_node_for_each_buffer(&scene_tree->node, first_buffer_iter, &scene_buffer);
+    if (!scene_buffer) return false;
+    struct wlr_scene_surface *scene_surface =
+        wlr_scene_surface_try_from_buffer(scene_buffer);
+    if (!scene_surface) return false;
+
+    struct wlr_surface *surface = scene_surface->surface;
+    if (!surface || !surface->buffer) return false;
+
+    // Rotated/flipped or scaled buffers need transform-aware copying;
+    // rather than risk a garbled thumbnail, no capture for those.
+    if (surface->current.transform != WL_OUTPUT_TRANSFORM_NORMAL ||
+        surface->current.scale != 1) {
+        return false;
+    }
+    struct wlr_client_buffer *cb = surface->buffer;
+    if (!cb) return false;
+
+    void* data = NULL;
+    uint32_t format = 0;
+    size_t stride = 0;
+    if (!wlr_buffer_begin_data_ptr_access(&cb->base, WLR_BUFFER_DATA_PTR_ACCESS_READ,
+                                           &data, &format, &stride)) {
+        return false;   // DMA-BUF etc. - no CPU access
+    }
+    bool ok = false;
+    const int bw = surface->current.buffer_width;
+    const int bh = surface->current.buffer_height;
+    if ((format == DRM_FORMAT_ARGB8888 || format == DRM_FORMAT_XRGB8888) &&
+        data && bw > 0 && bh > 0 && stride >= (size_t)bw * 4) {
+        uint32_t* out = malloc((size_t)bw * bh * 4);
+        if (out) {
+            for (int y = 0; y < bh; y++) {
+                memcpy(out + (size_t)y * bw, (uint8_t*)data + (size_t)y * stride,
+                       (size_t)bw * 4);
+            }
+            *out_pixels = out;
+            *out_w = bw;
+            *out_h = bh;
+            ok = true;
+        }
+    }
+    wlr_buffer_end_data_ptr_access(&cb->base);
+    return ok;
+}
+
+void havel_wlr_capture_pixels_free(uint32_t* pixels) {
+    free(pixels);
 }
 
 // ============================================================================
