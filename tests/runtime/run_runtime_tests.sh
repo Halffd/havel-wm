@@ -15,6 +15,8 @@
 #                      answer everything and survive)
 #   5. keys          - zwp_virtual_keyboard_v1 injection: Meta+Return must
 #                      trigger spawn_terminal in the log
+#   8. wallpaper      - set_wallpaper via IPC draws a generated pattern and
+#                      clears back to the solid background
 #
 # Usage: tests/runtime/run_runtime_tests.sh [BUILD_DIR]
 #
@@ -70,10 +72,12 @@ wait_for_log() {
 start_wm() {
     rm -f "$SOCK"
     # timeout must outlast the whole harness (boot + client + pixels +
-    # ipc + keys + parity phases); 90s expired mid-run under load and
-    # killed the compositor during the IPC phase
+    # ipc + keys + parity + alttab + wallpaper phases); 90s expired
+    # mid-run once, 240s expired mid-run after phase 7 landed (the
+    # wallpaper phase then talked to a dead compositor and skipped) -
+    # under load this box needs generous headroom
     WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 \
-        timeout 240 "$BUILD_DIR/bin/havel-wm" > "$LOG" 2>&1 &
+        timeout 420 "$BUILD_DIR/bin/havel-wm" > "$LOG" 2>&1 &
     WM_PID=$!
     wait_socket || { echo "compositor socket never came up"; return 1; }
 }
@@ -295,7 +299,10 @@ cat > "$PARITY_HOME/.config/havel-wm/config.hv" <<'EOF'
 ^+F2 => { log("harness-^+F2-fired") }
 keybind("Meta+F3", fn() { log("harness-keybind-F3-fired") })
 EOF
-HOME="$PARITY_HOME" WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 \
+PARITY_IPC1="/run/user/$(id -u)/havel-wm-parity1.sock"
+rm -f "$PARITY_IPC1"
+HOME="$PARITY_HOME" HAVEL_IPC_SOCKET="$PARITY_IPC1" \
+    WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 \
     timeout 150 "$BUILD_DIR/bin/havel-wm" > /tmp/havel-parity-wm.log 2>&1 &
 PARITY_PID=$!
 OLD_LOG="$LOG"; LOG=/tmp/havel-parity-wm.log
@@ -502,6 +509,79 @@ DOWN_PY
     rm -f "$GRID_UP" "$GRID_DOWN"
     kill $GRID_PIDS 2>/dev/null
 fi
+
+# ---------------------------------------------------------------- phase 8
+echo "--- phase 8: wallpaper behind windows"
+# The wallpaper used to be unreachable (no command, no renderer call) -
+# this phase exercises the IPC path end to end with its own pattern, so it
+# does not depend on files in $HOME.
+WPIMG="$(mktemp /tmp/havel-wp-XXXXXX.png)"
+python3 - "$WPIMG" <<'WP_PY'
+import sys
+from PIL import Image
+im = Image.new('RGB', (320, 200))
+px = im.load()
+for y in range(200):
+    for x in range(320):
+        px[x, y] = (255, 0, 255) if (x // 40 + y // 40) % 2 == 0 else (0, 255, 0)
+im.save(sys.argv[1])
+WP_PY
+if python3 - "$WPIMG" "$SOCK" <<'WPSET' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[2])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"set_wallpaper",
+                       "params":{"path":sys.argv[1]}})+"\n").encode())
+r = json.loads(s.recv(65536))
+raise SystemExit(0 if r.get("result",{}).get("success") else 1)
+WPSET
+then
+    sleep 0.8
+    WPCAP="$(mktemp /tmp/havel-wp-cap-XXXXXX.png)"
+    WAYLAND_DISPLAY=wayland-0 grim "$WPCAP" 2>/dev/null
+    WPCOUNTS=$(python3 - "$WPCAP" <<'WP_COUNT'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB'); px = im.load(); w, h = im.size
+mg = sum(1 for y in range(0, h, 4) for x in range(0, w, 4) if px[x, y] == (255, 0, 255))
+gr = sum(1 for y in range(0, h, 4) for x in range(0, w, 4) if px[x, y] == (0, 255, 0))
+print("%d %d" % (mg, gr))
+WP_COUNT
+)
+    WPMG=$(echo "$WPCOUNTS" | awk '{print $1}')
+    WPGR=$(echo "$WPCOUNTS" | awk '{print $2}')
+    TOTAL=$(( (1280 / 4) * (720 / 4) ))
+    report $([ "${WPMG:-0}" -gt 1000 ] && [ "${WPGR:-0}" -gt 1000 ] && echo 0 || echo 1) \
+        "wallpaper pattern drawn (magenta=${WPMG:-err} green=${WPGR:-err})"
+    # clear and confirm the pattern is gone
+    python3 - "$SOCK" <<'WPCLR' >/dev/null 2>&1
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"set_wallpaper",
+                       "params":{"path":""}})+"\n").encode())
+s.recv(65536)
+WPCLR
+    sleep 0.8
+    WAYLAND_DISPLAY=wayland-0 grim "$WPCAP" 2>/dev/null
+    WPCOUNTS2=$(python3 - "$WPCAP" <<'WP_COUNT2'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB'); px = im.load(); w, h = im.size
+mg = sum(1 for y in range(0, h, 4) for x in range(0, w, 4) if px[x, y] == (255, 0, 255))
+gr = sum(1 for y in range(0, h, 4) for x in range(0, w, 4) if px[x, y] == (0, 255, 0))
+print("%d %d" % (mg, gr))
+WP_COUNT2
+)
+    WPMG2=$(echo "$WPCOUNTS2" | awk '{print $1}')
+    WPGR2=$(echo "$WPCOUNTS2" | awk '{print $2}')
+    report $([ "${WPMG2:-1}" -lt 50 ] && [ "${WPGR2:-1}" -lt 50 ] && echo 0 || echo 1) \
+        "wallpaper cleared (magenta=${WPMG2:-err} green=${WPGR2:-err})"
+    rm -f "$WPCAP"
+else
+    skip "wallpaper phase (set_wallpaper failed)"
+fi
+rm -f "$WPIMG"
 
 # ---------------------------------------------------------------- teardown
 kill "$FOOT_PID" 2>/dev/null; FOOT_PID=""

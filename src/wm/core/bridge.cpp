@@ -353,6 +353,14 @@ void havel_cpp_init_desktop(struct havel_cpp_server* server) {
 
     server->server->setDesktopManager(&desktopManager);
 
+    // Wallpaper requests from the desktop manager (NASA wallpapers,
+    // slideshow) go to the real renderer path, same as the IPC
+    // set_wallpaper command.
+    desktopManager.setOnWallpaperChanged(
+        [srv = server->server](const std::string& path) {
+            srv->setWallpaperFromFile(path);
+        });
+
     // Bind logout shortcut (Ctrl+Alt+Delete)
     desktopManager.bindLogout(XKB_KEY_Delete, (1 << 0) | (1 << 2) | (1 << 3));  // Shift=bit0, Ctrl=bit2, Alt=bit3
 

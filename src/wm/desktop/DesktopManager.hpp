@@ -241,7 +241,6 @@ public:
     // Rendering
     void render(void* renderer, int screenWidth, int screenHeight);
     void renderIcons(void* renderer);
-    void renderWallpaper(void* renderer, int screenWidth, int screenHeight);
     void renderContextMenu(void* renderer);
     void renderTaskbar(void* renderer, int screenWidth, int screenHeight);
     
@@ -319,7 +318,6 @@ private:
     std::unique_ptr<NASAWallpaperManager> m_nasaWallpaperManager;
     
     // Rendering
-    uint32_t m_wallpaperTexture = 0;
     int m_screenWidth = 0;
     int m_screenHeight = 0;
     

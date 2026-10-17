@@ -95,10 +95,6 @@ void DesktopManager::shutdown() {
         }
     }
     
-    // Unload wallpaper texture
-    if (m_wallpaperTexture != 0) {
-        unloadIconTexture(m_wallpaperTexture);
-    }
     
     m_icons.clear();
     m_selectedIcons.clear();
@@ -436,15 +432,16 @@ void DesktopManager::endDrag() {
 void DesktopManager::setWallpaper(const std::string& path) {
     m_config.wallpaper.path = path;
     m_config.wallpaper.mode = WallpaperMode::Single;
-    
-    // Load wallpaper texture
-    if (m_wallpaperTexture != 0) {
-        unloadIconTexture(m_wallpaperTexture);
-    }
-    m_wallpaperTexture = loadIconTexture(path);
-    
+
+    // The wallpaper itself is rendered by the compositor's scene graph
+    // (havel_wlr_set_wallpaper, behind every window); this manager only
+    // records the choice and notifies through m_onWallpaperChanged. The
+    // old path ran the image through the ICON loader - which searches
+    // theme directories and produced a 32x32 placeholder for real paths
+    // - into a texture that renderWallpaper() would have drawn as a
+    // placeholder rect. renderWallpaper had no callers; both are gone.
     LOG_INFO("[DesktopManager] Wallpaper set: %s", path.c_str());
-    
+
     if (m_onWallpaperChanged) {
         m_onWallpaperChanged(path);
     }
@@ -620,9 +617,9 @@ void DesktopManager::render(void* renderer, int screenWidth, int screenHeight) {
     m_screenWidth = screenWidth;
     m_screenHeight = screenHeight;
     
-    // Render wallpaper
-    renderWallpaper(renderer, screenWidth, screenHeight);
-    
+    // The wallpaper is composited by the scene graph (see
+    // havel_wlr_set_wallpaper); nothing to draw here.
+
     // Render icons
     renderIcons(renderer);
     
@@ -686,31 +683,6 @@ void DesktopManager::renderIcons(void* rendererPtr) {
         
         renderer->drawText(displayName.c_str(), x, labelY, 14.0f, labelColor);
     }
-}
-
-void DesktopManager::renderWallpaper(void* rendererPtr, int screenWidth, int screenHeight) {
-    if (!rendererPtr) return;
-    
-    OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
-    
-    // Handle different wallpaper modes
-    if (m_config.wallpaper.mode == WallpaperMode::SolidColor) {
-        // Draw solid color background
-        Color bgColor(m_config.wallpaper.colorR, m_config.wallpaper.colorG, m_config.wallpaper.colorB, 1.0f);
-        renderer->drawRect(0, 0, screenWidth, screenHeight, bgColor);
-    } else if (m_config.wallpaper.mode == WallpaperMode::Single && !m_config.wallpaper.path.empty()) {
-        // Draw wallpaper image (would use loaded texture)
-        // For now, draw placeholder with path text
-        Color placeholder(0.1f, 0.15f, 0.2f, 1.0f);
-        renderer->drawRect(0, 0, screenWidth, screenHeight, placeholder);
-        renderer->drawText(m_config.wallpaper.path.c_str(), 20, screenHeight - 30, 16.0f, 
-                          Color(0.5f, 0.5f, 0.5f, 1.0f));
-    } else if (m_config.wallpaper.mode == WallpaperMode::Slideshow) {
-        // Draw current slideshow image
-        Color slideshow(0.1f, 0.1f, 0.15f, 1.0f);
-        renderer->drawRect(0, 0, screenWidth, screenHeight, slideshow);
-    }
-    // Video mode would use video player integration
 }
 
 void DesktopManager::renderContextMenu(void* rendererPtr) {

@@ -87,7 +87,13 @@ IPCServer::~IPCServer() {
 bool IPCServer::start(const std::string& socketPath) {
     if (m_running) return false;
 
-    m_socketPath = socketPath;
+    // NOTE: m_socketPath is only recorded once this instance actually
+    // OWNS the socket (after bind). It used to be set up front, so a
+    // second compositor that failed the live-socket check below still
+    // unlinked the FIRST compositor's live socket on shutdown - the
+    // parity harness killed its second instance and the main
+    // compositor's IPC silently vanished (phase 8 then talked to a
+    // dead socket path and skipped).
 
     // Live-socket check: if another compositor's IPC is listening, FAIL
     // instead of stealing its socket (the old unconditional unlink broke
@@ -142,6 +148,8 @@ bool IPCServer::start(const std::string& socketPath) {
         unlink(socketPath.c_str());
         return false;
     }
+
+    m_socketPath = socketPath;  // owned from here on
 
     m_running = true;
     // Register the listen fd with the wlr bridge's event-loop sources.
