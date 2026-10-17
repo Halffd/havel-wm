@@ -234,12 +234,14 @@ private:
             slot.slotX = idx % m_gridCols;
             slot.slotY = idx / m_gridCols;
             
-            // Store original geometry for restore
-            // Note: In production, would query actual view geometry
-            slot.originalX = 100 + (idx * 20);
-            slot.originalY = 100 + (idx * 20);
-            slot.originalW = 800;
-            slot.originalH = 600;
+            // Store the view's ACTUAL geometry for restore. The
+            // hardcoded cascading values (100+idx*20, 800x600) meant
+            // exiting scale mode gave every window the same size at a
+            // made-up position, destroying the user's layout.
+            slot.originalX = m_api->getViewX(view);
+            slot.originalY = m_api->getViewY(view);
+            slot.originalW = m_api->getViewWidth(view);
+            slot.originalH = m_api->getViewHeight(view);
             
             // Calculate scaled position
             int x = m_gap + (slot.slotX * (maxSlotW + m_gap));
