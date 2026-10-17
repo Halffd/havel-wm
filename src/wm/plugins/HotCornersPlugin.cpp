@@ -99,13 +99,25 @@ public:
         // Get cursor position from API
         int cursorX = (int)m_api->getCursorX();
         int cursorY = (int)m_api->getCursorY();
-        
-        // Get output dimensions
-        int width = m_api->getOutputWidth();
-        int height = m_api->getOutputHeight();
-        
-        // Detect which corner cursor is in
-        Corner corner = detectCorner(cursorX, cursorY, width, height);
+
+        // Corner detection is per-monitor: on a multi-output layout the
+        // pointer's scene position must be compared against the corners
+        // of the output it is actually on, not the primary's full-size
+        // box (with two 1280-wide outputs, the right edge of monitor 2
+        // is at x=2559 - a single 1280-wide box could never see it).
+        CompositorAPI::OutputTarget out = m_api->currentOutputTarget();
+        if (out.w <= 0 || out.h <= 0) {
+            // No output context (single-output plugins path): fall back
+            // to the primary's dimensions at scene origin.
+            out.x = 0; out.y = 0;
+            out.w = m_api->getOutputWidth();
+            out.h = m_api->getOutputHeight();
+        }
+        int relX = cursorX - out.x;
+        int relY = cursorY - out.y;
+
+        // Detect which corner of THIS output the pointer is in
+        Corner corner = detectCorner(relX, relY, out.w, out.h);
         
         // If cursor moved to a new corner
         if (corner != m_lastCorner) {
@@ -114,6 +126,7 @@ public:
                 m_cornerEnterTime = 0;
             }
             m_lastCorner = corner;
+            m_cornerOutput = out;
             m_cornerEnterTime = getMonotonicTimeMs();
         } else if (m_cornerEnterTime > 0) {
             // Check if we've been in the corner long enough to trigger
@@ -146,11 +159,14 @@ public:
         if (!m_enabled || !rendererPtr || m_lastCorner < 0) return;
         
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
-        int screenWidth = renderer->getScreenWidth();
-        int screenHeight = renderer->getScreenHeight();
-        
-        // Calculate corner highlight rectangle
-        FloatRect highlightRect = getCornerHighlightRect(m_lastCorner, screenWidth, screenHeight);
+
+        // Highlight in scene coordinates: the corner's own monitor box.
+        // (screenWidth/Height here belong to whichever output's pass is
+        // running; the highlight belongs on the monitor the pointer is
+        // cornered on.)
+        FloatRect highlightRect = getCornerHighlightRect(
+            m_lastCorner, m_cornerOutput.x, m_cornerOutput.y,
+            m_cornerOutput.w, m_cornerOutput.h);
         
         // Calculate fill based on trigger progress
         uint64_t currentTime = getMonotonicTimeMs();
@@ -171,9 +187,12 @@ public:
         Color borderColor = highlightColor;
         borderColor.a = 0.5f + (progress * 0.5f);  // Fade in border
         
-        // Draw progress bar along edge
+        // Draw progress bar along edge (relative to the highlight box;
+        // the monitor box is already baked into highlightRect)
         if (progress > 0.0f) {
-            FloatRect progressRect = getProgressRect(m_lastCorner, highlightRect, progress, screenWidth, screenHeight);
+            FloatRect progressRect = getProgressRect(m_lastCorner, highlightRect, progress,
+                                                     (int)highlightRect.x + (int)highlightRect.w,
+                                                     (int)highlightRect.y + (int)highlightRect.h);
             renderer->drawRect(progressRect.x, progressRect.y, progressRect.w, progressRect.h, borderColor);
         }
     }
@@ -181,6 +200,7 @@ public:
 private:
     CompositorAPI* m_api = nullptr;
     bool m_pointerMoved = false;
+    CompositorAPI::OutputTarget m_cornerOutput;
     bool m_haveFirstPos = false;
     int m_firstX = 0, m_firstY = 0;
     bool m_enabled;
@@ -266,20 +286,21 @@ private:
         }
     }
     
-    // Get highlight rectangle for a corner
-    FloatRect getCornerHighlightRect(int corner, int screenWidth, int screenHeight) {
+    // Get highlight rectangle for a corner, in scene coordinates of the
+    // monitor box (bx, by, bw, bh).
+    FloatRect getCornerHighlightRect(int corner, int bx, int by, int bw, int bh) {
         int size = 100;  // Highlight size in pixels
         int margin = 0;
         
         switch (corner) {
             case CORNER_TOP_LEFT:
-                return FloatRect(margin, margin, size, size);
+                return FloatRect(bx + margin, by + margin, size, size);
             case CORNER_TOP_RIGHT:
-                return FloatRect(screenWidth - size - margin, margin, size, size);
+                return FloatRect(bx + bw - size - margin, by + margin, size, size);
             case CORNER_BOTTOM_LEFT:
-                return FloatRect(margin, screenHeight - size - margin, size, size);
+                return FloatRect(bx + margin, by + bh - size - margin, size, size);
             case CORNER_BOTTOM_RIGHT:
-                return FloatRect(screenWidth - size - margin, screenHeight - size - margin, size, size);
+                return FloatRect(bx + bw - size - margin, by + bh - size - margin, size, size);
             default:
                 return FloatRect(0, 0, 0, 0);
         }

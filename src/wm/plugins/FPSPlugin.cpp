@@ -102,6 +102,17 @@ public:
         if (!m_tree) return;
         renderer->setTargetTree(m_tree);
 
+        // Collect each output as its render pass runs; the panel is drawn
+        // once per monitor (a single panel at scene (10,10) showed up on
+        // the first monitor only).
+        {
+            CompositorAPI::OutputTarget out = m_api->currentOutputTarget();
+            if (out.w > 0 && out.h > 0) {
+                m_outputs.resize(std::max(m_outputs.size(), (size_t)out.index + 1));
+                m_outputs[out.index] = out;
+            }
+        }
+
         int x = 10;
         int y = 10;
         int lineHeight = 18;
@@ -111,7 +122,20 @@ public:
         int panelH = 80;
         if (!m_showGraph) panelH = 60;
         
-        renderer->drawRect(x - 5, y - 5, panelW, panelH, Color(0.0f, 0.0f, 0.0f, 0.7f));
+        for (const auto& out : m_outputs) {
+        if (out.w <= 0 || out.h <= 0) continue;
+        x = out.x + 10;
+        y = out.y + 10;
+        drawPanel(renderer, x, y, panelW, panelH);
+        }
+        if (m_outputs.empty()) {
+        drawPanel(renderer, x, y, panelW, panelH);
+        }
+        renderer->setTargetTree(nullptr);
+    }
+
+    void drawPanel(OverlayRenderer* renderer, int x, int y, int panelW, int panelH) {
+        int lineHeight = 18;
         
         // Draw title
         if (m_showText) {
@@ -145,8 +169,6 @@ public:
             y += 5;
             drawFrameTimeGraph(renderer, x, y, 210, 40);
         }
-
-        renderer->setTargetTree(nullptr);
     }
 
     bool onKey(const KeyEvent& event) override {
@@ -173,6 +195,7 @@ public:
     }
 
 private:
+    std::vector<CompositorAPI::OutputTarget> m_outputs;
     CompositorAPI* m_api = nullptr;
     bool m_enabled;
     bool m_showGraph;
