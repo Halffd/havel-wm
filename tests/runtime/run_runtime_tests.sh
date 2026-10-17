@@ -7,6 +7,8 @@
 # frame loop, IPC crashes, modifier state).
 #
 # Phases:
+#   0. unit          - compositor-free unit suites (font module: bitmap
+#                     and vector faces through the one FreeType path)
 #   1. boot          - compositor starts, loading screen lifecycle, no crashes
 #   2. client        - foot round-trip: connect/map/focus/render/disconnect
 #   3. pixels        - grim captures a frame; window content must be present
@@ -104,6 +106,25 @@ report() {
 
 echo "=== havel-wm runtime verification ==="
 echo "log: $LOG"
+
+# ---------------------------------------------------------------- phase 0
+echo "--- phase 0: unit tests (no compositor needed)"
+# Pure unit binaries built alongside the compositor. The font module's
+# test generates its own bitmap font at run time, so it needs nothing
+# from the environment.
+for U in "$BUILD_DIR/test-font"; do
+    NAME=$(basename "$U")
+    if [ -x "$U" ]; then
+        if timeout 60 "$U" > /tmp/havel-unit-"$NAME".log 2>&1; then
+            report 0 "$NAME unit suite ($(tail -1 /tmp/havel-unit-"$NAME".log))"
+        else
+            report 1 "$NAME unit suite ($(tail -1 /tmp/havel-unit-"$NAME".log))"
+            cat /tmp/havel-unit-"$NAME".log | tail -8
+        fi
+    else
+        skip "$NAME (not built - cmake --build build --target $NAME)"
+    fi
+done
 
 # ---------------------------------------------------------------- phase 1
 echo "--- phase 1: boot"
