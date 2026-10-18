@@ -429,6 +429,19 @@ void DesktopManager::endDrag() {
     LOG_DEBUG("[DesktopManager] Ended drag");
 }
 
+void DesktopManager::setWallpaperSlideshow(const std::vector<std::string>& paths, int intervalSec) {
+    m_config.wallpaper.slideshowPaths = paths;
+    m_config.wallpaper.slideshowInterval = intervalSec;
+    m_config.wallpaper.mode = WallpaperMode::Slideshow;
+    m_lastSlideshowChange = 0;
+    LOG_INFO("[Desktop] Slideshow set: %zu paths, %ds interval", paths.size(), intervalSec);
+    if (!paths.empty()) {
+        setWallpaper(paths[0]);
+        m_lastSlideshowChange = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+}
+
 void DesktopManager::setWallpaper(const std::string& path) {
     m_config.wallpaper.path = path;
     m_config.wallpaper.mode = WallpaperMode::Single;

@@ -1,5 +1,6 @@
 #include <wm/Server.hpp>
 #include <wm/render/AppIconLoader.hpp>
+#include <wm/desktop/DesktopManager.hpp>
 #include <ui/lock/ScreenLock.hpp>
 #include <wm/Layout.hpp>
 #include <wm/plugins/Plugins.hpp>
@@ -425,6 +426,9 @@ void Server::onViewDestroyed(View* view) {
 }
 
 bool Server::handleKey(uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char, const char* utf8) {
+    m_lastInputTimeMs = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+
     // Screen lock intercepts ALL keyboard input when active — before
     // keybindings and plugins, so the lock screen is impenetrable.
     if (m_screenLock && m_screenLock->isLocked()) {
@@ -501,6 +505,8 @@ void Server::handlePointerButton(uint32_t button, bool pressed, double x, double
 }
 
 void Server::handlePointerMotion(double x, double y) {
+    m_lastInputTimeMs = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
     // Update cursor position for HotCorners and other plugins
     m_cursorX = x;
     m_cursorY = y;
@@ -1661,6 +1667,44 @@ bool Server::startIPCServer(const std::string& socketPath) {
         return m_ipcServer->jsonToString(r);
     });
 
+    // Idle auto-lock: screen locks after timeout_ms of no input (0 = off)
+    m_ipcServer->registerCommand("set_idle_lock", [this](const std::string& args) -> std::string {
+        int timeoutMs = m_ipcServer->extractJsonInt(args, "timeout_ms", 0);
+        setIdleLockTimeout((uint32_t)timeoutMs);
+        JsonObject r;
+        r["success"] = true;
+        r["timeout_ms"] = timeoutMs;
+        return m_ipcServer->jsonToString(r);
+    });
+
+    // Wallpaper slideshow: set a list of PNGs and an interval
+    m_ipcServer->registerCommand("set_wallpaper_slideshow", [this](const std::string& args) -> std::string {
+        std::vector<std::string> paths;
+        size_t pos = 0;
+        while (true) {
+            size_t start = args.find("\"", pos);
+            if (start == std::string::npos) break;
+            size_t end = args.find("\"", start + 1);
+            if (end == std::string::npos) break;
+            std::string p = args.substr(start + 1, end - start - 1);
+            if (!p.empty() && p[0] == '/' && std::filesystem::is_regular_file(p)) {
+                paths.push_back(p);
+            }
+            pos = end + 1;
+        }
+        int interval = m_ipcServer->extractJsonInt(args, "interval", 300);
+        if (paths.empty()) {
+            return m_ipcServer->createErrorResponse(-5, "no valid wallpaper paths");
+        }
+        auto& dm = havel::getDesktopManager();
+        dm.setWallpaperSlideshow(paths, interval);
+        JsonObject r;
+        r["success"] = true;
+        r["count"] = (int)paths.size();
+        r["interval"] = interval;
+        return m_ipcServer->jsonToString(r);
+    });
+
     // Wallpaper image (PNG), drawn behind every window. Empty path
     // clears back to the solid background colour.
     m_ipcServer->registerCommand("set_wallpaper", [this](const std::string& args) -> std::string {
@@ -2059,6 +2103,17 @@ void Server::lockScreen() {
 
 void Server::unlockScreen() {
     if (m_screenLock) m_screenLock->unlock();
+}
+
+void Server::checkIdleLock() {
+    if (m_idleLockTimeoutMs == 0 || !m_screenLock) return;
+    if (m_screenLock->isLocked()) return;
+    auto now = (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (now - m_lastInputTimeMs >= m_idleLockTimeoutMs) {
+        LOG_INFO("[ScreenLock] idle timeout (%ums) reached, locking", m_idleLockTimeoutMs);
+        lockScreen();
+    }
 }
 
 bool Server::isScreenLocked() const {

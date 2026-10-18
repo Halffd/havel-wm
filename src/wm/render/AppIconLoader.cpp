@@ -219,10 +219,10 @@ bool loadPngPixels(const std::string& path,
     if (colorType == PNG_COLOR_TYPE_GRAY || colorType == PNG_COLOR_TYPE_GRAY_ALPHA) {
         png_set_gray_to_rgb(png);
     }
-    if (colorType == PNG_COLOR_TYPE_RGBA) {
-        // libpng gives ABGR-packed bytes on little-endian unless swapped
-        png_set_bgr(png);
-    }
+    // libpng outputs [R,G,B,A] in memory; the scene buffer expects
+    // [B,G,R,A] (DRM_FORMAT_ARGB8888). Always swap — for RGBA, and for
+    // RGB/GRAY/PALETTE after png_set_add_alpha fills in the alpha byte.
+    png_set_bgr(png);
 
     png_read_update_info(png, info);
 

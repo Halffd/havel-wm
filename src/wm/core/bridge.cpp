@@ -267,6 +267,16 @@ void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int hei
     // their content would blink off between draws.
     renderer->beginFrame(width, height, target ? target->index : -1);
 
+    // Check idle auto-lock every frame
+    server->server->checkIdleLock();
+
+    // Drive the wallpaper slideshow
+    {
+        auto* dm = server->server->desktopManager();
+        if (dm) static_cast<havel::DesktopManager*>(dm)->updateSlideshow();
+    }
+
+    
     // Screen lock renders FIRST (over everything, under nothing): when
     // locked, its overlay is the only thing that should be visible.
     if (server->server->isScreenLocked()) {

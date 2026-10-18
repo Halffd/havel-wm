@@ -198,6 +198,8 @@ public:
     
     // Wallpaper
     void setWallpaper(const std::string& path);
+    void updateSlideshow();
+void setWallpaperSlideshow(const std::vector<std::string>& paths, int intervalSec);
     void setWallpaperMode(WallpaperMode mode);
     void setSlideshowInterval(int seconds);
     void addSlideshowImage(const std::string& path);
@@ -262,7 +264,6 @@ public:
 
 private:
     // Internal methods
-    void updateSlideshow();
     void updateVideoWallpaper();
     void renderDesktopBackground(void* renderer, int w, int h);
     ContextMenuItem createDefaultContextMenu();

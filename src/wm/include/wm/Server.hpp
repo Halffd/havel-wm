@@ -115,6 +115,12 @@ public:
     void unlockScreen();
     bool isScreenLocked() const;
 
+    // Idle auto-lock: the screen locks after timeoutMs of no input.
+    // Set to 0 to disable.
+    void setIdleLockTimeout(uint32_t timeoutMs) { m_idleLockTimeoutMs = timeoutMs; }
+    uint32_t idleLockTimeoutMs() const { return m_idleLockTimeoutMs; }
+    void checkIdleLock();  // called from the frame loop
+
     // Cursor mode request. Recorded even when the C handle is not up yet
     // (config.hv runs early), then applied as soon as it exists and to
     // every output as it is enabled.
@@ -303,6 +309,8 @@ private:
     void* m_nativeHandle = nullptr;
     bool m_softwareCursorForced = false;
     class ScreenLock* m_screenLock = nullptr;
+    uint32_t m_idleLockTimeoutMs = 0;  // 0 = disabled
+    uint64_t m_lastInputTimeMs = 0;
     OverlayTarget m_overlayTarget;
     std::unordered_map<uint32_t, Rect> m_outputGeoms;
     Animator m_animator;
