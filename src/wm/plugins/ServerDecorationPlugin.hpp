@@ -12,6 +12,29 @@ namespace havel {
  * Server-side window decoration
  * Provides title bars, borders, and window controls
  */
+// Decoration theme: configurable colours and sizes (Wayfire's
+// deco_theme_t pattern — a single theme object the renderer reads).
+struct DecorationTheme {
+    static constexpr int TITLE_BAR_HEIGHT = 32;
+    static constexpr int BORDER_WIDTH = 1;
+    static constexpr int CORNER_RADIUS = 8;
+
+    static constexpr int SHADOW_OFFSET_X = 4;
+    static constexpr int SHADOW_OFFSET_Y = 8;
+    static constexpr int SHADOW_BLUR = 16;
+    static constexpr float SHADOW_ALPHA = 0.4f;
+
+    // Focus transition duration (ms)
+    static constexpr int FOCUS_TRANSITION_MS = 200;
+
+    // Colours (RGBA 0..1)
+    static inline constexpr std::array<float, 4> FOCUSED_BG   = {0.2f, 0.3f, 0.4f, 1.0f};
+    static inline constexpr std::array<float, 4> UNFOCUSED_BG = {0.15f, 0.15f, 0.2f, 1.0f};
+    static inline constexpr std::array<float, 4> TEXT_COLOR   = {1.0f, 1.0f, 1.0f, 1.0f};
+    static inline constexpr std::array<float, 4> BUTTON_HOVER = {0.4f, 0.4f, 0.5f, 1.0f};
+    static inline constexpr std::array<float, 4> SHADOW_COLOR = {0.0f, 0.0f, 0.0f, 0.4f};
+};
+
 struct WindowDecoration {
     void* view = nullptr;              // Opaque view pointer
     std::string title;                 // Window title
@@ -26,24 +49,10 @@ struct WindowDecoration {
     // For maximize restore
     int view_start_x = 0, view_start_y = 0;
     int view_start_w = 0, view_start_h = 0;
+    // Focus transition progress (0=unfocused, 1=focused) for smooth
+    // colour interpolation; the animator drives this.
+    float focusBlend = 0.0f;
 
-    // Decoration dimensions
-    static constexpr int TITLE_BAR_HEIGHT = 32;
-    static constexpr int BORDER_WIDTH = 1;
-    static constexpr int CORNER_RADIUS = 8;
-    
-    // Shadow settings
-    static constexpr int SHADOW_OFFSET_X = 4;
-    static constexpr int SHADOW_OFFSET_Y = 8;
-    static constexpr int SHADOW_BLUR = 16;
-    static constexpr float SHADOW_ALPHA = 0.4f;
-
-    // Colors (inline constexpr to avoid linker errors)
-    static inline constexpr std::array<float, 4> FOCUSED_BG   = {0.2f, 0.3f, 0.4f, 1.0f};
-    static inline constexpr std::array<float, 4> UNFOCUSED_BG = {0.15f, 0.15f, 0.2f, 1.0f};
-    static inline constexpr std::array<float, 4> TEXT_COLOR   = {1.0f, 1.0f, 1.0f, 1.0f};
-    static inline constexpr std::array<float, 4> BUTTON_HOVER = {0.4f, 0.4f, 0.5f, 1.0f};
-    static inline constexpr std::array<float, 4> SHADOW_COLOR = {0.0f, 0.0f, 0.0f, SHADOW_ALPHA};
 };
 
 /**

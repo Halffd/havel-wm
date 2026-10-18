@@ -46,7 +46,7 @@ void ServerDecorationPlugin::onMouseMotion(int mx, int my) {
         if (deco.fullscreen) continue;
 
         // Check if mouse is in title bar area
-        if (my >= deco.y - WindowDecoration::TITLE_BAR_HEIGHT &&
+        if (my >= deco.y - DecorationTheme::TITLE_BAR_HEIGHT &&
             my <= deco.y &&
             mx >= deco.x &&
             mx <= deco.x + deco.width) {
@@ -171,6 +171,13 @@ void ServerDecorationPlugin::renderOverlay(void* rendererPtr) {
     for (auto& [viewPtr, deco] : m_decorations) {
         if (deco.minimized) continue;  // No decorations for minimized windows
 
+        // Smooth focus transition: focusBlend moves toward the target
+        // (1.0 = focused, 0.0 = unfocused) each frame
+        float target = deco.focused ? 1.0f : 0.0f;
+        float delta = 0.08f;  // per-frame step (200ms at 60fps)
+        if (deco.focusBlend < target) deco.focusBlend = std::min(deco.focusBlend + delta, target);
+        else if (deco.focusBlend > target) deco.focusBlend = std::max(deco.focusBlend - delta, target);
+
         // Render shadow first (behind window)
         renderShadow(renderer, deco);
 
@@ -209,6 +216,18 @@ uint64_t ServerDecorationPlugin::decorationSignature() const {
     return h;
 }
 
+// Interpolate between two RGBA colours (per-channel lerp).
+static std::array<float, 4> blendColors(
+    const std::array<float, 4>& focused, const std::array<float, 4>& unfocused, float t) {
+    t = t < 0 ? 0 : (t > 1 ? 1 : t);
+    return {
+        focused[0] * t + unfocused[0] * (1 - t),
+        focused[1] * t + unfocused[1] * (1 - t),
+        focused[2] * t + unfocused[2] * (1 - t),
+        focused[3] * t + unfocused[3] * (1 - t)
+    };
+}
+
 void ServerDecorationPlugin::renderShadow(OverlayRenderer* renderer, const WindowDecoration& deco) {
     if (!renderer) return;
     
@@ -217,17 +236,17 @@ void ServerDecorationPlugin::renderShadow(OverlayRenderer* renderer, const Windo
     
     // Draw drop shadow behind window
     // Multiple passes with increasing offset for pseudo-blur effect
-    const int shadowSize = WindowDecoration::SHADOW_BLUR;
-    const int offsetX = WindowDecoration::SHADOW_OFFSET_X;
-    const int offsetY = WindowDecoration::SHADOW_OFFSET_Y;
+    const int shadowSize = DecorationTheme::SHADOW_BLUR;
+    const int offsetX = DecorationTheme::SHADOW_OFFSET_X;
+    const int offsetY = DecorationTheme::SHADOW_OFFSET_Y;
     
     // Draw shadow rectangles (simplified blur by drawing multiple offset passes)
     for (int i = 1; i <= 3; i++) {
-        float alpha = WindowDecoration::SHADOW_COLOR[3] / (float)i;
+        float alpha = DecorationTheme::SHADOW_COLOR[3] / (float)i;
         Color shadowColor(
-            WindowDecoration::SHADOW_COLOR[0],
-            WindowDecoration::SHADOW_COLOR[1],
-            WindowDecoration::SHADOW_COLOR[2],
+            DecorationTheme::SHADOW_COLOR[0],
+            DecorationTheme::SHADOW_COLOR[1],
+            DecorationTheme::SHADOW_COLOR[2],
             alpha
         );
         
@@ -250,8 +269,8 @@ void ServerDecorationPlugin::renderRoundedCorners(OverlayRenderer* renderer, con
     // Skip for fullscreen or maximized windows
     if (deco.fullscreen || deco.maximized) return;
     
-    const int radius = WindowDecoration::CORNER_RADIUS;
-    const auto& color = deco.focused ? WindowDecoration::FOCUSED_BG : WindowDecoration::UNFOCUSED_BG;
+    const int radius = DecorationTheme::CORNER_RADIUS;
+    const auto& color = deco.focused ? DecorationTheme::FOCUSED_BG : DecorationTheme::UNFOCUSED_BG;
     Color cornerColor(color[0], color[1], color[2], color[3]);
     
     // Draw corner circles to create rounded effect
@@ -291,22 +310,22 @@ void ServerDecorationPlugin::renderRoundedCorners(OverlayRenderer* renderer, con
 void ServerDecorationPlugin::renderBorder(OverlayRenderer* renderer, const WindowDecoration& deco) {
     if (!renderer) return;
 
-    const auto& color = deco.focused ? WindowDecoration::FOCUSED_BG : WindowDecoration::UNFOCUSED_BG;
+    const auto& color = deco.focused ? DecorationTheme::FOCUSED_BG : DecorationTheme::UNFOCUSED_BG;
 
     // Top border (title bar background extends to full border)
     renderer->drawRect(
-        (float)deco.x - WindowDecoration::BORDER_WIDTH,
-        (float)deco.y - WindowDecoration::BORDER_WIDTH,
-        (float)deco.width + WindowDecoration::BORDER_WIDTH * 2,
-        (float)WindowDecoration::BORDER_WIDTH,
+        (float)deco.x - DecorationTheme::BORDER_WIDTH,
+        (float)deco.y - DecorationTheme::BORDER_WIDTH,
+        (float)deco.width + DecorationTheme::BORDER_WIDTH * 2,
+        (float)DecorationTheme::BORDER_WIDTH,
         Color(color[0], color[1], color[2], color[3])
     );
 
     // Left border
     renderer->drawRect(
-        (float)deco.x - WindowDecoration::BORDER_WIDTH,
+        (float)deco.x - DecorationTheme::BORDER_WIDTH,
         (float)deco.y,
-        (float)WindowDecoration::BORDER_WIDTH,
+        (float)DecorationTheme::BORDER_WIDTH,
         (float)deco.height,
         Color(color[0], color[1], color[2], color[3])
     );
@@ -315,17 +334,17 @@ void ServerDecorationPlugin::renderBorder(OverlayRenderer* renderer, const Windo
     renderer->drawRect(
         (float)deco.x + (float)deco.width,
         (float)deco.y,
-        (float)WindowDecoration::BORDER_WIDTH,
+        (float)DecorationTheme::BORDER_WIDTH,
         (float)deco.height,
         Color(color[0], color[1], color[2], color[3])
     );
 
     // Bottom border
     renderer->drawRect(
-        (float)deco.x - WindowDecoration::BORDER_WIDTH,
+        (float)deco.x - DecorationTheme::BORDER_WIDTH,
         (float)deco.y + (float)deco.height,
-        (float)deco.width + WindowDecoration::BORDER_WIDTH * 2,
-        (float)WindowDecoration::BORDER_WIDTH,
+        (float)deco.width + DecorationTheme::BORDER_WIDTH * 2,
+        (float)DecorationTheme::BORDER_WIDTH,
         Color(color[0], color[1], color[2], color[3])
     );
 }
@@ -333,93 +352,93 @@ void ServerDecorationPlugin::renderBorder(OverlayRenderer* renderer, const Windo
 void ServerDecorationPlugin::renderTitleBar(OverlayRenderer* renderer, const WindowDecoration& deco) {
     if (!renderer) return;
 
-    const auto& color = deco.focused ? WindowDecoration::FOCUSED_BG : WindowDecoration::UNFOCUSED_BG;
+    const auto& color = deco.focused ? DecorationTheme::FOCUSED_BG : DecorationTheme::UNFOCUSED_BG;
 
     // Title bar background
     renderer->drawRect(
         (float)deco.x,
-        (float)deco.y - (float)WindowDecoration::TITLE_BAR_HEIGHT,
+        (float)deco.y - (float)DecorationTheme::TITLE_BAR_HEIGHT,
         (float)deco.width,
-        (float)WindowDecoration::TITLE_BAR_HEIGHT,
+        (float)DecorationTheme::TITLE_BAR_HEIGHT,
         Color(color[0], color[1], color[2], color[3])
     );
 
     // Window title text
     float textX = (float)deco.x + 10.0f;
-    float textY = (float)deco.y - (float)WindowDecoration::TITLE_BAR_HEIGHT + 20.0f;
+    float textY = (float)deco.y - (float)DecorationTheme::TITLE_BAR_HEIGHT + 20.0f;
 
     renderer->drawText(
         deco.title.c_str(),
         textX,
         textY,
         14.0f,
-        Color(WindowDecoration::TEXT_COLOR[0], WindowDecoration::TEXT_COLOR[1],
-              WindowDecoration::TEXT_COLOR[2], WindowDecoration::TEXT_COLOR[3])
+        Color(DecorationTheme::TEXT_COLOR[0], DecorationTheme::TEXT_COLOR[1],
+              DecorationTheme::TEXT_COLOR[2], DecorationTheme::TEXT_COLOR[3])
     );
 }
 
 void ServerDecorationPlugin::renderButtons(OverlayRenderer* renderer, const WindowDecoration& deco) {
     if (!renderer) return;
 
-    const auto& color = deco.focused ? WindowDecoration::FOCUSED_BG : WindowDecoration::UNFOCUSED_BG;
+    const auto& color = deco.focused ? DecorationTheme::FOCUSED_BG : DecorationTheme::UNFOCUSED_BG;
     int btnSize = 20;
     int spacing = 8;
-    int btnY = deco.y - WindowDecoration::TITLE_BAR_HEIGHT + 6;
+    int btnY = deco.y - DecorationTheme::TITLE_BAR_HEIGHT + 6;
     int btnX = deco.x + deco.width - btnSize - spacing;
 
     // Close button (rightmost)
     bool closeHover = (m_hoveredView == deco.view && m_hoveredButton == DecoButton::Close);
     renderer->drawRect(
         (float)btnX, (float)btnY, (float)btnSize, (float)btnSize,
-        Color(closeHover ? WindowDecoration::BUTTON_HOVER[0] : color[0],
-              closeHover ? WindowDecoration::BUTTON_HOVER[1] : color[1],
-              closeHover ? WindowDecoration::BUTTON_HOVER[2] : color[2],
+        Color(closeHover ? DecorationTheme::BUTTON_HOVER[0] : color[0],
+              closeHover ? DecorationTheme::BUTTON_HOVER[1] : color[1],
+              closeHover ? DecorationTheme::BUTTON_HOVER[2] : color[2],
               color[3])
     );
     // X symbol
     renderer->drawText("×", (float)(btnX + 5), (float)(btnY + 16), 18.0f,
-                       Color(WindowDecoration::TEXT_COLOR[0], WindowDecoration::TEXT_COLOR[1],
-                             WindowDecoration::TEXT_COLOR[2], WindowDecoration::TEXT_COLOR[3]));
+                       Color(DecorationTheme::TEXT_COLOR[0], DecorationTheme::TEXT_COLOR[1],
+                             DecorationTheme::TEXT_COLOR[2], DecorationTheme::TEXT_COLOR[3]));
 
     // Maximize button
     btnX -= btnSize + spacing;
     bool maxHover = (m_hoveredView == deco.view && m_hoveredButton == DecoButton::Maximize);
     renderer->drawRect(
         (float)btnX, (float)btnY, (float)btnSize, (float)btnSize,
-        Color(maxHover ? WindowDecoration::BUTTON_HOVER[0] : color[0],
-              maxHover ? WindowDecoration::BUTTON_HOVER[1] : color[1],
-              maxHover ? WindowDecoration::BUTTON_HOVER[2] : color[2],
+        Color(maxHover ? DecorationTheme::BUTTON_HOVER[0] : color[0],
+              maxHover ? DecorationTheme::BUTTON_HOVER[1] : color[1],
+              maxHover ? DecorationTheme::BUTTON_HOVER[2] : color[2],
               color[3])
     );
     // Square symbol
     renderer->drawText("□", (float)(btnX + 5), (float)(btnY + 16), 16.0f,
-                       Color(WindowDecoration::TEXT_COLOR[0], WindowDecoration::TEXT_COLOR[1],
-                             WindowDecoration::TEXT_COLOR[2], WindowDecoration::TEXT_COLOR[3]));
+                       Color(DecorationTheme::TEXT_COLOR[0], DecorationTheme::TEXT_COLOR[1],
+                             DecorationTheme::TEXT_COLOR[2], DecorationTheme::TEXT_COLOR[3]));
 
     // Minimize button
     btnX -= btnSize + spacing;
     bool minHover = (m_hoveredView == deco.view && m_hoveredButton == DecoButton::Minimize);
     renderer->drawRect(
         (float)btnX, (float)btnY, (float)btnSize, (float)btnSize,
-        Color(minHover ? WindowDecoration::BUTTON_HOVER[0] : color[0],
-              minHover ? WindowDecoration::BUTTON_HOVER[1] : color[1],
-              minHover ? WindowDecoration::BUTTON_HOVER[2] : color[2],
+        Color(minHover ? DecorationTheme::BUTTON_HOVER[0] : color[0],
+              minHover ? DecorationTheme::BUTTON_HOVER[1] : color[1],
+              minHover ? DecorationTheme::BUTTON_HOVER[2] : color[2],
               color[3])
     );
     // Dash symbol
     renderer->drawText("−", (float)(btnX + 6), (float)(btnY + 16), 18.0f,
-                       Color(WindowDecoration::TEXT_COLOR[0], WindowDecoration::TEXT_COLOR[1],
-                             WindowDecoration::TEXT_COLOR[2], WindowDecoration::TEXT_COLOR[3]));
+                       Color(DecorationTheme::TEXT_COLOR[0], DecorationTheme::TEXT_COLOR[1],
+                             DecorationTheme::TEXT_COLOR[2], DecorationTheme::TEXT_COLOR[3]));
 }
 
 DecoButton ServerDecorationPlugin::buttonAtPosition(const WindowDecoration& deco, int mx, int my) {
     int btnSize = 20;
     int spacing = 8;
-    int btnY = deco.y - WindowDecoration::TITLE_BAR_HEIGHT + 6;
+    int btnY = deco.y - DecorationTheme::TITLE_BAR_HEIGHT + 6;
     int btnX = deco.x + deco.width - btnSize - spacing;
 
     // Check if mouse is in title bar area
-    if (my < deco.y - WindowDecoration::TITLE_BAR_HEIGHT || my > deco.y) {
+    if (my < deco.y - DecorationTheme::TITLE_BAR_HEIGHT || my > deco.y) {
         return DecoButton::None;
     }
     if (mx < deco.x || mx > deco.x + deco.width) {
