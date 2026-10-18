@@ -309,6 +309,13 @@ private:
     void* m_nativeHandle = nullptr;
     bool m_softwareCursorForced = false;
     class ScreenLock* m_screenLock = nullptr;
+
+    // Window placement mode (config: "cascade", "center", "pointer")
+    enum class PlacementMode { Cascade, Center, Pointer };
+    PlacementMode m_placementMode = PlacementMode::Cascade;
+    int m_cascadeX = 40;  // running cascade offset (scene coords)
+    int m_cascadeY = 40;
+    void placeWindow(View* view);
     uint32_t m_idleLockTimeoutMs = 0;  // 0 = disabled
     uint64_t m_lastInputTimeMs = 0;
     OverlayTarget m_overlayTarget;

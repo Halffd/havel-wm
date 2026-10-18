@@ -21,6 +21,9 @@ cursor_mode("auto")
 // solid background colour.
 // set_wallpaper("/home/agent/pictures/wallpaper.png")
 
+// Window placement mode: "cascade" | "center" | "pointer"
+// HAVEL_PLACEMENT=center  (env var, not Havel — read at startup)
+
 // ---------------------------------------------------------------------
 // Plugin settings
 //

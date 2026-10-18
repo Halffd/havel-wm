@@ -310,14 +310,51 @@ void Server::onViewMapped(View* view) {
         // identically. Wraps after the eighth diagonal; an xwayland
         // window that set its own position overrides this (default -
         //1,-1). 24px is the decoration titlebar height plus a margin.
-        int N = view->floatCascadeIndex();
-        if (N < 0) {
-            int idx = ws->nextCascadeIndex();
-            int x = 40 + (idx % 8) * 40;
-            int y = 40 + (idx % 8) * 40;
-            view->setFloatCascadeIndex(idx);
+        placeWindow(view);
+    }
+}
+
+// Place a newly-mapped floating window according to the configured
+// placement mode. Modes: cascade (running offset clamped to the
+// workarea), center, pointer (centred under cursor, clamped).
+void Server::placeWindow(View* view) {
+    int w = view->geom().w;
+    int h = view->geom().h;
+
+    switch (m_placementMode) {
+        case PlacementMode::Center: {
+            int x = (getOutputWidth() - w) / 2;
+            int y = (getOutputHeight() - h) / 2;
+            if (x < 0) x = 0;
+            if (y < 0) y = 0;
             setViewPosition(view, x, y, false);
-            LOG_INFO("[Server] stacking spawn #%d at (%d,%d)", idx, x, y);
+            break;
+        }
+        case PlacementMode::Pointer: {
+            int px = (int)cursorX() - w / 2;
+            int py = (int)cursorY() - h / 2;
+            int workW = getOutputWidth(), workH = getOutputHeight();
+    int workW2 = getOutputWidth(), workH2 = getOutputHeight();
+            if (px < 0) px = 0;
+            if (py < 0) py = 0;
+            if (px + w > workW) px = workW - w;
+            if (py + h > workH) py = workH - h;
+            setViewPosition(view, px, py, false);
+            break;
+        }
+        case PlacementMode::Cascade:
+        default: {
+            int workW = getOutputWidth(), workH = getOutputHeight();
+    int workW2 = getOutputWidth(), workH2 = getOutputHeight();
+            if (m_cascadeX + w > workW || m_cascadeY + h > workH) {
+                m_cascadeX = 40;
+                m_cascadeY = 40;
+            }
+            setViewPosition(view, m_cascadeX, m_cascadeY, false);
+            LOG_INFO("[Server] cascade spawn at (%d,%d)", m_cascadeX, m_cascadeY);
+            m_cascadeX += workW * 3 / 100;
+            m_cascadeY += workH * 3 / 100;
+            break;
         }
     }
 }
@@ -1526,6 +1563,14 @@ bool Server::startIPCServer(const std::string& socketPath) {
     // ========================================================================
     // Display Settings Commands
     // ========================================================================
+    // Window placement mode (cascade/center/pointer)
+    {
+        std::string mode = getenv("HAVEL_PLACEMENT") ? getenv("HAVEL_PLACEMENT") : "";
+        if (mode == "center") m_placementMode = PlacementMode::Center;
+        else if (mode == "pointer") m_placementMode = PlacementMode::Pointer;
+        else m_placementMode = PlacementMode::Cascade;
+    }
+
     m_ipcServer->registerCommand("set_gamma", [this](const std::string& args) -> std::string {
         return ipcSetGamma(args);
     });
