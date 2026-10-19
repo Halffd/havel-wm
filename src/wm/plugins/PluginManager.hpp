@@ -205,6 +205,7 @@ public:
     void setTemperatureForOutput(int output_index, int kelvin) override;
     void setBrightnessForOutput(int output_index, float brightness) override;
     void setZoomForOutput(int output_index, float zoom) override;
+    void setOutputGeometry(uint32_t workspaceId, int x, int y, int w, int h) override;
     OutputTarget currentOutputTarget() override;
 
     void scheduleRedraw() override;

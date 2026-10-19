@@ -650,6 +650,12 @@ void PluginManager::setZoomForOutput(int output_index, float zoom) {
              output_index, zoom);
 }
 
+void PluginManager::setOutputGeometry(uint32_t workspaceId, int x, int y, int w, int h) {
+    if (!m_server) return;
+    auto* server = static_cast<Server*>(m_server);
+    server->setOutputGeometry(workspaceId, Rect{x, y, w, h});
+}
+
 void PluginManager::scheduleRedraw() {
     // Handled by frame loop in C layer
 }

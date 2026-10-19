@@ -32,6 +32,16 @@ public:
         m_visible = true;
         m_barHeight = 30;
         m_bgColor = Color(0.0f, 0.0f, 0.0f, 0.85f);
+
+        // Reserve space for the taskbar: reduce the workarea for all
+        // workspaces so windows are placed below the bar. This connects
+        // the taskbar to the window layout — without it, windows
+        // rendered at (0,0) and overlapped the bar.
+        for (uint32_t ws = 0; ws < m_api->getWorkspaceCount(); ws++) {
+            m_api->setOutputGeometry(ws, 0, m_barHeight,
+                                     m_api->getOutputWidth(),
+                                     m_api->getOutputHeight() - m_barHeight);
+        }
         m_fgColor = Color(1.0f, 1.0f, 1.0f, 1.0f);
         m_accentColor = Color(0.2f, 0.6f, 1.0f, 1.0f);
 

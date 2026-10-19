@@ -104,6 +104,10 @@ public:
     // Output info
     virtual int getOutputWidth() = 0;
     virtual int getOutputHeight() = 0;
+
+    // Set the usable area for a workspace (windows are placed within
+    // this area). Panels/taskbars reduce it so windows avoid them.
+    virtual void setOutputGeometry(uint32_t workspaceId, int x, int y, int w, int h) = 0;
     
     // Cursor position (for HotCorners, etc.)
     virtual double getCursorX() = 0;
