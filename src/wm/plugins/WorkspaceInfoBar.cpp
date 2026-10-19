@@ -2,6 +2,7 @@
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/plugins/PluginConfig.hpp>
 #include <wm/render/OverlayRenderer.hpp>
+#include <Logger.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 #include <ctime>
@@ -98,8 +99,9 @@ public:
         if (!m_tree) return;
         renderer->setTargetTree(m_tree);
 
+        collectTaskbarButtons();
         uint32_t currentWs = m_api->getActiveWorkspace();
-        int windowCount = getWindowCountOnWorkspace(currentWs);
+        int windowCount = (int)m_buttons.size();
 
         char timeStr[32];
         getTimeString(timeStr, sizeof(timeStr));
@@ -110,6 +112,8 @@ public:
 
         char winStr[64];
         snprintf(winStr, sizeof(winStr), "  |  %d window%s", windowCount, windowCount != 1 ? "s" : "");
+        // (winStr is still drawn in the drawBar fallback but the buttons
+        // are the primary window display)
 
         float timeWidth = getTextWidth(timeStr, 16.0f) + 20.0f;
 
@@ -154,6 +158,16 @@ public:
 private:
     std::vector<CompositorAPI::OutputTarget> m_outputs;
     CompositorAPI* m_api = nullptr;
+
+    // Interactive taskbar: window buttons
+    struct TaskbarButton {
+        void* viewPtr = nullptr;
+        std::string title;
+        int x = 0, y = 0, w = 0, h = 0;
+        bool focused = false;
+    };
+    std::vector<TaskbarButton> m_buttons;
+    int m_hoverButton = -1;
     bool m_visible;
     // Toggle binding (overridable via config "keybinding", default Meta+Shift+B)
     uint32_t m_bindingMods = (1u << 6) | (1u << 0);  // Meta+Shift
@@ -166,10 +180,23 @@ private:
     wlr_scene_tree_t* m_tree = nullptr;      // persistent bar tree (rebuilt at 1 Hz)
     OverlayRenderer* m_renderer = nullptr;   // cached for toggle-time tree teardown
 
-    int getWindowCountOnWorkspace(uint32_t workspace) {
-        auto views = m_api->getAllViews();
-        int count = 0;
-        return count;
+    // Collect the windows on the current workspace for the taskbar buttons
+    void collectTaskbarButtons() {
+        m_buttons.clear();
+        uint32_t currentWs = m_api->getActiveWorkspace();
+        auto views = m_api->getViewsInWorkspace(currentWs);
+        View* focused = m_api->getFocusedView();
+
+        for (View* view : views) {
+            if (!view) continue;
+            TaskbarButton btn;
+            btn.viewPtr = view;
+            btn.title = m_api->getViewTitle(view);
+            if (btn.title.empty()) btn.title = m_api->getViewAppId(view);
+            if (btn.title.empty()) btn.title = "window";
+            btn.focused = (view == focused);
+            m_buttons.push_back(btn);
+        }
     }
 
     void getTimeString(char* buffer, size_t size) {
@@ -189,11 +216,46 @@ private:
         renderer->drawRect((float)(x0 + 8), (float)(y0 + 5), wsWidth, (float)(m_barHeight - 10),
                            Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 0.4f));
         renderer->drawText(wsStr, (float)(x0 + 18), (float)(y0 + 8), 16.0f, m_accentColor);
-        renderer->drawText(winStr, (float)(x0 + 18 + wsWidth), (float)(y0 + 8), 16.0f,
-                           Color(m_fgColor.r, m_fgColor.g, m_fgColor.b, m_fgColor.a * 0.85f));
+
+        // Window buttons: one per window on the current workspace
+        const int btnH = m_barHeight - 10;
+        int btnX = x0 + 8 + (int)wsWidth + 8;
+        const int btnMaxW = 150;
+        for (auto& btn : m_buttons) {
+            int btnW = (int)(btn.title.size() * 7.0f) + 16;
+            if (btnW > btnMaxW) btnW = btnMaxW;
+            if (btnX + btnW > x0 + w - timeWidth - 16) break;
+
+            Color btnBg = btn.focused ? Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 0.6f)
+                                      : Color(0.2f, 0.2f, 0.25f, 0.7f);
+            renderer->drawRect((float)btnX, (float)(y0 + 5), (float)btnW, (float)btnH, btnBg);
+            renderer->drawText(btn.title.c_str(), (float)(btnX + 6), (float)(y0 + 8), 12.0f,
+                              btn.focused ? Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 1.0f)
+                                          : Color(m_fgColor.r, m_fgColor.g, m_fgColor.b, 0.8f));
+            btn.x = btnX;
+            btn.y = y0 + 5;
+            btn.w = btnW;
+            btn.h = btnH;
+            btnX += btnW + 4;
+        }
         renderer->drawRect((float)(x0 + w - timeWidth - 8), (float)(y0 + 5), timeWidth,
                            (float)(m_barHeight - 10), Color(0.0f, 0.0f, 0.0f, 0.4f));
         renderer->drawText(timeStr, (float)(x0 + w - timeWidth + 2), (float)(y0 + 8), 16.0f, m_fgColor);
+    }
+
+    void onMouseButton(uint32_t button, bool pressed, int x, int y) override {
+        if (!m_visible || !pressed || button != 0x110) return;  // left press only
+        if (y < 0 || y >= m_barHeight) return;
+        for (auto& btn : m_buttons) {
+            if (x >= btn.x && x < btn.x + btn.w &&
+                y >= btn.y && y < btn.y + btn.h) {
+                if (btn.viewPtr) {
+                    m_api->focusView((View*)btn.viewPtr);
+                    LOG_INFO("[WorkspaceInfoBar] clicked: %s", btn.title.c_str());
+                }
+                return;
+            }
+        }
     }
 
     float getTextWidth(const char* text, float fontSize) {
