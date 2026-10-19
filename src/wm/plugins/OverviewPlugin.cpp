@@ -8,6 +8,7 @@
 #include <wm/View.hpp>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
+#include <algorithm>
 #include <cstring>
 #include <vector>
 #include <string>
@@ -31,6 +32,8 @@ struct OverviewWindow {
     uint32_t workspace = 0;
     int gridX = 0, gridY = 0;  // Grid position
     int x = 0, y = 0, w = 0, h = 0;  // Original geometry
+    std::vector<uint32_t> thumbPixels;
+    int thumbW = 0, thumbH = 0;
 };
 
 /**
@@ -270,6 +273,25 @@ private:
                 win.h = geom.h;
                 win.workspace = ws;
                 
+                {
+                    std::vector<uint32_t> pixels;
+                    int pw = 0, ph = 0;
+                    if (m_api->captureViewPixels(view, pixels, &pw, &ph) && pw > 0 && ph > 0) {
+                        const int maxW = 120, maxH = 64;
+                        float scl = std::min((float)maxW / pw, (float)maxH / ph);
+                        if (scl > 1.0f) scl = 1.0f;
+                        int tw = std::max(1, (int)(pw * scl));
+                        int th = std::max(1, (int)(ph * scl));
+                        win.thumbPixels.resize((size_t)tw * th);
+                        win.thumbW = tw;
+                        win.thumbH = th;
+                        for (int y2 = 0; y2 < th; y2++) {
+                            const uint32_t* src = &pixels[(size_t)(y2 * ph / th) * pw];
+                            uint32_t* dst = &win.thumbPixels[(size_t)y2 * tw];
+                            for (int x2 = 0; x2 < tw; x2++) dst[x2] = src[(int)((x2 + 0.5f) * pw / tw)];
+                        }
+                    }
+                }
                 ows.windows.push_back(win);
             }
             
@@ -464,8 +486,20 @@ private:
                     } else {
                         winColor = Color(0.3f, 0.3f, 0.35f, 0.8f);  // Normal
                     }
-                    renderer->drawRect((float)winX, (float)winY, (float)winWidth, (float)winHeight, winColor);
-
+                    if (!win.thumbPixels.empty()) {
+                        renderer->drawPixels(win.thumbPixels.data(),
+                                             win.thumbW, win.thumbH,
+                                             (float)winX, (float)winY,
+                                             (float)winWidth, (float)winHeight);
+                    }
+                    if (win.thumbPixels.empty()) {
+                        // Placeholder rect for uncapturable clients
+                        Color ph;
+                        if (isWinSelected) ph = Color(0.4f, 0.5f, 0.6f, 0.9f);
+                        else if (isSelected) ph = Color(0.35f, 0.4f, 0.45f, 0.85f);
+                        else ph = Color(0.3f, 0.3f, 0.35f, 0.8f);
+                        renderer->drawRect((float)winX, (float)winY, (float)winWidth, (float)winHeight, ph);
+                    }
                     // Draw window border
                     Color winBorder;
                     float borderWidth;
