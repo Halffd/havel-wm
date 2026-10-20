@@ -301,6 +301,11 @@ public:
 
     // IPC command handlers (extracted from startIPCServer lambdas, phase 2).
     // Each returns the JSON-RPC result string for its command.
+    // Re-run config.hv after dropping script-registered keybindings.
+    // Empty return = success, else the interpreter error. A failed reload
+    // restores the previous bindings.
+    std::string reloadHavelConfig();
+
     std::string ipcSetGamma(const std::string& args);
     std::string ipcSetTemperature(const std::string& args);
     std::string ipcSetBrightness(const std::string& args);

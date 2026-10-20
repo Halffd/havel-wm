@@ -314,6 +314,25 @@ static int hf_settings(HavelState* H, void*) {
     return HAVEL_OK;
 }
 
+// reload_config(): re-run config.hv (drops script keybindings first so
+// re-registration succeeds). Pushes true, or false + last_error on a
+// broken config.
+static int hf_reload_config(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    if (!ctx || !ctx->server) {
+        havel_pushboolean(H, 0);
+        return HAVEL_OK;
+    }
+    std::string err = ctx->server->reloadHavelConfig();
+    if (!err.empty()) {
+        printf("[Havel] reload_config failed: %s\n", err.c_str());
+        havel_pushboolean(H, 0);
+        return HAVEL_OK;
+    }
+    havel_pushboolean(H, 1);
+    return HAVEL_OK;
+}
+
 // plugin_config(plugin, key, value): set a plugin setting from config.hv
 // and apply it live. Values are strings; numbers/bools are converted
 // here so `plugin_config("alt_tab", "columns", 4)` works.
@@ -575,6 +594,8 @@ void HavelHost::registerHostFunctions() {
     havel_pushcfunction_with_ctx(m_H, hf_open_path, nullptr, "open_path");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_settings, nullptr, "settings");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_reload_config, nullptr, "reload_config");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_get_workspace, nullptr, "get_workspace");
     havel_pop(m_H, 1);

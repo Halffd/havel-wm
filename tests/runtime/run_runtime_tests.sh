@@ -1031,6 +1031,91 @@ rm -f "$PANEL_CAP2"
 SSET x "{\"action\":\"set\",\"key\":\"plugin.workspace_info_bar.height\",\"value\":\"30\"}" >/dev/null
 SSET x "{\"action\":\"set\",\"key\":\"gamma\",\"value\":\"1.0\"}" >/dev/null
 
+# ---------------------------------------------------------------- phase 14: reload_config
+# Re-running config.hv must (a) drop the OLD script bindings - register
+# refuses duplicate combos, so a plain re-run would disable every script
+# hotkey - (b) execute the new file, and (c) report a broken config
+# through IPC instead of dying. Own compositor instance (own HOME, own
+# socket, same pattern as phase 6's parity WM).
+if [ "${HAS_EMBED:-0}" -eq 0 ]; then
+    skip "reload_config (no havel embed)"
+else
+    RL_HOME="$(mktemp -d /tmp/havel-reload-XXXXXX)"
+    mkdir -p "$RL_HOME/.config/havel-wm"
+    cat > "$RL_HOME/.config/havel-wm/config.hv" <<'EOF'
+keybind("Meta+F9", fn() { log("harness-reload-old-fired") })
+EOF
+    RL_IPC="/run/user/$(id -u)/havel-wm-reload.sock"
+    rm -f "$RL_IPC"
+    HOME="$RL_HOME" HAVEL_IPC_SOCKET="$RL_IPC" \
+        WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 \
+        timeout 150 "$BUILD_DIR/bin/havel-wm" > /tmp/havel-reload-wm.log 2>&1 &
+    RL_PID=$!
+    OLD_LOG="$LOG"; LOG=/tmp/havel-reload-wm.log
+    RL_WAYLAND=""
+    for _ in $(seq 750); do
+        if grep -q "Compositor running on" /tmp/havel-reload-wm.log 2>/dev/null; then
+            RL_WAYLAND=$(grep -o "Compositor running on wayland-[0-9]*" /tmp/havel-reload-wm.log | head -1 | grep -o "wayland-[0-9]*")
+            break
+        fi
+        sleep 0.2
+    done
+    rl_ipc() {
+        python3 - "$RL_IPC" "$1" "$2" <<'RIPCS' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":sys.argv[2],
+                       "params":json.loads(sys.argv[3])})+"\n").encode())
+r = json.loads(s.recv(65536))
+print(json.dumps(r.get("result", r.get("error", {}))))
+RIPCS
+    }
+    if [ -z "$RL_WAYLAND" ]; then
+        skip "reload compositor never became ready"
+    else
+        # boot-time binding works without any reload
+        WAYLAND_DISPLAY="$RL_WAYLAND" "$INJ" +125 67 -125   # Meta+F9
+        sleep 0.4
+        OLDHITS=$(grep -ac "harness-reload-old-fired" /tmp/havel-reload-wm.log)
+        report $([ "${OLDHITS:-0}" -ge 1 ] && echo 0 || echo 1) \
+            "boot binding fires (F9 hits=${OLDHITS:-err})"
+
+        # step 1: rewrite the config to bind F8 instead; reload; F9 dies, F8 lives
+        cat > "$RL_HOME/.config/havel-wm/config.hv" <<'EOF'
+keybind("Meta+F8", fn() { log("harness-reload-new-fired") })
+EOF
+        RLC=$(rl_ipc reload_config '{}')
+        report $(echo "$RLC" | grep -q '"success": true' && echo 0 || echo 1) \
+            "reload_config succeeds ($(echo "$RLC" | head -c 50))"
+        WAYLAND_DISPLAY="$RL_WAYLAND" "$INJ" +125 67 -125   # F9 (should be dead)
+        WAYLAND_DISPLAY="$RL_WAYLAND" "$INJ" +125 66 -125   # F8 (new)
+        sleep 0.5
+        OLDHITS2=$(grep -ac "harness-reload-old-fired" /tmp/havel-reload-wm.log)
+        NEWHITS=$(grep -ac "harness-reload-new-fired" /tmp/havel-reload-wm.log)
+        report $([ "${OLDHITS2:-9}" -eq "${OLDHITS:-9}" ] && [ "${NEWHITS:-0}" -ge 1 ] && echo 0 || echo 1) \
+            "reload swaps bindings (old hits still=${OLDHITS2:-err}, new=${NEWHITS:-err})"
+
+        # step 2: a broken config is refused through IPC; bindings survive
+        cat > "$RL_HOME/.config/havel-wm/config.hv" <<'EOF'
+keybind("Meta+F7", fn() { this is not havel })
+EOF
+        BAD=$(rl_ipc reload_config '{}')
+        report $(echo "$BAD" | grep -q '"success": true' && echo 1 || echo 0) \
+            "broken config refused ($(echo "$BAD" | head -c 60))"
+        WAYLAND_DISPLAY="$RL_WAYLAND" "$INJ" +125 66 -125   # F8 still works
+        sleep 0.4
+        NEWHITS2=$(grep -ac "harness-reload-new-fired" /tmp/havel-reload-wm.log)
+        report $([ "${NEWHITS2:-0}" -ge 2 ] && echo 0 || echo 1) \
+            "bindings survive failed reload (F8 hits=${NEWHITS2:-err})"
+        report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "reload compositor clean"
+    fi
+    kill "$RL_PID" 2>/dev/null
+    [ -n "$RL_PID" ] && wait "$RL_PID" 2>/dev/null
+    rm -rf "$RL_HOME"
+    LOG="$OLD_LOG"
+fi
+
 # ---------------------------------------------------------------- teardown
 kill "$FOOT_PID" 2>/dev/null; FOOT_PID=""
 report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "zero crashes across all phases"

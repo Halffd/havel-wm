@@ -1903,6 +1903,17 @@ bool Server::startIPCServer(const std::string& socketPath) {
         return ipcSettings(args);
     });
 
+    m_ipcServer->registerCommand("reload_config", [this](const std::string& args) -> std::string {
+        std::string err = reloadHavelConfig();
+        if (err.empty()) {
+            JsonObject r;
+            r["success"] = true;
+            r["message"] = "config.hv reloaded";
+            return m_ipcServer->jsonToString(r);
+        }
+        return m_ipcServer->createErrorResponse(-3, err);
+    });
+
     // File manager integration (validated paths, no shell)
     m_ipcServer->registerCommand("file_list", [this](const std::string& args) -> std::string {
         return ipcFileList(args);
@@ -2273,6 +2284,36 @@ bool Server::initHavelHost() {
 bool Server::registerHavelKeybinding(uint32_t modifiers, uint32_t keysym,
                                       const char* name, std::function<void()> callback) {
     return m_keybindingManager.registerKeybinding(modifiers, keysym, name, callback);
+}
+
+// Re-run config.hv: drop the script-registered bindings first (register
+// refuses duplicate combos, so a plain re-run would silently disable
+// every script hotkey), then execute the file. A failure re-registers
+// the saved bindings - a broken config must leave the running setup
+// untouched. Returns an empty string on success or the interpreter error.
+std::string Server::reloadHavelConfig() {
+#ifdef HAVE_HAVEL_LANG
+    if (!m_havelHost) return "havel host not initialized";
+    const char* home = getenv("HOME");
+    if (!home) return "no HOME";
+    std::string path = std::string(home) + "/.config/havel-wm/config.hv";
+    if (access(path.c_str(), R_OK) != 0) return "no config at " + path;
+
+    std::vector<Keybinding> saved;
+    m_keybindingManager.unregisterByPrefixSave("havel:", &saved);
+    if (!m_havelHost->runFile(path)) {
+        std::string err = m_havelHost->lastError();
+        for (auto& b : saved) {
+            m_keybindingManager.registerKeybinding(b.modifiers, b.keysym,
+                                                   b.name.c_str(), b.callback);
+        }
+        LOG_WARN("[Havel] reload failed, %zu binding(s) restored", saved.size());
+        return err;
+    }
+    return "";
+#else
+    return "built without the havel embed";
+#endif
 }
 #endif  // HAVE_HAVEL_LANG
 
