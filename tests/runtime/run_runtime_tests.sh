@@ -904,6 +904,40 @@ else
     skip "launcher phase (plugin_command open failed)"
 fi
 
+# ---------------------------------------------------------------- phase 11: panel
+# The panel (WorkspaceInfoBar v2) draws a launcher button, workspace
+# buttons, window buttons and a clock per monitor, with a workarea
+# reservation. Pixel checks: the launcher button block, the workspace
+# button row (accent-tinted active cell), and the clock area text.
+PANEL_CAP="$(mktemp /tmp/havel-panel-XXXXXX.png)"
+sleep 1.2   # let the 1 Hz persistent tree rebuild with the new layout
+WAYLAND_DISPLAY=wayland-0 grim "$PANEL_CAP" 2>/dev/null
+PSTATS=$(python3 - "$PANEL_CAP" <<'PSTATS_PY'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB'); px = im.load(); w, h = im.size
+def count(x0, x1, y0, y1, pred):
+    return sum(1 for y in range(y0, y1, 2) for x in range(x0, x1, 2) if pred(px[x, y]))
+# top strip of the panel; bar = 0.85 black over bg (0.1,0.1,0.15) -> ~(4,4,6)
+panel_bg = count(0, w, 0, 28, lambda c: c[0] < 15 and c[1] < 15 and c[2] < 25)
+# launcher button: accent-tinted block at the far left
+accent = count(2, 120, 4, 26, lambda c: c[2] > 120 and c[2] > c[0] + 40 and c[1] > 60)
+# bright text pixels in the top strip (Apps, workspace numbers, clock)
+text = count(0, w, 4, 26, lambda c: c[0] > 180 and c[1] > 180 and c[2] > 180)
+print("%d %d %d" % (panel_bg, accent, text))
+PSTATS_PY
+)
+PPANEL=$(echo "$PSTATS" | awk '{print $1}')
+PACCENT=$(echo "$PSTATS" | awk '{print $2}')
+PTEXT=$(echo "$PSTATS" | awk '{print $3}')
+report $([ "${PPANEL:-0}" -gt 2000 ] && echo 0 || echo 1) \
+    "panel strip drawn (bg=${PPANEL:-err})"
+report $([ "${PACCENT:-0}" -gt 20 ] && echo 0 || echo 1) \
+    "panel launcher button visible (accent=${PACCENT:-err})"
+report $([ "${PTEXT:-0}" -gt 30 ] && echo 0 || echo 1) \
+    "panel text (workspaces/clock) visible (text=${PTEXT:-err})"
+rm -f "$PANEL_CAP"
+
 # ---------------------------------------------------------------- teardown
 kill "$FOOT_PID" 2>/dev/null; FOOT_PID=""
 report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "zero crashes across all phases"

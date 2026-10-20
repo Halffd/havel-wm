@@ -43,6 +43,23 @@ plugin_config("alt_tab", "borderColor", "1,1,1,1")      // selected cell border
 plugin_config("alt_tab", "textColor", "0.92,0.92,0.92,1")
 plugin_config("alt_tab", "keybinding", "Alt+Tab")       // cycle + select on release
 
+plugin_config("app_launcher", "keybinding", "Meta+D")  // open/close the grid
+plugin_config("app_launcher", "terminal", "foot")      // run Terminal=true apps here
+// Script/panel access: plugin_command("app_launcher", "open"|"close"|"toggle")
+
+// Panel (taskbar): launcher button, workspace buttons, window buttons,
+// clock. Keys act per monitor; the workarea reservation keeps windows
+// clear of the panel.
+plugin_config("workspace_info_bar", "position", "top")    // top | bottom
+plugin_config("workspace_info_bar", "height", "30")       // px (16..80)
+plugin_config("workspace_info_bar", "clock_format", "%H:%M")
+plugin_config("workspace_info_bar", "show_workspaces", "true")
+plugin_config("workspace_info_bar", "show_launcher_button", "true")
+plugin_config("workspace_info_bar", "show_clock", "true")
+plugin_config("workspace_info_bar", "keybinding", "Meta+Shift+B") // toggle
+
+// ---------------------------------------------------------------------
+
 // Zoom (Wayfire-style: fullscreen scale + lens/strip/custom magnifiers)
 //
 // Keybindings - the gate comes from the "keybinding" spec's modifiers;
