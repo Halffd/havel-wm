@@ -938,6 +938,45 @@ report $([ "${PTEXT:-0}" -gt 30 ] && echo 0 || echo 1) \
     "panel text (workspaces/clock) visible (text=${PTEXT:-err})"
 rm -f "$PANEL_CAP"
 
+# ---------------------------------------------------------------- phase 12: file manager IPC
+# file_list / file_copy / file_delete / open_path against a temp dir with
+# known content; the compositor-side FileManager finally gets exercised.
+FILEDIR="$(mktemp -d /tmp/havel-files-XXXXXX)"
+echo "alpha" > "$FILEDIR/a.txt"
+echo "beta" > "$FILEDIR/b.txt"
+mkdir -p "$FILEDIR/subdir"
+file_ipc() {
+    python3 - "$SOCK" "$1" "$2" <<'FIPC' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":sys.argv[2],
+                       "params":json.loads(sys.argv[3])})+"\n").encode())
+r = json.loads(s.recv(65536))
+print(json.dumps(r.get("result", r.get("error", {}))))
+FIPC
+}
+FLIST=$(file_ipc file_list "{\"path\":\"$FILEDIR\"}")
+report $(echo "$FLIST" | grep -q '"count": 3' && echo "$FLIST" | grep -q '"a.txt"' && echo 0 || echo 1) \
+    "file_list returns entries ($(echo "$FLIST" | head -c 60))"
+FINFO=$(file_ipc file_info "{\"path\":\"$FILEDIR/a.txt\"}")
+report $(echo "$FINFO" | grep -q '"mime": "text/plain"' && echo 0 || echo 1) \
+    "file_info mime detection ($(echo "$FINFO" | head -c 60))"
+FCOPY=$(file_ipc file_copy "{\"src\":\"$FILEDIR/a.txt\",\"dst\":\"$FILEDIR/copy.txt\"}")
+report $(echo "$FCOPY" | grep -q '"success": true' && [ -f "$FILEDIR/copy.txt" ] && echo 0 || echo 1) \
+    "file_copy creates the copy"
+FDEL=$(file_ipc file_delete "{\"path\":\"$FILEDIR/copy.txt\"}")
+report $(echo "$FDEL" | grep -q '"success": true' && [ ! -f "$FILEDIR/copy.txt" ] && echo 0 || echo 1) \
+    "file_delete removes the copy"
+FBAD=$(file_ipc file_delete "{\"path\":\"/etc/passwd\"}")
+report $(echo "$FBAD" | grep -q 'must be under HOME or /tmp' && echo 0 || echo 1) \
+    "file ops reject paths outside HOME//tmp ($(echo "$FBAD" | head -c 50))"
+FOPEN=$(file_ipc open_path "{\"path\":\"$FILEDIR\"}")
+report $(echo "$FOPEN" | grep -q '"success": true' && echo 0 || echo 1) \
+    "open_path opens a directory ($(echo "$FOPEN" | head -c 60))"
+rm -rf "$FILEDIR"
+sleep 0.3
+
 # ---------------------------------------------------------------- teardown
 kill "$FOOT_PID" 2>/dev/null; FOOT_PID=""
 report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "zero crashes across all phases"

@@ -277,6 +277,19 @@ static int hf_set_wallpaper(HavelState* H, void*) {
     return HAVEL_OK;
 }
 
+// open_path(path): open a directory in the file manager or a file with
+// its default application (xdg-open). Pushes a boolean result.
+static int hf_open_path(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    std::string path = arg_str(H, 0) ? arg_str(H, 0) : "";
+    bool ok = false;
+    if (ctx && ctx->server && !path.empty()) {
+        ok = ctx->server->openPath(path);
+    }
+    havel_pushboolean(H, ok ? 1 : 0);
+    return HAVEL_OK;
+}
+
 // plugin_config(plugin, key, value): set a plugin setting from config.hv
 // and apply it live. Values are strings; numbers/bools are converted
 // here so `plugin_config("alt_tab", "columns", 4)` works.
@@ -534,6 +547,8 @@ void HavelHost::registerHostFunctions() {
     havel_pushcfunction_with_ctx(m_H, hf_zoom, nullptr, "zoom");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_set_wallpaper, nullptr, "set_wallpaper");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_open_path, nullptr, "open_path");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_get_workspace, nullptr, "get_workspace");
     havel_pop(m_H, 1);

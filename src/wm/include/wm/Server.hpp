@@ -295,6 +295,13 @@ public:
     std::string ipcSetBrightness(const std::string& args);
     std::string ipcGetDisplaySettings();
     std::string ipcZoom(const std::string& args);
+    std::string ipcFileList(const std::string& args);
+    std::string ipcFileInfo(const std::string& args);
+    std::string ipcFileOp(const std::string& op, const std::string& args);
+    std::string ipcOpenPath(const std::string& args);
+    // Script-facing: open a directory in the file manager or a file with
+    // its default application. False when the path is invalid/missing.
+    bool openPath(const std::string& path, std::string* openedWith = nullptr);
     std::string ipcGetPlugins();
     std::string ipcNotify(const std::string& args);
     std::string ipcCloseNotification(const std::string& args);

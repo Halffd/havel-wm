@@ -1,6 +1,7 @@
 #include <wm/Server.hpp>
 #include <wm/render/AppIconLoader.hpp>
 #include <wm/desktop/DesktopManager.hpp>
+#include <wm/desktop/FileManager.hpp>
 #include <ui/lock/ScreenLock.hpp>
 #include <wm/Layout.hpp>
 #include <wm/plugins/Plugins.hpp>
@@ -1765,6 +1766,27 @@ bool Server::startIPCServer(const std::string& socketPath) {
         return ipcZoom(args);
     });
 
+    // File manager integration (validated paths, no shell)
+    m_ipcServer->registerCommand("file_list", [this](const std::string& args) -> std::string {
+        return ipcFileList(args);
+    });
+    m_ipcServer->registerCommand("file_info", [this](const std::string& args) -> std::string {
+        return ipcFileInfo(args);
+    });
+    auto fileOp = [this](const std::string& op) {
+        return [this, op](const std::string& args) -> std::string {
+            return ipcFileOp(op, args);
+        };
+    };
+    m_ipcServer->registerCommand("file_copy", fileOp("copy"));
+    m_ipcServer->registerCommand("file_move", fileOp("move"));
+    m_ipcServer->registerCommand("file_rename", fileOp("rename"));
+    m_ipcServer->registerCommand("file_delete", fileOp("delete"));
+    m_ipcServer->registerCommand("file_mkdir", fileOp("mkdir"));
+    m_ipcServer->registerCommand("open_path", [this](const std::string& args) -> std::string {
+        return ipcOpenPath(args);
+    });
+
     m_ipcServer->registerCommand("get_display_settings", [this](const std::string& args) -> std::string {
         return ipcGetDisplaySettings();
     });
@@ -2143,6 +2165,210 @@ std::string Server::ipcGetDisplaySettings() {
     settings["grayscale"] = m_displaySettings.isGrayscaleEnabled();
     settings["negative"] = m_displaySettings.isNegativeEnabled();
     return m_ipcServer->jsonToString(settings);
+}
+
+// ============================================================================
+// File manager integration (uses havel::FileManager; paths are validated:
+// no traversal, no shell metacharacters - spawn never uses a shell either)
+// ============================================================================
+
+namespace {
+// Expand a leading ~ to HOME, validate: non-empty, no "..", no shell
+// metacharacters. Returns false for anything that would escape or inject.
+bool fileSafePath(const std::string& in, std::string* out) {
+    std::string p = in;
+    if (p.empty()) return false;
+    if (p[0] == '~') {
+        const char* home = getenv("HOME");
+        if (!home) return false;
+        p = std::string(home) + p.substr(1);
+    }
+    if (p.find("..") != std::string::npos) return false;
+    static const char* bad = "|&;$(){}[]<>*'\"\\`\n\r";
+    if (p.find_first_of(bad) != std::string::npos) return false;
+    if (p.empty() || p[0] != '/') return false;
+    *out = p;
+    return true;
+}
+
+// fork+exec with a real argv (paths may contain spaces; no shell)
+void spawnArgv(const std::vector<std::string>& argv) {
+    if (argv.empty()) return;
+    pid_t pid = fork();
+    if (pid == 0) {
+        std::vector<char*> cargv;
+        for (const auto& a : argv) cargv.push_back(const_cast<char*>(a.c_str()));
+        cargv.push_back(nullptr);
+        execvp(cargv[0], cargv.data());
+        _exit(127);
+    }
+}
+} // namespace
+
+std::string Server::ipcFileList(const std::string& args) {
+    std::string path;
+    try {
+        auto j = nlohmann::json::parse(args);
+        if (!fileSafePath(j.value("path", ""), &path))
+            return m_ipcServer->createErrorResponse(-2, "Invalid path");
+    } catch (...) {
+        return m_ipcServer->createErrorResponse(-1, "Invalid JSON");
+    }
+    auto files = getFileManager().listDirectory(path);
+    if (files.empty() && !getFileManager().fileExists(path))
+        return m_ipcServer->createErrorResponse(-3, "Cannot list: " + path);
+    nlohmann::json arr = nlohmann::json::array();
+    for (const auto& f : files) {
+        arr.push_back({{"name", f.name},
+                       {"path", f.path},
+                       {"mime", f.mimeType},
+                       {"size", f.size},
+                       {"modified", f.modified},
+                       {"is_directory", f.isDirectory},
+                       {"hidden", f.isHidden}});
+    }
+    nlohmann::json r;
+    r["files"] = arr;
+    r["count"] = files.size();
+    return r.dump();
+}
+
+std::string Server::ipcFileInfo(const std::string& args) {
+    std::string path;
+    try {
+        auto j = nlohmann::json::parse(args);
+        if (!fileSafePath(j.value("path", ""), &path))
+            return m_ipcServer->createErrorResponse(-2, "Invalid path");
+    } catch (...) {
+        return m_ipcServer->createErrorResponse(-1, "Invalid JSON");
+    }
+    auto& fm = getFileManager();
+    if (!fm.fileExists(path))
+        return m_ipcServer->createErrorResponse(-3, "No such file: " + path);
+    FileInfo f = fm.getFileInfo(path);
+    nlohmann::json r = {{"name", f.name},
+                        {"path", f.path},
+                        {"mime", f.mimeType},
+                        {"size", f.size},
+                        {"modified", f.modified},
+                        {"is_directory", f.isDirectory},
+                        {"hidden", f.isHidden}};
+    return r.dump();
+}
+
+// Shared implementation for the mutating file operations
+std::string Server::ipcFileOp(const std::string& op, const std::string& args) {
+    // Mutating operations are contained to the user's home and /tmp:
+    // the IPC socket is user-owned but file_delete must never become a
+    // root-ish primitive on system paths.
+    auto contained = [](const std::string& p) {
+        const char* home = getenv("HOME");
+        return (home && p.rfind(home, 0) == 0) || p.rfind("/tmp/", 0) == 0;
+    };
+    try {
+        auto j = nlohmann::json::parse(args);
+        auto get = [&](const char* k) {
+            std::string p;
+            if (!j.contains(k) || !fileSafePath(j[k].get<std::string>(), &p))
+                return std::string();
+            return p;
+        };
+        auto& fm = getFileManager();
+        bool ok = false;
+        if (op == "copy" || op == "move" || op == "rename") {
+            std::string src = get("src");
+            std::string dst = get("dst");
+            if (src.empty() || dst.empty())
+                return m_ipcServer->createErrorResponse(-2, "Missing or invalid src/dst");
+            if (!contained(src) || !contained(dst))
+                return m_ipcServer->createErrorResponse(-2, "Paths must be under HOME or /tmp");
+            if (op == "copy") ok = fm.copyFile(src, dst);
+            else if (op == "move") ok = fm.moveFile(src, dst);
+            else ok = fm.renameFile(src, dst);
+        } else if (op == "delete") {
+            std::string p = get("path");
+            if (p.empty()) return m_ipcServer->createErrorResponse(-2, "Missing or invalid path");
+            if (!contained(p))
+                return m_ipcServer->createErrorResponse(-2, "Path must be under HOME or /tmp");
+            if (fm.isDirectory(p)) ok = fm.deleteDirectory(p);
+            else ok = fm.deleteFile(p);
+        } else if (op == "mkdir") {
+            std::string p = get("path");
+            if (p.empty()) return m_ipcServer->createErrorResponse(-2, "Missing or invalid path");
+            if (!contained(p))
+                return m_ipcServer->createErrorResponse(-2, "Path must be under HOME or /tmp");
+            ok = fm.createDirectory(p);
+        } else {
+            return m_ipcServer->createErrorResponse(-4, "Unknown op");
+        }
+        nlohmann::json r;
+        r["success"] = ok;
+        if (!ok) r["error"] = "operation failed";
+        return r.dump();
+    } catch (const std::exception& e) {
+        return m_ipcServer->createErrorResponse(-1, e.what());
+    }
+}
+
+std::string Server::ipcOpenPath(const std::string& args) {
+    std::string path;
+    try {
+        auto j = nlohmann::json::parse(args);
+        if (!fileSafePath(j.value("path", ""), &path))
+            return m_ipcServer->createErrorResponse(-2, "Invalid path");
+    } catch (...) {
+        return m_ipcServer->createErrorResponse(-1, "Invalid JSON");
+    }
+    std::string openedWith;
+    if (!openPath(path, &openedWith))
+        return m_ipcServer->createErrorResponse(-3, "No such path: " + path);
+    nlohmann::json r;
+    r["success"] = true;
+    r["opened_with"] = openedWith;
+    return r.dump();
+}
+
+bool Server::openPath(const std::string& rawPath, std::string* openedWith) {
+    std::string path;
+    if (!fileSafePath(rawPath, &path)) return false;
+    auto& fm = getFileManager();
+    if (!fm.fileExists(path)) return false;
+
+    // Directories open in the project file manager when it is installed
+    // next to the compositor, else xdg-open.
+    if (fm.isDirectory(path)) {
+        std::vector<std::string> candidates;
+        std::string self = "/proc/self/exe";
+        char buf[4096];
+        ssize_t n = readlink(self.c_str(), buf, sizeof(buf) - 1);
+        if (n > 0) {
+            buf[n] = '\0';
+            std::string dir = buf;
+            size_t slash = dir.rfind('/');
+            if (slash != std::string::npos) {
+                dir = dir.substr(0, slash);
+                candidates.push_back(dir + "/havel-filemanager");
+                candidates.push_back(dir + "/../src/shell/filemanager/havel-filemanager");
+            }
+        }
+        for (const auto& c : candidates) {
+            if (access(c.c_str(), X_OK) == 0) {
+                spawnArgv({c, path});
+                LOG_INFO("[Files] Opened directory %s in %s", path.c_str(), c.c_str());
+                if (openedWith) *openedWith = c;
+                return true;
+            }
+        }
+        spawnArgv({"xdg-open", path});
+        LOG_WARN("[Files] no havel-filemanager found; xdg-open used for %s", path.c_str());
+        if (openedWith) *openedWith = "xdg-open";
+        return true;
+    }
+
+    spawnArgv({"xdg-open", path});
+    LOG_INFO("[Files] Opened %s with xdg-open", path.c_str());
+    if (openedWith) *openedWith = "xdg-open";
+    return true;
 }
 
 std::string Server::ipcZoom(const std::string& args) {
