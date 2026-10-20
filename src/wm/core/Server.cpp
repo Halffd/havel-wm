@@ -14,6 +14,8 @@
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <algorithm>
 #include <cstdlib>
+#include <fstream>
+#include <filesystem>
 #include <unistd.h>
 #include <sys/types.h>
 #include <cstdio>
@@ -89,6 +91,10 @@ Server::Server() {
 
     // Register built-in keybindings
     registerKeybindings();
+
+    // Apply persisted settings after plugins exist (plugin.* keys need
+    // their plugins registered to apply live)
+    settingsLoad();
 
     // Initialize text input manager (IME support)
     // This must be done after wl_display is created
@@ -1243,6 +1249,133 @@ bool Server::zoomGetCapture(int outputIndex, const uint32_t** pixels, int* w, in
 }
 
 // ============================================================================
+// Settings store (persisted, live-applied)
+// ============================================================================
+
+namespace {
+std::string settingsStorePath() {
+    const char* home = getenv("HOME");
+    if (!home || !*home) return "";
+    return std::string(home) + "/.config/havel-wm/settings.json";
+}
+} // namespace
+
+// Apply one setting immediately where a handler exists. Unknown keys are
+// simply stored - scripts and the REPL read them via settings_get.
+void Server::settingsSet(const std::string& key, const std::string& value) {
+    m_settings[key] = value;
+
+    if (key == "gamma") {
+        setGamma(std::stof(value));
+    } else if (key == "temperature") {
+        setTemperature(std::stoi(value));
+    } else if (key == "brightness") {
+        setBrightness(std::stof(value));
+    } else if (key == "animations") {
+        setAnimationsEnabled(value == "true" || value == "1");
+    } else if (key == "background_color") {
+        float r = 0.1f, g = 0.1f, b = 0.15f;
+        if (sscanf(value.c_str(), "%f,%f,%f", &r, &g, &b) == 3) {
+            setBackgroundColor(r, g, b);
+        } else {
+            LOG_WARN("[Settings] background_color wants r,g,b floats, got '%s'", value.c_str());
+        }
+    } else if (key.rfind("plugin.", 0) == 0) {
+        // plugin.<name>.<key> -> live plugin setting
+        size_t second = key.find('.', 7);
+        if (second != std::string::npos && second > 7) {
+            std::string pluginName = key.substr(7, second - 7);
+            std::string pluginKey = key.substr(second + 1);
+            PluginConfig::getInstance().setValue(pluginName, pluginKey, value);
+            m_pluginManager.reloadPluginSettings(pluginName);
+            LOG_INFO("[Settings] plugin %s.%s = %s", pluginName.c_str(),
+                     pluginKey.c_str(), value.c_str());
+        } else {
+            LOG_WARN("[Settings] plugin settings want plugin.<name>.<key>, got '%s'", key.c_str());
+        }
+    }
+
+    // Persist (best effort: a failed write keeps the live value only)
+    std::string path = settingsStorePath();
+    if (!path.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(
+            std::filesystem::path(path).parent_path(), ec);
+        nlohmann::json j = nlohmann::json::object();
+        for (const auto& [k, v] : m_settings) j[k] = v;
+        std::ofstream out(path);
+        if (out) out << j.dump(2);
+    }
+}
+
+std::string Server::settingsGet(const std::string& key) const {
+    auto it = m_settings.find(key);
+    return it == m_settings.end() ? std::string() : it->second;
+}
+
+void Server::settingsLoad() {
+    std::string path = settingsStorePath();
+    if (path.empty()) return;
+    std::ifstream in(path);
+    if (!in) return;
+    try {
+        auto j = nlohmann::json::parse(in);
+        if (!j.is_object()) return;
+        int applied = 0;
+        for (auto it = j.begin(); it != j.end(); ++it) {
+            if (!it.value().is_string()) continue;
+            // settingsSet re-saves; suppress by writing the map directly
+            // and applying the handler logic through settingsSet is fine
+            // here too (boot-time, one write).
+            settingsSet(it.key(), it.value().get<std::string>());
+            applied++;
+        }
+        LOG_INFO("[Settings] Loaded %d persisted setting(s)", applied);
+    } catch (const std::exception& e) {
+        LOG_WARN("[Settings] Could not load %s: %s", path.c_str(), e.what());
+    }
+}
+
+std::string Server::ipcSettings(const std::string& args) {
+    try {
+        auto j = nlohmann::json::parse(args);
+        std::string action = j.value("action", "get");
+        if (action == "set") {
+            std::string key = j.value("key", "");
+            if (key.empty() || !j.contains("value"))
+                return m_ipcServer->createErrorResponse(-5, "Missing key or value");
+            nlohmann::json v = j["value"];
+            if (!v.is_string())
+                return m_ipcServer->createErrorResponse(-2, "value must be a string");
+            settingsSet(key, v.get<std::string>());
+            nlohmann::json r;
+            r["success"] = true;
+            r["key"] = key;
+            r["value"] = v;
+            return r.dump();
+        }
+        if (action == "get") {
+            std::string key = j.value("key", "");
+            std::string value = settingsGet(key);
+            if (value.empty())
+                return m_ipcServer->createErrorResponse(-3, "No such setting: " + key);
+            nlohmann::json r;
+            r["key"] = key;
+            r["value"] = value;
+            return r.dump();
+        }
+        if (action == "list") {
+            nlohmann::json r = nlohmann::json::object();
+            for (const auto& [k, v] : m_settings) r[k] = v;
+            return r.dump();
+        }
+        return m_ipcServer->createErrorResponse(-4, "Unknown action: " + action);
+    } catch (const std::exception& e) {
+        return m_ipcServer->createErrorResponse(-1, e.what());
+    }
+}
+
+// ============================================================================
 // Animation Control
 // ============================================================================
 
@@ -1764,6 +1897,10 @@ bool Server::startIPCServer(const std::string& socketPath) {
 
     m_ipcServer->registerCommand("zoom", [this](const std::string& args) -> std::string {
         return ipcZoom(args);
+    });
+
+    m_ipcServer->registerCommand("settings", [this](const std::string& args) -> std::string {
+        return ipcSettings(args);
     });
 
     // File manager integration (validated paths, no shell)

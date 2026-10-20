@@ -290,6 +290,30 @@ static int hf_open_path(HavelState* H, void*) {
     return HAVEL_OK;
 }
 
+// settings(key) -> string (or nil when unset); settings(key, value) sets
+// and applies the setting live.
+static int hf_settings(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    const char* key = arg_str(H, 0);
+    if (!key || !ctx || !ctx->server) {
+        havel_pushnil(H);
+        return HAVEL_OK;
+    }
+    if (havel_gettop(H) >= 2) {
+        const char* value = arg_str(H, 1);
+        if (value) ctx->server->settingsSet(key, value);
+        havel_pushnil(H);
+        return HAVEL_OK;
+    }
+    std::string value = ctx->server->settingsGet(key);
+    if (value.empty()) {
+        havel_pushnil(H);
+    } else {
+        havel_pushstring(H, value.c_str());
+    }
+    return HAVEL_OK;
+}
+
 // plugin_config(plugin, key, value): set a plugin setting from config.hv
 // and apply it live. Values are strings; numbers/bools are converted
 // here so `plugin_config("alt_tab", "columns", 4)` works.
@@ -549,6 +573,8 @@ void HavelHost::registerHostFunctions() {
     havel_pushcfunction_with_ctx(m_H, hf_set_wallpaper, nullptr, "set_wallpaper");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_open_path, nullptr, "open_path");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_settings, nullptr, "settings");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_get_workspace, nullptr, "get_workspace");
     havel_pop(m_H, 1);

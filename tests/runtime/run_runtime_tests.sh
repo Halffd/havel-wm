@@ -977,6 +977,60 @@ report $(echo "$FOPEN" | grep -q '"success": true' && echo 0 || echo 1) \
 rm -rf "$FILEDIR"
 sleep 0.3
 
+# ---------------------------------------------------------------- phase 13: settings store
+# settings_set/get/list with live application: gamma routes to the display
+# settings, plugin.* keys push into plugins.json and reload the plugin.
+SSET() {
+    python3 - "$SOCK" "$1" "$2" <<'SIPC' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"settings",
+                       "params":json.loads(sys.argv[3])})+"\n").encode())
+r = json.loads(s.recv(65536))
+print(json.dumps(r.get("result", r.get("error", {}))))
+SIPC
+}
+SGAMMA=$(SSET x "{\"action\":\"set\",\"key\":\"gamma\",\"value\":\"1.5\"}")
+report $(echo "$SGAMMA" | grep -q '"success": true' && echo 0 || echo 1) \
+    "settings_set gamma 1.5"
+SGAMMA2=$(SSET x "{\"action\":\"get\",\"key\":\"gamma\"}")
+report $(echo "$SGAMMA2" | grep -q '"value": "1.5"' && echo 0 || echo 1) \
+    "settings_get returns gamma ($(echo "$SGAMMA2" | head -c 50))"
+GDSP=$(python3 - "$SOCK" <<'GDSP' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_display_settings","params":{}})+"\n").encode())
+print(s.recv(65536).decode())
+GDSP
+)
+report $(echo "$GDSP" | grep -q '"gamma":1.5' && echo 0 || echo 1) \
+    "gamma setting applied to display settings"
+
+# plugin.* key: taller panel, pixel-verified (bar bg reaches y=38)
+PANEL_CAP2="$(mktemp /tmp/havel-panel2-XXXXXX.png)"
+SSET x "{\"action\":\"set\",\"key\":\"plugin.workspace_info_bar.height\",\"value\":\"44\"}" >/dev/null
+sleep 0.6
+WAYLAND_DISPLAY=wayland-0 grim "$PANEL_CAP2" 2>/dev/null
+PDEEP=$(python3 - "$PANEL_CAP2" <<'PDEEP_PY'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB'); px = im.load(); w, h = im.size
+# bar bg (0.85 black over bg) sampled below the old 30px height, in the
+# workarea-free zone the taller panel now owns
+return_val = sum(1 for y in range(34, 42, 2) for x in range(300, 900, 8)
+                 if px[x, y][0] < 15 and px[x, y][1] < 15 and px[x, y][2] < 25)
+print(return_val)
+PDEEP_PY
+)
+report $([ "${PDEEP:-0}" -gt 50 ] && echo 0 || echo 1) \
+    "plugin setting live-applied (panel taller, deep px=${PDEEP:-err})"
+rm -f "$PANEL_CAP2"
+# restore panel height so later phases see the default layout
+SSET x "{\"action\":\"set\",\"key\":\"plugin.workspace_info_bar.height\",\"value\":\"30\"}" >/dev/null
+SSET x "{\"action\":\"set\",\"key\":\"gamma\",\"value\":\"1.0\"}" >/dev/null
+
 # ---------------------------------------------------------------- teardown
 kill "$FOOT_PID" 2>/dev/null; FOOT_PID=""
 report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "zero crashes across all phases"

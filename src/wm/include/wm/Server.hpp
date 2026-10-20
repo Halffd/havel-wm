@@ -264,6 +264,17 @@ public:
                          float srcX, float srcY);
     bool zoomGetCapture(int outputIndex, const uint32_t** pixels, int* w, int* h,
                         float* srcX, float* srcY, uint64_t* seq) const;
+
+    // Settings store: persisted key/value pairs (~/.config/havel-wm/
+    // settings.json) with live application of known keys. Keys:
+    //   gamma, temperature, brightness, animations, background_color
+    //   plugin.<plugin>.<key> -> plugin setting, applied immediately
+    //   anything else -> stored for scripts/REPL
+    void settingsSet(const std::string& key, const std::string& value);
+    std::string settingsGet(const std::string& key) const;
+    const std::map<std::string, std::string>& settingsAll() const { return m_settings; }
+    void settingsLoad();  // read + apply persisted settings (boot)
+    std::string ipcSettings(const std::string& args);
     // Window group management
     void* windowGroupManager() const { return m_windowGroupManager; }
     void setWindowGroupManager(void* manager) { m_windowGroupManager = manager; }
@@ -383,6 +394,7 @@ private:
     // Zoom state (see zoomConfig()/zoom* methods)
     ZoomConfig m_zoomConfig;
     std::map<int, ZoomTargets> m_zoomTargets;
+    std::map<std::string, std::string> m_settings;  // persisted settings store
     struct ZoomCaptureRequest {
         bool pending = false;
         float cx = 0, cy = 0;
