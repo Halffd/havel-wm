@@ -89,6 +89,17 @@ struct havel_overlay_target {
 void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int height,
                              const struct havel_overlay_target* target);
 
+// Zoom magnifier capture handshake (C renders the scene, C++ wants a
+// region as CPU pixels for lens/strip/custom zoom modes).
+// take_request: atomically fetch + clear the region the C++ side asked for
+// during the overlay pass; returns false when there is no pending request.
+bool havel_cpp_zoom_take_request(struct havel_cpp_server* server, int output_index,
+                                  float* cx, float* cy, int* w, int* h);
+// feed: deliver the captured region (output-local source coordinates).
+// Copies the pixels; caller frees.
+void havel_cpp_zoom_feed(struct havel_cpp_server* server, int output_index,
+                          const uint32_t* pixels, int w, int h, float src_x, float src_y);
+
 // Application spawning (for App Launcher): fork+exec, no shell
 void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command);
 
@@ -195,6 +206,14 @@ void havel_wlr_set_wallpaper(struct havel_wlr_server *server,
 bool havel_wlr_capture_view_pixels(void* c_view,
                                    uint32_t** out_pixels, int* out_w, int* out_h);
 void havel_wlr_capture_pixels_free(uint32_t* pixels);
+
+// Zoom query (per-output; rendered in output_frame via scale + offset)
+float havel_wlr_get_zoom(struct havel_wlr_server *server, int output_index);
+
+// Zoom setter (per-output, cursor-centred scale + offset; rendered in
+// output_frame). centre < 0 means "follow the live cursor".
+void havel_wlr_set_zoom_for_output(struct havel_wlr_server *server, int output_index,
+                                    float zoom, float center_x, float center_y);
 
 // Start the persistent self-injection keyboard (background wayland-client
 // connection to the compositor's own socket)

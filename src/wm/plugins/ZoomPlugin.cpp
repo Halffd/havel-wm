@@ -1,236 +1,351 @@
-// Zoom Plugin - Per-monitor zoom control with cursor-centered zoom
-// Accessibility feature for users who need larger UI
+// Zoom Plugin - Wayfire-style zoom with lens/strip/custom magnifier modes
+//
+// Modes (Meta+Ctrl+M cycles, or zoom IPC "mode"):
+//   fullscreen - output scale + cursor-centred pan (rendered by the C frame
+//                loop; this plugin only animates the applied level)
+//   lens       - magnifier box following the cursor
+//   strip      - full-width magnified band at the top/bottom edge
+//   custom     - fixed user-positioned magnifier box
+//
+// Multi-monitor: zoom keys hit the output under the cursor; each output
+// keeps its own level/magnification. The lens/strip/custom magnifier draws
+// only on the output the pointer is on.
+//
+// Animation: applied values ease toward the Server-owned targets every
+// frame (exponential smoothing, "smoothing_ms" config, default 300).
+//
+// Keybindings (gate from "keybinding", default Meta+Ctrl):
+//   gate+Plus / gate+Minus / gate+0  step in / out / reset
+//   gate+Z (toggle key)              toggle zoom
+//   gate+M                           cycle mode
+//   gate+Space (hold)                push-to-zoom
 
 #include <wm/plugins/Plugin.hpp>
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/plugins/PluginConfig.hpp>
+#include <wm/render/OverlayRenderer.hpp>
 #include <xkbcommon/xkbcommon-keysyms.h>
+#include <algorithm>
+#include <cmath>
+#include <chrono>
 #include <cstdio>
+#include <map>
 
 namespace havel {
 
-/**
- * Zoom Plugin - Enhanced with proportional zoom and push/toggle modes
- *
- * Features:
- * - Per-monitor zoom (0.5x - 3.0x)
- * - Proportional zoom (multiplicative, not additive)
- * - Push-to-zoom mode (hold key to zoom, release to return)
- * - Toggle zoom mode (press to enable, press to disable)
- *
- * Keybindings:
- * - Meta+Ctrl+Plus: Zoom in (proportional)
- * - Meta+Ctrl+Minus: Zoom out (proportional)
- * - Meta+Ctrl+0: Reset zoom
- * - Meta+Ctrl+Z: Toggle zoom (1.0x <-> 2.0x)
- * - Meta+Ctrl+Space: Push-to-zoom (hold to zoom)
- * - Add Shift for secondary monitor
- */
 class ZoomPlugin : public Plugin {
 public:
     const char* name() const override { return "zoom"; }
-    const char* version() const override { return "2.0.0"; }
+    const char* version() const override { return "3.0.0"; }
 
     void init(CompositorAPI* api) override {
         m_api = api;
-        
-        // Initialize zoom levels
-        m_zoomLevels[0] = 1.0f;  // Primary monitor
-        m_zoomLevels[1] = 1.0f;  // Secondary monitor
-        
-        // Saved zoom levels for toggle/push modes
-        m_savedZoomLevels[0] = 1.0f;
-        m_savedZoomLevels[1] = 1.0f;
-        
-        // Push-to-zoom state
-        m_pushZoomActive = false;
-        m_pushZoomLevel = 2.0f;  // Default push zoom level
-        
-        // Toggle state
-        m_toggleZoomActive = false;
-        m_toggleZoomLevel = 2.0f;  // Default toggle zoom level
-        
-        printf("[ZoomPlugin] Initialized v2.0 (proportional, push/toggle modes)\n");
-        printf("[ZoomPlugin]   Primary: %.2f, Secondary: %.2f\n", m_zoomLevels[0], m_zoomLevels[1]);
+        m_lastTick = std::chrono::steady_clock::now();
+        printf("[ZoomPlugin] Initialized v3.0 (fullscreen/lens/strip/custom, animated)\n");
     }
 
     void fini() override {
-        // Reset zoom on unload
-        m_api->setZoomForOutput(0, 1.0f);
-        m_api->setZoomForOutput(1, 1.0f);
-        printf("[ZoomPlugin] Finalized (reset to defaults)\n");
+        // Drop every output back to 1.0 or the scale sticks after unload.
+        for (const auto& [idx, box] : m_boxes) {
+            m_api->setZoomForOutput(idx, 1.0f);
+        }
+        for (int i = 0; i < 8; i++) {
+            m_api->setZoomForOutput(i, 1.0f);
+        }
+        printf("[ZoomPlugin] Finalized (zoom reset)\n");
         m_api = nullptr;
     }
 
     void loadConfig(const std::string& configPath) override {
         (void)configPath;
-        // Configurable binding (default Meta+Ctrl+Z): the modifiers from
-        // the spec become the gate; the keysym becomes the toggle key.
-        // Plus/minus/0/space remain fixed family members behind that gate.
         auto& config = PluginConfig::getInstance();
+
+        // Toggle binding: its modifiers are the gate for the whole key
+        // family (plus/minus/0/space/mode), the keysym is the toggle key.
         uint32_t mods = 0, sym = 0;
         if (config.getKeybindingParsed("zoom", &mods, &sym)) {
             m_gateMods = mods;
             m_toggleKeysym = sym;
-            printf("[ZoomPlugin] Binding from config: gate mods=0x%x toggle keysym=0x%x\n",
-                   mods, sym);
         }
-        printf("[ZoomPlugin] Config loaded\n");
+        // Mode-cycle binding: independent full spec (default gate + M).
+        uint32_t mmods = 0, msym = 0;
+        if (PluginConfig::parseKeybindingSpec("Meta+Ctrl+M", &mmods, &msym)) {
+            m_modeMods = mmods;
+            m_modeKeysym = msym;
+        }
+
+        // Push the control parameters down to the Server (single source of
+        // truth for targets/clamps). Display geometry stays plugin-side in
+        // plugins.json - the plugin is the only renderer of the magnifier.
+        std::string cfg = "{";
+        cfg += "\"step\":" + std::to_string(config.getFloatValue("zoom", "step", 1.25f)) + ",";
+        cfg += "\"toggle_level\":" + std::to_string(config.getFloatValue("zoom", "toggle_level", 2.0f)) + ",";
+        cfg += "\"max_level\":" + std::to_string(config.getFloatValue("zoom", "max_level", 8.0f)) + ",";
+        cfg += "\"max_mag\":" + std::to_string(config.getFloatValue("zoom", "max_mag", 20.0f));
+        cfg += "}";
+        m_api->zoomConfigure(cfg);
+
+        m_smoothingMs = config.getFloatValue("zoom", "smoothing_ms", 300.0f);
+        if (m_smoothingMs < 0.0f) m_smoothingMs = 0.0f;
+
+        printf("[ZoomPlugin] Config loaded (gate=0x%x toggle=0x%x smoothing=%.0fms)\n",
+               m_gateMods, m_toggleKeysym, m_smoothingMs);
     }
 
     bool onKey(const KeyEvent& event) override {
-        constexpr uint32_t MOD_SHIFT = 1 << 0;
+        if (!event.pressed && event.keysym != m_toggleKeysym &&
+            event.keysym != XKB_KEY_space) {
+            return false;  // releases only matter for hold keys
+        }
+        if ((event.modifiers & m_gateMods) != m_gateMods &&
+            (event.modifiers & m_modeMods) != m_modeMods) {
+            return false;
+        }
 
-        // Gate: configured modifier set (default Meta+Ctrl)
+        int target = outputUnderCursor();
+
+        // Mode cycle (own gate+key so M works even if the toggle gate differs)
+        if (event.pressed && (event.modifiers & m_modeMods) == m_modeMods &&
+            event.keysym == m_modeKeysym) {
+            m_api->zoomSetMode((m_api->zoomMode() + 1) % 4);
+            static const char* names[] = {"fullscreen", "lens", "strip", "custom"};
+            printf("[ZoomPlugin] Mode: %s\n", names[m_api->zoomMode()]);
+            return true;
+        }
+
         if ((event.modifiers & m_gateMods) != m_gateMods) return false;
 
-        // Select which monitor
-        int targetOutput = (event.modifiers & MOD_SHIFT) ? 1 : 0;
-        const char* targetName = targetOutput == 0 ? "primary" : "secondary";
-
-        // Zoom in: Plus key - PROPORTIONAL
         if (event.keysym == XKB_KEY_plus && event.pressed) {
-            zoomInProportional(targetOutput);
-            printf("[ZoomPlugin] Zoom %s: %.2f\n",
-                   targetName, m_zoomLevels[targetOutput]);
+            m_api->zoomIn(target);
             return true;
         }
-
-        // Zoom out: Minus key - PROPORTIONAL
         if (event.keysym == XKB_KEY_minus && event.pressed) {
-            zoomOutProportional(targetOutput);
-            printf("[ZoomPlugin] Zoom %s: %.2f\n",
-                   targetName, m_zoomLevels[targetOutput]);
+            m_api->zoomOut(target);
             return true;
         }
-
-        // Reset zoom: Zero key
         if (event.keysym == XKB_KEY_0 && event.pressed) {
-            resetZoom(targetOutput);
-            printf("[ZoomPlugin] Zoom %s reset to 1.0\n", targetName);
+            m_api->zoomReset(target);
             return true;
         }
-
-        // Toggle zoom: configured toggle key (default Z)
         if (event.keysym == m_toggleKeysym && event.pressed) {
-            toggleZoom(targetOutput);
+            m_api->zoomToggle(target);
             return true;
         }
-
-        // Push-to-zoom: Space key
         if (event.keysym == XKB_KEY_space) {
-            if (event.pressed) {
-                pushZoomStart(targetOutput);
-            } else {
-                pushZoomEnd(targetOutput);
-            }
+            if (event.pressed) m_api->zoomPushStart(target);
+            else m_api->zoomPushEnd(target);
             return true;
         }
-
         return false;
+    }
+
+    void onOutputFrame(const OutputFrameEvent& event) override {
+        (void)event;
+        if (!m_api) return;
+
+        // Frame callbacks fire once per output per refresh, so with N
+        // monitors this runs N times per period. Advance the animation on
+        // wall-clock time instead of event count, or N monitors zoom N
+        // times faster.
+        auto now = std::chrono::steady_clock::now();
+        float dtMs = std::chrono::duration<float, std::milli>(now - m_lastTick).count();
+        if (dtMs < 4.0f) return;  // same vsync tick seen through N outputs
+        m_lastTick = now;
+        if (dtMs > 100.0f) dtMs = 100.0f;
+
+        int mode = m_api->zoomMode();
+        float k = m_smoothingMs <= 0.0f ? 1.0f
+                                        : 1.0f - std::exp(-dtMs / m_smoothingMs);
+
+        for (const auto& [idx, box] : m_boxes) {
+            float targetLevel = mode == 0 ? m_api->zoomTargetLevel(idx) : 1.0f;
+            float targetMag = mode != 0 ? m_api->zoomTargetMag(idx) : 1.0f;
+            Anim& a = m_anim[idx];
+
+            float prev = a.level;
+            a.level += (targetLevel - a.level) * k;
+            if (std::fabs(targetLevel - a.level) < 0.001f) a.level = targetLevel;
+            if (a.level != prev) m_api->setZoomForOutput(idx, a.level);
+
+            prev = a.mag;
+            a.mag += (targetMag - a.mag) * k;
+            if (std::fabs(targetMag - a.mag) < 0.001f) a.mag = targetMag;
+        }
+    }
+
+    void renderOverlay(void* rendererPtr) override {
+        if (!rendererPtr || !m_api) return;
+        OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+
+        // Cache the per-output box: keys resolve their target output from
+        // these (cursor-in-box test) and the magnifier draws in scene coords.
+        CompositorAPI::OutputTarget out = m_api->currentOutputTarget();
+        OutBox& box = m_boxes[out.index];
+        box.x = out.x;
+        box.y = out.y;
+        box.w = out.w;
+        box.h = out.h;
+        box.underCursor = out.underCursor;
+
+        if (m_api->zoomMode() == 0) return;  // fullscreen mode: C-side scale only
+        if (!out.underCursor) return;        // magnifier follows the pointer
+        if (!m_api->zoomActive(out.index)) return;
+
+        float mag = m_anim[out.index].mag;
+        if (mag < 1.05f) return;  // not visually zoomed yet (or already off)
+
+        // Display box in scene coordinates, source region in output-local
+        // coordinates (that is what the C capture clamps against).
+        FloatRect display = displayBox(out, box);
+        float srcW = display.w / mag;
+        float srcH = display.h / mag;
+        float clx = (float)m_api->getCursorX() - (float)out.x;
+        float cly = (float)m_api->getCursorY() - (float)out.y;
+
+        // The capture reads the rendered frame, which already contains the
+        // magnifier drawn last frame - keep the source outside the display
+        // box or the magnifier feeds back into itself.
+        clampSourceOut(&clx, &cly, srcW, srcH, display);
+        // Keep the source inside the output
+        clx = std::min(std::max(clx, srcW / 2), (float)box.w - srcW / 2);
+        cly = std::min(std::max(cly, srcH / 2), (float)box.h - srcH / 2);
+
+        m_api->zoomRequestCapture(out.index, clx, cly, (int)std::lround(srcW), (int)std::lround(srcH));
+
+        // Draw the freshest capture (one frame stale, standard for a
+        // magnifier) stretched over the display box.
+        const uint32_t* pixels = nullptr;
+        int pw = 0, ph = 0;
+        float sx = 0, sy = 0;
+        uint64_t seq = 0;
+        bool have = m_api->zoomGetCapture(out.index, &pixels, &pw, &ph, &sx, &sy, &seq);
+        if (have && seq != m_anim[out.index].capSeq) {
+            m_anim[out.index].capSeq = seq;
+            m_anim[out.index].captureWorks = true;
+        }
+
+        // Dim backing + accent border
+        renderer->drawRect(display, Color(0.0f, 0.0f, 0.0f, 0.55f));
+        if (have && pixels && pw > 0 && ph > 0) {
+            renderer->drawPixels(pixels, pw, ph, display.x, display.y, display.w, display.h);
+        } else if (!m_anim[out.index].captureWarned) {
+            // GPU-backed framebuffers expose no CPU pixels; say so once
+            // instead of leaving a silent black box.
+            m_anim[out.index].captureWarned = true;
+            printf("[ZoomPlugin] output %d: no CPU capture (GPU buffer?) - magnifier shows placeholder only\n",
+                   out.index);
+        }
+        renderer->drawBorder(display, Color(0.1f, 0.65f, 0.9f, 0.95f), 2.0f);
+
+        char label[32];
+        snprintf(label, sizeof(label), "%.1fx", mag);
+        renderer->drawText(label, display.x + 6.0f, display.y + 4.0f, 13.0f,
+                           Color(0.9f, 0.95f, 1.0f, 0.95f));
     }
 
 private:
     CompositorAPI* m_api = nullptr;
 
-    // Binding (overridable via config "keybinding", default Meta+Ctrl+Z):
-    // gate modifiers + toggle keysym; plus/minus/0/space are fixed family
+    struct Anim {
+        float level = 1.0f;
+        float mag = 1.0f;
+        uint64_t capSeq = 0;
+        bool captureWorks = false;
+        bool captureWarned = false;
+    };
+    struct OutBox {
+        int x = 0, y = 0, w = 0, h = 0;
+        bool underCursor = false;
+    };
+
+    // Gate (from the toggle binding's modifiers) + family keys
     uint32_t m_gateMods = (1u << 6) | (1u << 2);  // Meta+Ctrl
     uint32_t m_toggleKeysym = XKB_KEY_z;
+    uint32_t m_modeMods = (1u << 6) | (1u << 2);
+    uint32_t m_modeKeysym = XKB_KEY_m;
+    float m_smoothingMs = 300.0f;
 
-    // Current zoom levels
-    float m_zoomLevels[2];  // [0] = primary, [1] = secondary
-    
-    // Saved zoom levels for toggle/push modes
-    float m_savedZoomLevels[2];
-    
-    // Push-to-zoom state
-    bool m_pushZoomActive;
-    float m_pushZoomLevel;
-    
-    // Toggle zoom state
-    bool m_toggleZoomActive;
-    float m_toggleZoomLevel;
+    std::map<int, Anim> m_anim;
+    std::map<int, OutBox> m_boxes;
+    std::chrono::steady_clock::time_point m_lastTick;
 
-    // Proportional zoom in (multiply by 1.25)
-    void zoomInProportional(int output_index) {
-        float factor = 1.25f;  // 25% increase
-        m_zoomLevels[output_index] = clamp(m_zoomLevels[output_index] * factor, 0.5f, 3.0f);
-        m_api->setZoomForOutput(output_index, m_zoomLevels[output_index]);
-        
-        // Reset toggle/push state when manually adjusting
-        m_toggleZoomActive = false;
-        m_pushZoomActive = false;
-    }
-
-    // Proportional zoom out (divide by 1.25)
-    void zoomOutProportional(int output_index) {
-        float factor = 0.8f;  // 20% decrease (inverse of 1.25)
-        m_zoomLevels[output_index] = clamp(m_zoomLevels[output_index] * factor, 0.5f, 3.0f);
-        m_api->setZoomForOutput(output_index, m_zoomLevels[output_index]);
-        
-        // Reset toggle/push state when manually adjusting
-        m_toggleZoomActive = false;
-        m_pushZoomActive = false;
-    }
-
-    // Reset zoom to 1.0
-    void resetZoom(int output_index) {
-        m_zoomLevels[output_index] = 1.0f;
-        m_api->setZoomForOutput(output_index, 1.0f);
-        m_toggleZoomActive = false;
-        m_pushZoomActive = false;
-    }
-
-    // Toggle zoom between 1.0x and toggle level
-    void toggleZoom(int output_index) {
-        if (m_toggleZoomActive) {
-            // Return to normal
-            m_zoomLevels[output_index] = m_savedZoomLevels[output_index];
-            m_toggleZoomActive = false;
-            printf("[ZoomPlugin] Toggle zoom OFF (restored to %.2f)\n", 
-                   m_zoomLevels[output_index]);
-        } else {
-            // Save current and apply toggle zoom
-            m_savedZoomLevels[output_index] = m_zoomLevels[output_index];
-            m_zoomLevels[output_index] = m_toggleZoomLevel;
-            m_toggleZoomActive = true;
-            printf("[ZoomPlugin] Toggle zoom ON (%.2f)\n", m_toggleZoomLevel);
+    // Output under the pointer: box containment test against the layout
+    // cursor position. Falls back to the primary (index 0) before the
+    // first overlay pass has cached any boxes.
+    int outputUnderCursor() {
+        double cx = m_api->getCursorX();
+        double cy = m_api->getCursorY();
+        int fallback = -1;
+        for (const auto& [idx, b] : m_boxes) {
+            if (fallback < 0) fallback = idx;
+            if (cx >= b.x && cx < b.x + b.w && cy >= b.y && cy < b.y + b.h) return idx;
         }
-        m_api->setZoomForOutput(output_index, m_zoomLevels[output_index]);
-        m_pushZoomActive = false;
+        return fallback < 0 ? 0 : fallback;
     }
 
-    // Push-to-zoom start (hold key)
-    void pushZoomStart(int output_index) {
-        m_savedZoomLevels[output_index] = m_zoomLevels[output_index];
-        m_zoomLevels[output_index] = m_pushZoomLevel;
-        m_pushZoomActive = true;
-        m_api->setZoomForOutput(output_index, m_zoomLevels[output_index]);
-        m_toggleZoomActive = false;
-        printf("[ZoomPlugin] Push zoom START (%.2f)\n", m_pushZoomLevel);
-    }
-
-    // Push-to-zoom end (release key)
-    void pushZoomEnd(int output_index) {
-        if (m_pushZoomActive) {
-            m_zoomLevels[output_index] = m_savedZoomLevels[output_index];
-            m_pushZoomActive = false;
-            m_api->setZoomForOutput(output_index, m_zoomLevels[output_index]);
-            printf("[ZoomPlugin] Push zoom END (restored to %.2f)\n", 
-                   m_zoomLevels[output_index]);
+    FloatRect displayBox(const CompositorAPI::OutputTarget& out, const OutBox& box) {
+        int mode = m_api->zoomMode();
+        FloatRect d;
+        if (mode == 1) {  // lens: box centred on cursor + configured offset
+            d.w = (float)lensW();
+            d.h = (float)lensH();
+            d.x = (float)m_api->getCursorX() + (float)lensDx() - d.w / 2;
+            d.y = (float)m_api->getCursorY() + (float)lensDy() - d.h / 2;
+        } else if (mode == 2) {  // strip: full width band at an edge
+            d.w = (float)box.w;
+            d.h = (float)stripH();
+            d.x = (float)box.x;
+            d.y = stripBottom() ? (float)(box.y + box.h - stripH()) : (float)box.y;
+        } else {  // custom: fixed box, auto position = top-right
+            d.w = (float)customW();
+            d.h = (float)customH();
+            float cx = customX();
+            float cy = customY();
+            d.x = cx < 0 ? (float)(box.x + box.w - customW() - 16) : box.x + cx;
+            d.y = cy < 0 ? (float)(box.y + 16) : box.y + cy;
         }
+        // Clamp inside the output
+        if (d.x < (float)box.x) d.x = (float)box.x;
+        if (d.y < (float)box.y) d.y = (float)box.y;
+        if (d.x + d.w > (float)(box.x + box.w)) d.x = (float)(box.x + box.w) - d.w;
+        if (d.y + d.h > (float)(box.y + box.h)) d.y = (float)(box.y + box.h) - d.h;
+        return d;
     }
 
-    template<typename T>
-    T clamp(T value, T min, T max) {
-        if (value < min) return min;
-        if (value > max) return max;
-        return value;
+    // Push the source centre out of the display box through the nearest
+    // edge (see the feedback note in renderOverlay).
+    static void clampSourceOut(float* cx, float* cy, float srcW, float srcH,
+                               const FloatRect& d) {
+        float sx0 = *cx - srcW / 2, sx1 = *cx + srcW / 2;
+        float sy0 = *cy - srcH / 2, sy1 = *cy + srcH / 2;
+        if (!(sx1 > d.x && sx0 < d.x + d.w && sy1 > d.y && sy0 < d.y + d.h)) return;
+        float bx = std::abs((d.x - srcW / 2) - *cx) < std::abs((d.x + d.w + srcW / 2) - *cx)
+                       ? (d.x - srcW / 2) - *cx
+                       : (d.x + d.w + srcW / 2) - *cx;
+        float by = std::abs((d.y - srcH / 2) - *cy) < std::abs((d.y + d.h + srcH / 2) - *cy)
+                       ? (d.y - srcH / 2) - *cy
+                       : (d.y + d.h + srcH / 2) - *cy;
+        if (std::abs(bx) <= std::abs(by)) *cx += bx;
+        else *cy += by;
+    }
+
+    // Geometry comes from the Server config (kept in sync via zoomConfigure)
+    int lensW() const { return cfgInt("lens_w", 240); }
+    int lensH() const { return cfgInt("lens_h", 240); }
+    int lensDx() const { return cfgInt("lens_dx", 40); }
+    int lensDy() const { return cfgInt("lens_dy", 40); }
+    int stripH() const { return cfgInt("strip_h", 140); }
+    bool stripBottom() const { return PluginConfig::getInstance().getValue("zoom", "strip_bottom", "false") == "true"; }
+    int customW() const { return cfgInt("custom_w", 420); }
+    int customH() const { return cfgInt("custom_h", 300); }
+    float customX() const { return PluginConfig::getInstance().getFloatValue("zoom", "custom_x", -1.0f); }
+    float customY() const { return PluginConfig::getInstance().getFloatValue("zoom", "custom_y", -1.0f); }
+
+    static int cfgInt(const char* key, int def) {
+        return PluginConfig::getInstance().getIntValue("zoom", key, def);
     }
 };
 
-// Plugin factory
 Plugin* create_zoom_plugin() {
     return new ZoomPlugin();
 }

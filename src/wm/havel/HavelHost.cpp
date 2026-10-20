@@ -240,6 +240,32 @@ static int hf_lock_screen(HavelState* H, void*) {
     return HAVEL_OK;
 }
 
+// zoom(action, output = 0): "in"|"out"|"reset"|"toggle"|"mode" on one
+// output, or "status" pushing the JSON state string.
+static int hf_zoom(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    const char* action = arg_str(H, 0);
+    int64_t output = havel_gettop(H) >= 1 ? arg_int(H, 1) : 0;
+    if (ctx && ctx->server && action) {
+        std::string a = action;
+        auto* s = ctx->server;
+        if (a == "in") s->zoomIn((int)output);
+        else if (a == "out") s->zoomOut((int)output);
+        else if (a == "reset") s->zoomReset((int)output);
+        else if (a == "toggle") s->zoomToggle((int)output);
+        else if (a == "mode") {
+            if (havel_gettop(H) >= 2) s->zoomSetMode((int)arg_int(H, 2));
+            else s->zoomCycleMode();
+        }
+        else if (a == "status") {
+            havel_pushstring(H, s->zoomStatusJson().c_str());
+            return HAVEL_OK;
+        }
+    }
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
 // set_wallpaper(path): PNG wallpaper behind all windows; "" clears
 // back to the solid background colour.
 static int hf_set_wallpaper(HavelState* H, void*) {
@@ -504,6 +530,8 @@ void HavelHost::registerHostFunctions() {
     havel_pushcfunction_with_ctx(m_H, hf_cursor_mode, nullptr, "cursor_mode");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_lock_screen, nullptr, "lock_screen");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_zoom, nullptr, "zoom");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_set_wallpaper, nullptr, "set_wallpaper");
     havel_pop(m_H, 1);

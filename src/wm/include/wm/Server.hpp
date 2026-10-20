@@ -17,6 +17,8 @@
 #include "scene/SceneGraph.hpp"
 #include <memory>
 #include <array>
+#include <map>
+#include <vector>
 #include <unordered_map>
 
 // Havel language host (global-namespace class from HavelHost.hpp).
@@ -212,6 +214,56 @@ public:
     void setTemperature(int kelvin);
     void setBrightness(float brightness);
 
+    // ------------------------------------------------------------------------
+    // Zoom (fullscreen scale + lens/strip/custom magnifier overlays).
+    //
+    // This state is the single source of truth for zoom TARGETS: IPC, Havel
+    // and the ZoomPlugin keybindings all mutate it here. The plugin animates
+    // the applied values toward the targets every frame (setZoomForOutput)
+    // and draws the magnifier overlays; the C frame loop owns the actual
+    // scale + cursor-following rendering.
+    enum class ZoomMode { Fullscreen = 0, Lens = 1, Strip = 2, Custom = 3 };
+
+    struct ZoomConfig {
+        ZoomMode mode = ZoomMode::Fullscreen;
+        float step = 1.25f;           // multiplicative in/out step
+        float maxLevel = 8.0f;        // fullscreen level clamp
+        float maxMag = 20.0f;         // magnifier power clamp
+        float toggleLevel = 2.0f;     // level used by toggle/push-to-zoom
+    };
+
+    struct ZoomTargets {
+        float level = 1.0f;   // fullscreen target (1.0 = off)
+        float mag = 1.0f;     // magnifier power target (1.0 = off)
+        bool active = false;  // toggle/push state for this output
+    };
+
+    ZoomConfig& zoomConfig() { return m_zoomConfig; }
+    void zoomConfigure(const std::string& json);   // merge config keys
+    void zoomIn(int outputIndex);
+    void zoomOut(int outputIndex);
+    void zoomReset(int outputIndex);
+    void zoomToggle(int outputIndex);
+    void zoomPushStart(int outputIndex);           // hold-to-zoom begin
+    void zoomPushEnd(int outputIndex);
+    void zoomSetMode(int mode);                    // resets all outputs
+    void zoomCycleMode();
+    float zoomTargetLevel(int outputIndex) const;
+    float zoomTargetMag(int outputIndex) const;
+    bool zoomActive(int outputIndex) const;
+    int zoomMode() const { return (int)m_zoomConfig.mode; }
+    std::string zoomStatusJson() const;
+
+    // Magnifier capture handshake (C frame loop <-> plugin):
+    // the plugin requests a source region during the overlay pass; the C
+    // side takes the request after overlays are drawn, builds the scene
+    // state, copies the region out of the rendered buffer and feeds it back.
+    void zoomRequestCapture(int outputIndex, float cx, float cy, int w, int h);
+    bool zoomTakeCaptureRequest(int outputIndex, float* cx, float* cy, int* w, int* h);
+    void zoomFeedCapture(int outputIndex, const uint32_t* pixels, int w, int h,
+                         float srcX, float srcY);
+    bool zoomGetCapture(int outputIndex, const uint32_t** pixels, int* w, int* h,
+                        float* srcX, float* srcY, uint64_t* seq) const;
     // Window group management
     void* windowGroupManager() const { return m_windowGroupManager; }
     void setWindowGroupManager(void* manager) { m_windowGroupManager = manager; }
@@ -242,6 +294,7 @@ public:
     std::string ipcSetTemperature(const std::string& args);
     std::string ipcSetBrightness(const std::string& args);
     std::string ipcGetDisplaySettings();
+    std::string ipcZoom(const std::string& args);
     std::string ipcGetPlugins();
     std::string ipcNotify(const std::string& args);
     std::string ipcCloseNotification(const std::string& args);
@@ -319,6 +372,24 @@ private:
     uint32_t m_idleLockTimeoutMs = 0;  // 0 = disabled
     uint64_t m_lastInputTimeMs = 0;
     OverlayTarget m_overlayTarget;
+
+    // Zoom state (see zoomConfig()/zoom* methods)
+    ZoomConfig m_zoomConfig;
+    std::map<int, ZoomTargets> m_zoomTargets;
+    struct ZoomCaptureRequest {
+        bool pending = false;
+        float cx = 0, cy = 0;
+        int w = 0, h = 0;
+    };
+    struct ZoomCapture {
+        std::vector<uint32_t> pixels;
+        int w = 0, h = 0;
+        float srcX = 0, srcY = 0;
+        uint64_t seq = 0;      // bumped on every feed; 0 = none yet
+    };
+    static constexpr int kMaxZoomOutputs = 8;
+    std::array<ZoomCaptureRequest, kMaxZoomOutputs> m_zoomCaptureReq;
+    std::array<ZoomCapture, kMaxZoomOutputs> m_zoomCapture;
     std::unordered_map<uint32_t, Rect> m_outputGeoms;
     Animator m_animator;
     

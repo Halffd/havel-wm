@@ -252,7 +252,7 @@ See `test_ipc.sh` for more examples.
 | Wallpaper | Background images/colors |
 | FPS | Performance overlay |
 | Gamma | Gamma/temperature/brightness |
-| Zoom | Screen magnification |
+| Zoom | Wayfire-style zoom: fullscreen scale with cursor-centred pan plus lens/strip/custom magnifier modes, animated, per-monitor |
 | Notifications | On-screen notifications |
 | Custom Layouts | Tiling layouts |
 | Draw | Screen annotation |

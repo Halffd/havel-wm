@@ -3,6 +3,7 @@
 #include <chrono>
 #include "PluginManager.hpp"
 #include <wm/Server.hpp>
+#include <wm/bridge.h>
 #include <Logger.h>
 #include <algorithm>
 #include <cstdio>
@@ -642,12 +643,92 @@ void PluginManager::setBrightnessForOutput(int output_index, float brightness) {
 }
 
 void PluginManager::setZoomForOutput(int output_index, float zoom) {
-    // No zoom state exists in the compositor and the C bridge has no zoom
-    // entry point (same reason the set_zoom IPC command was removed in the
-    // phase 1 honesty pass). ZoomPlugin's calls land here and are refused
-    // honestly instead of silently pretending to apply.
-    LOG_WARN("[PluginManager] setZoomForOutput(%d, %.2f) refused: no zoom support in compositor",
-             output_index, zoom);
+    if (!m_server) {
+        LOG_WARN("[PluginManager] setZoomForOutput(%d, %.2f) refused: no server",
+                 output_index, zoom);
+        return;
+    }
+    auto* server = static_cast<Server*>(m_server);
+    void* native = server->nativeHandle();
+    if (!native) {
+        LOG_WARN("[PluginManager] setZoomForOutput(%d, %.2f) refused: compositor not up",
+                 output_index, zoom);
+        return;
+    }
+    // The C frame loop renders zoom as output scale + cursor-centred scene
+    // offset (see output_frame in wlr_bridge.c); -1 centre = follow cursor.
+    havel_wlr_set_zoom_for_output((havel_wlr_server_t*)native, output_index, zoom,
+                                  -1.0f, -1.0f);
+}
+
+// ============================================================================
+// Zoom (targets live in Server; plugin animates + draws)
+// ============================================================================
+
+void PluginManager::zoomConfigure(const std::string& json) {
+    if (!m_server) return;
+    static_cast<Server*>(m_server)->zoomConfigure(json);
+}
+
+void PluginManager::zoomIn(int output_index) {
+    if (m_server) static_cast<Server*>(m_server)->zoomIn(output_index);
+}
+
+void PluginManager::zoomOut(int output_index) {
+    if (m_server) static_cast<Server*>(m_server)->zoomOut(output_index);
+}
+
+void PluginManager::zoomReset(int output_index) {
+    if (m_server) static_cast<Server*>(m_server)->zoomReset(output_index);
+}
+
+void PluginManager::zoomToggle(int output_index) {
+    if (m_server) static_cast<Server*>(m_server)->zoomToggle(output_index);
+}
+
+void PluginManager::zoomPushStart(int output_index) {
+    if (m_server) static_cast<Server*>(m_server)->zoomPushStart(output_index);
+}
+
+void PluginManager::zoomPushEnd(int output_index) {
+    if (m_server) static_cast<Server*>(m_server)->zoomPushEnd(output_index);
+}
+
+void PluginManager::zoomSetMode(int mode) {
+    if (m_server) static_cast<Server*>(m_server)->zoomSetMode(mode);
+}
+
+float PluginManager::zoomTargetLevel(int output_index) {
+    if (!m_server) return 1.0f;
+    return static_cast<Server*>(m_server)->zoomTargetLevel(output_index);
+}
+
+float PluginManager::zoomTargetMag(int output_index) {
+    if (!m_server) return 1.0f;
+    return static_cast<Server*>(m_server)->zoomTargetMag(output_index);
+}
+
+bool PluginManager::zoomActive(int output_index) {
+    if (!m_server) return false;
+    return static_cast<Server*>(m_server)->zoomActive(output_index);
+}
+
+int PluginManager::zoomMode() {
+    if (!m_server) return 0;
+    return static_cast<Server*>(m_server)->zoomMode();
+}
+
+void PluginManager::zoomRequestCapture(int output_index, float cx, float cy,
+                                       int src_w, int src_h) {
+    if (m_server)
+        static_cast<Server*>(m_server)->zoomRequestCapture(output_index, cx, cy, src_w, src_h);
+}
+
+bool PluginManager::zoomGetCapture(int output_index, const uint32_t** pixels, int* w, int* h,
+                                   float* src_x, float* src_y, uint64_t* seq) {
+    if (!m_server) return false;
+    return static_cast<Server*>(m_server)->zoomGetCapture(output_index, pixels, w, h,
+                                                          src_x, src_y, seq);
 }
 
 void PluginManager::setOutputGeometry(uint32_t workspaceId, int x, int y, int w, int h) {

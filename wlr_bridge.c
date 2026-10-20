@@ -342,9 +342,10 @@ struct havel_output {
     int temperature;
     float brightness;
     float zoom;  // Per-monitor zoom level
-    float zoom_center_x;  // Cursor X for cursor-centered zoom (output-local)
-    float zoom_center_y;  // Cursor Y for cursor-centered zoom (output-local)
-    float prev_zoom;      // Previous zoom level for calculating offset
+    float zoom_center_x;  // Last zoom centre (output-local), -1 = unset
+    float zoom_center_y;
+    bool zoom_pos_override;  // scene output position moved for zoom; must be
+                             // restored to the layout position on zoom-out
 
     // Gamma LUT buffers (allocated once per output)
     uint16_t *gamma_ramp_red;
@@ -1774,27 +1775,61 @@ static void output_frame(struct wl_listener *listener, void *data) {
     struct wlr_output_state state;
     wlr_output_state_init(&state);
 
-    // Apply zoom as output scale transform
-    if (output->zoom != 1.0f && output->zoom > 0.0f) {
-        // Set scale for zoom (1.0 = normal, 2.0 = 2x zoom)
-        wlr_output_state_set_scale(&state, output->zoom);
-        
-        // Apply cursor-centered zoom translation
-        // When zooming, content under cursor should stay in place
-        // Translation offset = cursor_pos * (1 - prev_zoom / new_zoom)
-        if (output->zoom_center_x >= 0 && output->zoom_center_y >= 0 && 
-            output->prev_zoom > 0) {
-            float zoom_ratio = output->prev_zoom / output->zoom;
-            float offset_x = output->zoom_center_x * (1.0f - zoom_ratio);
-            float offset_y = output->zoom_center_y * (1.0f - zoom_ratio);
-            
-            // Apply offset to scene output position
-            wlr_scene_output_set_position(output->scene_output, 
-                                          (int)offset_x, (int)offset_y);
-            
-            LOG_DEBUG("[FRAME] %s: cursor-centered zoom offset (%.0f,%.0f)", 
-                      output->output->name, offset_x, offset_y);
+    // Output index for the zoom/lens paths (list order matches what
+    // havel_wlr_set_zoom_for_output and the C++ side address).
+    int output_index = 0;
+    {
+        struct havel_output *o;
+        wl_list_for_each(o, &server->outputs, link) {
+            if (o == output) break;
+            output_index++;
         }
+    }
+    struct wlr_output_layout_output *own_lo =
+        wlr_output_layout_get(server->output_layout, output->output);
+
+    // Apply zoom as output scale transform (fullscreen zoom mode).
+    // The scene output position is derived ABSOLUTELY from the live cursor
+    // every frame: at scale z, showing the point (cx,cy) under the cursor
+    // requires pos + (cx,cy)/z == (cx,cy), i.e. pos = (cx,cy)*(1 - 1/z).
+    // The old incremental offset (1 - prev/new) accumulated error and
+    // missed the output's layout origin (every monitor past the first
+    // zoomed the wrong region), and the position was never restored when
+    // zoom returned to 1.0 - the output kept showing a shifted region.
+    if (output->zoom != 1.0f && output->zoom > 0.0f) {
+        wlr_output_state_set_scale(&state, output->zoom);
+        if (own_lo) {
+            // Follow the live cursor while it is on this output; keep the
+            // last centre when it leaves (zoom must not jump on hover-out).
+            float cx = output->zoom_center_x, cy = output->zoom_center_y;
+            if (server->cursor) {
+                struct wlr_output *cur_out = wlr_output_layout_output_at(
+                    server->output_layout, server->cursor->x, server->cursor->y);
+                if (cur_out == output->output) {
+                    cx = server->cursor->x - (float)own_lo->x;
+                    cy = server->cursor->y - (float)own_lo->y;
+                    output->zoom_center_x = cx;
+                    output->zoom_center_y = cy;
+                }
+            }
+            if (cx >= 0 && cy >= 0) {
+                // Clamp the pan so the view stays within the output
+                float W = (float)output->output->width;
+                float H = (float)output->output->height;
+                if (cx > W) cx = W;
+                if (cy > H) cy = H;
+                float z = output->zoom;
+                int pos_x = (int)((float)own_lo->x + cx * (1.0f - 1.0f / z));
+                int pos_y = (int)((float)own_lo->y + cy * (1.0f - 1.0f / z));
+                wlr_scene_output_set_position(output->scene_output, pos_x, pos_y);
+                output->zoom_pos_override = true;
+            }
+        }
+    } else if (output->zoom_pos_override) {
+        if (own_lo) {
+            wlr_scene_output_set_position(output->scene_output, own_lo->x, own_lo->y);
+        }
+        output->zoom_pos_override = false;
     }
 
     const struct wlr_scene_output_state_options options = {
@@ -1860,6 +1895,18 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // The scene MUST be built into the state before committing —
     // wlr_output_commit_state alone attaches no buffer, which blanks
     // the output. Previously the zoom path did exactly that.
+    // Magnifier modes (lens/strip/custom) need the rendered scene as CPU
+    // pixels. The C++ side registers what it wants during the overlay pass
+    // above; the scene is built into a state here either way, the wanted
+    // region is copied out of the buffer, then the state commits normally.
+    // Reading only the small source region keeps the per-frame cost at a
+    // few tens of KB; GPU-backed buffers without CPU access simply yield
+    // no capture and the magnifier falls back to a placeholder border.
+    float cap_cx = 0.0f, cap_cy = 0.0f;
+    int cap_w = 0, cap_h = 0;
+    bool want_capture = havel_cpp_zoom_take_request(
+        server->cpp_server, output_index, &cap_cx, &cap_cy, &cap_w, &cap_h);
+
     if (output->zoom != 1.0f && output->zoom > 0.0f) {
         LOG_DEBUG("[FRAME] %s: committing with zoom %.2f", output->output->name, output->zoom);
         if (!wlr_scene_output_build_state(output->scene_output, &state, &options)) {
@@ -1867,6 +1914,46 @@ static void output_frame(struct wl_listener *listener, void *data) {
         } else if (!wlr_output_commit_state(output->output, &state)) {
             LOG_ERROR("[FRAME] %s: output_commit_state failed (zoom=%.2f)",
                       output->output->name, output->zoom);
+        }
+    } else if (want_capture && cap_w > 0 && cap_h > 0 &&
+               wlr_scene_output_build_state(output->scene_output, &state, &options)) {
+        struct wlr_buffer *buf = state.buffer;
+        void *data = NULL;
+        uint32_t format = 0;
+        size_t stride = 0;
+        if (buf &&
+            wlr_buffer_begin_data_ptr_access(buf, WLR_BUFFER_DATA_PTR_ACCESS_READ,
+                                             &data, &format, &stride)) {
+            if ((format == DRM_FORMAT_ARGB8888 || format == DRM_FORMAT_XRGB8888) &&
+                data && stride >= (size_t)buf->width * 4) {
+                // Clamp the region to the buffer
+                int x0 = (int)cap_cx - cap_w / 2;
+                int y0 = (int)cap_cy - cap_h / 2;
+                if (x0 < 0) x0 = 0;
+                if (y0 < 0) y0 = 0;
+                if (x0 + cap_w > buf->width) x0 = buf->width - cap_w;
+                if (y0 + cap_h > buf->height) y0 = buf->height - cap_h;
+                if (x0 >= 0 && y0 >= 0 && cap_w <= buf->width && cap_h <= buf->height) {
+                    uint32_t *px = malloc((size_t)cap_w * cap_h * 4);
+                    if (px) {
+                        for (int y = 0; y < cap_h; y++) {
+                            memcpy(px + (size_t)y * cap_w,
+                                   (uint8_t *)data + (size_t)(y0 + y) * stride +
+                                       (size_t)x0 * 4,
+                                   (size_t)cap_w * 4);
+                        }
+                        havel_cpp_zoom_feed(server->cpp_server, output_index,
+                                            px, cap_w, cap_h,
+                                            (float)x0, (float)y0);
+                        free(px);
+                    }
+                }
+            }
+            wlr_buffer_end_data_ptr_access(buf);
+        }
+        if (!wlr_output_commit_state(output->output, &state)) {
+            LOG_ERROR("[FRAME] %s: output_commit_state failed (capture path)",
+                      output->output->name);
         }
     } else {
         wlr_scene_output_commit(output->scene_output, &options);
@@ -1988,7 +2075,7 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     output->zoom = 1.0f;
     output->zoom_center_x = -1.0f;  // -1 = not set
     output->zoom_center_y = -1.0f;
-    output->prev_zoom = 1.0f;
+    output->zoom_pos_override = false;
 
     // Allocate gamma LUT buffers once per output
     size_t gamma_size = wlr_output_get_gamma_size(wlr_output);
@@ -3642,17 +3729,15 @@ void havel_wlr_set_zoom_for_output(havel_wlr_server_t *server, int output_index,
     struct havel_output *output;
     wl_list_for_each(output, &server->outputs, link) {
         if (i == output_index) {
-            // Store cursor position as zoom center (if valid)
+            // Store an explicit zoom centre when given (output-local);
+            // otherwise the frame loop follows the live cursor.
             if (cursor_x >= 0 && cursor_y >= 0) {
                 output->zoom_center_x = cursor_x;
                 output->zoom_center_y = cursor_y;
             }
-            
-            // Store previous zoom for offset calculation
-            output->prev_zoom = output->zoom;
             output->zoom = zoom;
-            
-            LOG_INFO("[Zoom] Output %d (%s) set to %.2f (center: %.0f,%.0f)", 
+            // DEBUG: the plugin re-applies the animated level every frame
+            LOG_DEBUG("[Zoom] Output %d (%s) set to %.2f (center: %.0f,%.0f)",
                      output_index, output->output->name, zoom,
                      output->zoom_center_x, output->zoom_center_y);
             return;
@@ -3665,6 +3750,18 @@ void havel_wlr_set_zoom_for_output(havel_wlr_server_t *server, int output_index,
 // Wrapper without cursor position (for backward compatibility)
 void havel_wlr_set_zoom_for_output_simple(havel_wlr_server_t *server, int output_index, float zoom) {
     havel_wlr_set_zoom_for_output(server, output_index, zoom, -1.0f, -1.0f);
+}
+
+// Query the current zoom level of an output (1.0 = none)
+float havel_wlr_get_zoom(havel_wlr_server_t *server, int output_index) {
+    if (!server) return 1.0f;
+    int i = 0;
+    struct havel_output *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        if (i == output_index) return output->zoom;
+        i++;
+    }
+    return 1.0f;
 }
 
 // ============================================================================

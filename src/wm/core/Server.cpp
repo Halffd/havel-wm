@@ -1064,6 +1064,184 @@ void Server::setBrightness(float brightness) {
 }
 
 // ============================================================================
+// Zoom (fullscreen scale + lens/strip/custom magnifier).
+// Targets live here; the ZoomPlugin animates applied values toward them
+// and draws the magnifier overlays. See ZoomPlugin.cpp for the display
+// geometry and source-region math.
+// ============================================================================
+
+static Server::ZoomTargets& zoomTargets(std::map<int, Server::ZoomTargets>& m, int idx) {
+    return m[idx];  // default-inserts 1.0/1.0/off
+}
+
+void Server::zoomConfigure(const std::string& json) {
+    // Control parameters only; magnifier display geometry is plugin-side
+    // (plugins.json "zoom" keys) - Server never draws, so echoing geometry
+    // here would drift from what the plugin actually renders.
+    try {
+        auto j = nlohmann::json::parse(json);
+        if (j.contains("step")) m_zoomConfig.step = j["step"].get<float>();
+        if (j.contains("max_level")) m_zoomConfig.maxLevel = j["max_level"].get<float>();
+        if (j.contains("max_mag")) m_zoomConfig.maxMag = j["max_mag"].get<float>();
+        if (j.contains("toggle_level")) m_zoomConfig.toggleLevel = j["toggle_level"].get<float>();
+        LOG_INFO("[Zoom] Configured (step %.2f toggle %.2f)",
+                 m_zoomConfig.step, m_zoomConfig.toggleLevel);
+    } catch (const std::exception& e) {
+        LOG_WARN("[Zoom] Bad configure json: %s", e.what());
+    }
+}
+
+void Server::zoomIn(int outputIndex) {
+    auto& t = zoomTargets(m_zoomTargets, outputIndex);
+    if ((ZoomMode)m_zoomConfig.mode == ZoomMode::Fullscreen)
+        t.level = std::min(m_zoomConfig.maxLevel, std::max(1.0f, t.level) * m_zoomConfig.step);
+    else
+        t.mag = std::min(m_zoomConfig.maxMag, std::max(1.0f, t.mag) * m_zoomConfig.step);
+    t.active = true;
+}
+
+void Server::zoomOut(int outputIndex) {
+    auto& t = zoomTargets(m_zoomTargets, outputIndex);
+    if ((ZoomMode)m_zoomConfig.mode == ZoomMode::Fullscreen)
+        t.level = std::max(1.0f, t.level / m_zoomConfig.step);
+    else
+        t.mag = std::max(1.0f, t.mag / m_zoomConfig.step);
+    if (t.level <= 1.0f && t.mag <= 1.0f) t.active = false;
+}
+
+void Server::zoomReset(int outputIndex) {
+    auto& t = zoomTargets(m_zoomTargets, outputIndex);
+    t.level = 1.0f;
+    t.mag = 1.0f;
+    t.active = false;
+}
+
+void Server::zoomToggle(int outputIndex) {
+    auto& t = zoomTargets(m_zoomTargets, outputIndex);
+    t.active = !t.active;
+    if (t.active) {
+        if ((ZoomMode)m_zoomConfig.mode == ZoomMode::Fullscreen)
+            t.level = std::min(m_zoomConfig.maxLevel, std::max(1.0f, m_zoomConfig.toggleLevel));
+        else
+            t.mag = std::min(m_zoomConfig.maxMag, std::max(1.0f, m_zoomConfig.toggleLevel));
+    } else {
+        t.level = 1.0f;
+        t.mag = 1.0f;
+    }
+}
+
+void Server::zoomPushStart(int outputIndex) {
+    auto& t = zoomTargets(m_zoomTargets, outputIndex);
+    t.active = true;
+    if ((ZoomMode)m_zoomConfig.mode == ZoomMode::Fullscreen)
+        t.level = std::min(m_zoomConfig.maxLevel, std::max(1.0f, m_zoomConfig.toggleLevel));
+    else
+        t.mag = std::min(m_zoomConfig.maxMag, std::max(1.0f, m_zoomConfig.toggleLevel));
+}
+
+void Server::zoomPushEnd(int outputIndex) {
+    zoomReset(outputIndex);
+}
+
+void Server::zoomSetMode(int mode) {
+    ZoomMode m = (mode >= 0 && mode <= 3) ? (ZoomMode)mode : ZoomMode::Fullscreen;
+    if (m == m_zoomConfig.mode) return;
+    m_zoomConfig.mode = m;
+    // Mode switches clear every output: fullscreen scale and magnifier
+    // overlays are different mechanisms, a silent carry-over would leave
+    // one stuck at a stale scale.
+    m_zoomTargets.clear();
+    LOG_INFO("[Zoom] Mode -> %s", m == ZoomMode::Fullscreen ? "fullscreen" :
+                                  m == ZoomMode::Lens ? "lens" :
+                                  m == ZoomMode::Strip ? "strip" : "custom");
+}
+
+void Server::zoomCycleMode() {
+    zoomSetMode(((int)m_zoomConfig.mode + 1) % 4);
+}
+
+float Server::zoomTargetLevel(int outputIndex) const {
+    auto it = m_zoomTargets.find(outputIndex);
+    return it == m_zoomTargets.end() ? 1.0f : it->second.level;
+}
+
+float Server::zoomTargetMag(int outputIndex) const {
+    auto it = m_zoomTargets.find(outputIndex);
+    return it == m_zoomTargets.end() ? 1.0f : it->second.mag;
+}
+
+bool Server::zoomActive(int outputIndex) const {
+    auto it = m_zoomTargets.find(outputIndex);
+    return it != m_zoomTargets.end() && it->second.active;
+}
+
+std::string Server::zoomStatusJson() const {
+    nlohmann::json j;
+    const char* modes[] = {"fullscreen", "lens", "strip", "custom"};
+    j["mode"] = modes[(int)m_zoomConfig.mode];
+    j["step"] = m_zoomConfig.step;
+    j["toggle_level"] = m_zoomConfig.toggleLevel;
+    nlohmann::json outputs = nlohmann::json::array();
+    for (const auto& [idx, t] : m_zoomTargets) {
+        outputs.push_back({{"output", idx},
+                           {"active", t.active},
+                           {"level", t.level},
+                           {"mag", t.mag}});
+    }
+    j["outputs"] = outputs;
+    return j.dump();
+}
+
+void Server::zoomRequestCapture(int outputIndex, float cx, float cy, int w, int h) {
+    if (outputIndex < 0 || outputIndex >= kMaxZoomOutputs) return;
+    auto& r = m_zoomCaptureReq[outputIndex];
+    r.pending = true;
+    r.cx = cx;
+    r.cy = cy;
+    r.w = w;
+    r.h = h;
+}
+
+bool Server::zoomTakeCaptureRequest(int outputIndex, float* cx, float* cy, int* w, int* h) {
+    if (outputIndex < 0 || outputIndex >= kMaxZoomOutputs) return false;
+    auto& r = m_zoomCaptureReq[outputIndex];
+    if (!r.pending) return false;
+    r.pending = false;
+    *cx = r.cx;
+    *cy = r.cy;
+    *w = r.w;
+    *h = r.h;
+    return true;
+}
+
+void Server::zoomFeedCapture(int outputIndex, const uint32_t* pixels, int w, int h,
+                             float srcX, float srcY) {
+    if (outputIndex < 0 || outputIndex >= kMaxZoomOutputs || !pixels || w <= 0 || h <= 0)
+        return;
+    auto& c = m_zoomCapture[outputIndex];
+    c.pixels.assign(pixels, pixels + (size_t)w * h);
+    c.w = w;
+    c.h = h;
+    c.srcX = srcX;
+    c.srcY = srcY;
+    c.seq++;
+}
+
+bool Server::zoomGetCapture(int outputIndex, const uint32_t** pixels, int* w, int* h,
+                            float* srcX, float* srcY, uint64_t* seq) const {
+    if (outputIndex < 0 || outputIndex >= kMaxZoomOutputs || !pixels) return false;
+    const auto& c = m_zoomCapture[outputIndex];
+    if (c.seq == 0 || c.pixels.empty()) return false;
+    *pixels = c.pixels.data();
+    *w = c.w;
+    *h = c.h;
+    *srcX = c.srcX;
+    *srcY = c.srcY;
+    if (seq) *seq = c.seq;
+    return true;
+}
+
+// ============================================================================
 // Animation Control
 // ============================================================================
 
@@ -1583,8 +1761,9 @@ bool Server::startIPCServer(const std::string& socketPath) {
         return ipcSetBrightness(args);
     });
 
-    // set_zoom removed in the IPC honesty pass (phase 1): no implementation
-    // path exists (no zoom state, no bridge entry point).
+    m_ipcServer->registerCommand("zoom", [this](const std::string& args) -> std::string {
+        return ipcZoom(args);
+    });
 
     m_ipcServer->registerCommand("get_display_settings", [this](const std::string& args) -> std::string {
         return ipcGetDisplaySettings();
@@ -1946,6 +2125,55 @@ std::string Server::ipcGetDisplaySettings() {
     settings["grayscale"] = m_displaySettings.isGrayscaleEnabled();
     settings["negative"] = m_displaySettings.isNegativeEnabled();
     return m_ipcServer->jsonToString(settings);
+}
+
+std::string Server::ipcZoom(const std::string& args) {
+    // zoom {"action":"in|out|reset|toggle|push_start|push_end|mode|status|configure",
+    //        "output":0, "mode":"fullscreen|lens|strip|custom", ...geometry keys}
+    try {
+        auto j = nlohmann::json::parse(args);
+        if (!j.contains("action"))
+            return m_ipcServer->createErrorResponse(-5, "Missing action");
+        std::string action = j["action"].get<std::string>();
+
+        // Target output: explicit index, "all", or primary by default.
+        std::vector<int> targets;
+        if (j.contains("output")) {
+            if (j["output"].is_string() && j["output"].get<std::string>() == "all") {
+                for (int i = 0; i < kMaxZoomOutputs; i++) targets.push_back(i);
+            } else if (j["output"].is_number_integer()) {
+                targets.push_back(j["output"].get<int>());
+            }
+        }
+        if (targets.empty()) targets.push_back(0);
+
+        if (action == "configure") {
+            zoomConfigure(j.dump());
+        } else if (action == "mode") {
+            if (j.contains("mode")) {
+                std::string m = j["mode"].get<std::string>();
+                int mode = m == "lens" ? 1 : m == "strip" ? 2 : m == "custom" ? 3 : 0;
+                zoomSetMode(mode);
+            } else {
+                zoomCycleMode();
+            }
+        } else if (action == "status") {
+            return zoomStatusJson();
+        } else {
+            for (int idx : targets) {
+                if (action == "in") zoomIn(idx);
+                else if (action == "out") zoomOut(idx);
+                else if (action == "reset") zoomReset(idx);
+                else if (action == "toggle") zoomToggle(idx);
+                else if (action == "push_start") zoomPushStart(idx);
+                else if (action == "push_end") zoomPushEnd(idx);
+                else return m_ipcServer->createErrorResponse(-5, "Unknown action: " + action);
+            }
+        }
+        return zoomStatusJson();
+    } catch (const std::exception& e) {
+        return m_ipcServer->createErrorResponse(-1, e.what());
+    }
 }
 
 std::string Server::ipcGetPlugins() {

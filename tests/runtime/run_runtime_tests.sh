@@ -642,6 +642,199 @@ else
 fi
 rm -f "$WPIMG"
 
+# ---------------------------------------------------------------- phase 9: zoom
+# Fullscreen zoom is the C-side scale + cursor-centred offset; lens/strip/
+# custom are magnifier overlays fed by an in-process scene capture. Both
+# paths get pixel evidence here against a two-colour test wallpaper:
+# a control capture (mixed colours where the colour boundary crosses the
+# sample box), the lens box turning solid after an 8x lens over a solid
+# region, and the colour boundary moving right under a 2x fullscreen zoom.
+ZWPIMG="$(mktemp /tmp/havel-zwp-XXXXXX.png)"
+ZCAP1="$(mktemp /tmp/havel-zc1-XXXXXX.png)"
+ZCAP2="$(mktemp /tmp/havel-zc2-XXXXXX.png)"
+ZCAP3="$(mktemp /tmp/havel-zc3-XXXXXX.png)"
+python3 - "$ZWPIMG" <<'ZWP_PY'
+import sys
+from PIL import Image
+im = Image.new('RGB', (1280, 720))
+px = im.load()
+for y in range(720):
+    for x in range(1280):
+        px[x, y] = (255, 0, 255) if x < 640 else (0, 255, 0)
+im.save(sys.argv[1])
+ZWP_PY
+
+zoom_ipc() {
+    python3 - "$SOCK" "$1" <<'ZIPC' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"zoom",
+                       "params":json.loads(sys.argv[2])})+"\n").encode())
+r = json.loads(s.recv(65536))
+print(json.dumps(r.get("result", r.get("error", {}))))
+ZIPC
+}
+
+# park every client window in a fixed floating spot and drop back to
+# workspace 0 - phase 5 spawns an interactive terminal that would
+# otherwise cover the sample regions (get_windows returns a bare array;
+# the spawned terminal lives on the workspace the key phase switched to)
+python3 - "$SOCK" <<'FPARK' >/dev/null 2>&1
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+def rpc(m, p):
+    s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":m,"params":p})+"\n").encode())
+    s.recv(65536)
+rpc("workspace", {"id": 0})
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_windows","params":{}})+"\n").encode())
+r = json.loads(s.recv(65536))
+wins = r.get("result", [])
+if isinstance(wins, dict): wins = wins.get("windows", [])
+for w in wins:
+    wid = w.get("id")
+    if wid is None: continue
+    rpc("set_floating", {"id": wid, "floating": True})
+    rpc("move", {"id": wid, "x": 900, "y": 380})
+    rpc("resize", {"id": wid, "w": 300, "h": 200})
+print(len(wins))
+FPARK
+sleep 0.5
+report 0 "test clients parked, workspace 0"
+
+if python3 - "$SOCK" "$ZWPIMG" <<'ZWSET' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"set_wallpaper",
+                       "params":{"path":sys.argv[2]}})+"\n").encode())
+r = json.loads(s.recv(65536))
+raise SystemExit(0 if r.get("result",{}).get("success") else 1)
+ZWSET
+then
+    sleep 0.8
+
+    # -- status round-trip: mode switch lands in the compositor state
+    ZSTAT=$(zoom_ipc '{"action":"mode","mode":"lens"}')
+    ZSTAT=$(zoom_ipc '{"action":"status"}')
+    report $(echo "$ZSTAT" | grep -q '"mode": *"lens"' && echo 0 || echo 1) \
+        "zoom status reports lens mode (${ZSTAT:0:60})"
+
+    # -- control capture: the sample box straddles the colour boundary
+    WAYLAND_DISPLAY=wayland-0 grim "$ZCAP1" 2>/dev/null
+    ZCTRL=$(python3 - "$ZCAP1" <<'ZCTRL_PY'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB'); px = im.load()
+mg = gr = 0
+for y in range(310, 490, 2):
+    for x in range(550, 730, 2):
+        c = px[x, y]
+        if c == (255, 0, 255): mg += 1
+        elif c == (0, 255, 0): gr += 1
+print("%d %d" % (mg, gr))
+ZCTRL_PY
+)
+    ZCMG=$(echo "$ZCTRL" | awk '{print $1}'); ZCGR=$(echo "$ZCTRL" | awk '{print $2}')
+    report $([ "${ZCMG:-0}" -gt 500 ] && [ "${ZCGR:-0}" -gt 500 ] && echo 0 || echo 1) \
+        "zoom control box mixed (magenta=${ZCMG:-err} green=${ZCGR:-err})"
+
+    # -- lens: 8x over the solid magenta region turns the box solid
+    #    (mode is already lens from the status round-trip; one toggle arms it)
+    zoom_ipc '{"action":"configure","toggle_level":8.0}' >/dev/null
+    zoom_ipc '{"action":"toggle","output":0}' >/dev/null
+    python3 - "$SOCK" <<'ZWARPa' >/dev/null 2>&1
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"warp_cursor",
+                       "params":{"x":600,"y":360}})+"\n").encode())
+s.recv(65536)
+ZWARPa
+    sleep 1.5
+    ZSTAT2=$(zoom_ipc '{"action":"status"}')
+    report $(echo "$ZSTAT2" | grep -q '"mag": *8' && echo 0 || echo 1) \
+        "zoom lens target applied (mag 8)"
+    WAYLAND_DISPLAY=wayland-0 grim "$ZCAP2" 2>/dev/null
+    ZLENS=$(python3 - "$ZCAP2" <<'ZLENS_PY'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB'); px = im.load()
+mg = tot = 0
+for y in range(310, 490, 2):
+    for x in range(550, 730, 2):
+        c = px[x, y]
+        tot += 1
+        if c == (255, 0, 255): mg += 1
+print("%d %d" % (mg, tot))
+ZLENS_PY
+)
+    ZLMG=$(echo "$ZLENS" | awk '{print $1}'); ZLTOT=$(echo "$ZLENS" | awk '{print $2}')
+    report $([ "${ZLTOT:-1}" -gt 0 ] && [ $(( ${ZLMG:-0} * 10 )) -ge $(( ${ZLTOT:-1} * 9 )) ] && echo 0 || echo 1) \
+        "lens box solid at 8x (magenta=${ZLMG:-err}/${ZLTOT:-err})"
+
+    # -- fullscreen: 2x zoom pushes the colour boundary right (640 -> ~680
+    #    with the cursor at 600: pos = 600*(1-1/2) = 300, lx = (640-300)*2)
+    zoom_ipc '{"action":"mode","mode":"fullscreen"}' >/dev/null
+    zoom_ipc '{"action":"configure","toggle_level":2.0}' >/dev/null
+    zoom_ipc '{"action":"toggle","output":0}' >/dev/null
+    sleep 1.2
+    WAYLAND_DISPLAY=wayland-0 grim "$ZCAP3" 2>/dev/null
+    boundary_x() {
+        python3 - "$1" <<'ZB_PY'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB'); px = im.load()
+run = 0
+for x in range(250, 1270):
+    if px[x, 650] == (0, 255, 0):
+        run += 1
+        if run >= 5:
+            print(x - 4); break
+    else:
+        run = 0
+else:
+    print(-1)
+ZB_PY
+    }
+    ZB1=$(boundary_x "$ZCAP1"); ZB2=$(boundary_x "$ZCAP3")
+    report $([ "${ZB1:-0}" -gt 400 ] && [ "${ZB2:-0}" -gt 0 ] && [ $((ZB2 - ZB1)) -gt 20 ] && [ $((ZB2 - ZB1)) -lt 160 ] && echo 0 || echo 1) \
+        "fullscreen 2x moves boundary right (${ZB1:-err} -> ${ZB2:-err})"
+
+    # -- cleanup: back to normal, wallpaper cleared
+    zoom_ipc '{"action":"mode","mode":"fullscreen"}' >/dev/null
+    zoom_ipc '{"action":"reset","output":"all"}' >/dev/null
+    python3 - "$SOCK" <<'ZWCLR2' >/dev/null 2>&1
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"set_wallpaper",
+                       "params":{"path":""}})+"\n").encode())
+s.recv(65536)
+ZWCLR2
+    sleep 0.5
+    ZCAP4="$(mktemp /tmp/havel-zc4-XXXXXX.png)"
+    WAYLAND_DISPLAY=wayland-0 grim "$ZCAP4" 2>/dev/null
+    ZAFTER=$(python3 - "$ZCAP4" <<'ZAFTER_PY'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB'); px = im.load()
+mg = 0
+for y in range(0, 720, 8):
+    for x in range(0, 1280, 8):
+        if px[x, y] == (255, 0, 255): mg += 1
+print(mg)
+ZAFTER_PY
+)
+    report $([ "${ZAFTER:-1}" -lt 200 ] && echo 0 || echo 1) \
+        "zoom reset + wallpaper cleared (magenta=${ZAFTER:-err})"
+    rm -f "$ZCAP4"
+else
+    skip "zoom phase (set_wallpaper failed)"
+fi
+rm -f "$ZWPIMG" "$ZCAP1" "$ZCAP2" "$ZCAP3"
+
 # ---------------------------------------------------------------- teardown
 kill "$FOOT_PID" 2>/dev/null; FOOT_PID=""
 report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "zero crashes across all phases"

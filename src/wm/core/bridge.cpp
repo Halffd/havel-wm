@@ -209,6 +209,19 @@ void havel_cpp_update_animations(struct havel_cpp_server* server) {
     server->server->updateAnimations();
 }
 
+// Zoom magnifier capture handshake: C frame loop <-> plugin.
+bool havel_cpp_zoom_take_request(struct havel_cpp_server* server, int output_index,
+                                  float* cx, float* cy, int* w, int* h) {
+    if (!server || !server->server) return false;
+    return server->server->zoomTakeCaptureRequest(output_index, cx, cy, w, h);
+}
+
+void havel_cpp_zoom_feed(struct havel_cpp_server* server, int output_index,
+                          const uint32_t* pixels, int w, int h, float src_x, float src_y) {
+    if (!server || !server->server) return;
+    server->server->zoomFeedCapture(output_index, pixels, w, h, src_x, src_y);
+}
+
 void havel_cpp_dispatch_output_frame(struct havel_cpp_server* server, void* output, void* sceneOutput, int width, int height, int refresh) {
     if (!server || !output) return;
 

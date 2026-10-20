@@ -43,6 +43,33 @@ plugin_config("alt_tab", "borderColor", "1,1,1,1")      // selected cell border
 plugin_config("alt_tab", "textColor", "0.92,0.92,0.92,1")
 plugin_config("alt_tab", "keybinding", "Alt+Tab")       // cycle + select on release
 
+// Zoom (Wayfire-style: fullscreen scale + lens/strip/custom magnifiers)
+//
+// Keybindings - the gate comes from the "keybinding" spec's modifiers;
+// Plus/Minus/0 step in/out/reset, the spec's key toggles, M cycles mode,
+// Space (hold) is push-to-zoom. Keys act on the monitor under the cursor.
+// Modes: "fullscreen" (scale + cursor-centred pan), "lens" (box following
+// the cursor), "strip" (full-width band at the top or bottom edge),
+// "custom" (fixed box, top-right by default).
+plugin_config("zoom", "keybinding", "Meta+Ctrl+Z")
+plugin_config("zoom", "step", "1.25")          // multiplicative in/out step
+plugin_config("zoom", "toggle_level", "2.0")   // level used by toggle/push
+plugin_config("zoom", "smoothing_ms", "300")   // animation time constant
+plugin_config("zoom", "lens_w", "240")         // lens display box
+plugin_config("zoom", "lens_h", "240")
+plugin_config("zoom", "lens_dx", "40")         // lens offset from the cursor
+plugin_config("zoom", "lens_dy", "40")
+plugin_config("zoom", "strip_h", "140")        // strip band height
+plugin_config("zoom", "strip_bottom", "false") // strip at the bottom edge
+plugin_config("zoom", "custom_w", "420")       // custom magnifier box
+plugin_config("zoom", "custom_h", "300")
+plugin_config("zoom", "custom_x", "-1")        // -1 = top-right auto position
+plugin_config("zoom", "custom_y", "-1")
+
+// Script access: zoom("in"|"out"|"reset"|"toggle", output) and
+// zoom("mode", output, 0-3) or zoom("status") for the JSON state.
+// zoom("in", 0)
+
 // ---------------------------------------------------------------------
 // Keybindings
 //

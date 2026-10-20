@@ -205,6 +205,24 @@ public:
     void setTemperatureForOutput(int output_index, int kelvin) override;
     void setBrightnessForOutput(int output_index, float brightness) override;
     void setZoomForOutput(int output_index, float zoom) override;
+
+    // Zoom (targets owned by Server; see Server.hpp)
+    void zoomConfigure(const std::string& json) override;
+    void zoomIn(int output_index) override;
+    void zoomOut(int output_index) override;
+    void zoomReset(int output_index) override;
+    void zoomToggle(int output_index) override;
+    void zoomPushStart(int output_index) override;
+    void zoomPushEnd(int output_index) override;
+    void zoomSetMode(int mode) override;
+    float zoomTargetLevel(int output_index) override;
+    float zoomTargetMag(int output_index) override;
+    bool zoomActive(int output_index) override;
+    int zoomMode() override;
+    void zoomRequestCapture(int output_index, float cx, float cy,
+                            int src_w, int src_h) override;
+    bool zoomGetCapture(int output_index, const uint32_t** pixels, int* w, int* h,
+                        float* src_x, float* src_y, uint64_t* seq) override;
     void setOutputGeometry(uint32_t workspaceId, int x, int y, int w, int h) override;
     OutputTarget currentOutputTarget() override;
 

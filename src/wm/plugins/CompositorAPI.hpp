@@ -82,8 +82,33 @@ public:
     virtual void setGammaForOutput(int output_index, float gamma) = 0;
     virtual void setTemperatureForOutput(int output_index, int kelvin) = 0;
     virtual void setBrightnessForOutput(int output_index, float brightness) = 0;
+    // Apply the rendered fullscreen zoom level (the animated value, called
+    // per frame by the ZoomPlugin; Server owns the targets).
     virtual void setZoomForOutput(int output_index, float zoom) = 0;
     // Note: Scale requires scene graph extension (future)
+
+    // Zoom control. Server owns the target state (IPC/Havel mutate it);
+    // the plugin animates toward the targets and draws magnifier overlays.
+    // Modes: 0 = fullscreen scale, 1 = lens, 2 = strip, 3 = custom box.
+    virtual void zoomConfigure(const std::string& json) = 0;
+    virtual void zoomIn(int output_index) = 0;
+    virtual void zoomOut(int output_index) = 0;
+    virtual void zoomReset(int output_index) = 0;
+    virtual void zoomToggle(int output_index) = 0;
+    virtual void zoomPushStart(int output_index) = 0;
+    virtual void zoomPushEnd(int output_index) = 0;
+    virtual void zoomSetMode(int mode) = 0;
+    virtual float zoomTargetLevel(int output_index) = 0;
+    virtual float zoomTargetMag(int output_index) = 0;
+    virtual bool zoomActive(int output_index) = 0;
+    virtual int zoomMode() = 0;
+    // Magnifier capture: ask for a (w,h) source region centred on output-local
+    // (cx,cy); the fresh capture from the previous frame is returned through
+    // zoomGetCapture (seq changes when new pixels arrived).
+    virtual void zoomRequestCapture(int output_index, float cx, float cy,
+                                    int src_w, int src_h) = 0;
+    virtual bool zoomGetCapture(int output_index, const uint32_t** pixels, int* w, int* h,
+                                float* src_x, float* src_y, uint64_t* seq) = 0;
 
     // Output the current overlay pass is drawing for. renderOverlay runs
     // once per output with the scene in global coordinates; overlays that
