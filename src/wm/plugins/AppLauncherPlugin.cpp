@@ -34,6 +34,7 @@ struct DesktopEntry {
     std::string icon;
     std::string categories;
     bool noDisplay = false;
+    bool terminal = false;   // Terminal=true: launch inside a terminal
 };
 
 /**
@@ -167,24 +168,37 @@ private:
     wlr_scene_tree_t* m_tree = nullptr;     // persistent launcher tree
     OverlayRenderer* m_renderer = nullptr;  // cached for hide-time tree teardown
     std::vector<DesktopEntry> m_filtered;
+    int m_hoverIndex = -1;   // result row under the pointer
+    int m_scrollStart = 0;   // first visible row in the result list
+    bool m_treeDirty = false; // hover/scroll change: rebuild tree now
     
     void scanDesktopFiles() {
-        // Standard locations
-        const char* paths[] = {
-            "/usr/share/applications/",
-            "/usr/local/share/applications/",
-            nullptr
-        };
-
-        for (int i = 0; paths[i] != nullptr; i++) {
-            scanDirectory(paths[i]);
+        // XDG base dir spec: $XDG_DATA_HOME/applications (default
+        // ~/.local/share) first, then every $XDG_DATA_DIRS entry (default
+        // /usr/local/share:/usr/share).
+        std::vector<std::string> dirs;
+        const char* dataHome = getenv("XDG_DATA_HOME");
+        const char* home = getenv("HOME");
+        if (dataHome && dataHome[0]) {
+            dirs.push_back(std::string(dataHome) + "/applications");
+        } else if (home) {
+            dirs.push_back(std::string(home) + "/.local/share/applications");
+        }
+        const char* dataDirs = getenv("XDG_DATA_DIRS");
+        std::string sysDirs = dataDirs && dataDirs[0] ? dataDirs : "/usr/local/share:/usr/share";
+        size_t start = 0;
+        while (start <= sysDirs.size()) {
+            size_t colon = sysDirs.find(':', start);
+            std::string one = colon == std::string::npos
+                                  ? sysDirs.substr(start)
+                                  : sysDirs.substr(start, colon - start);
+            if (!one.empty()) dirs.push_back(one + "/applications");
+            if (colon == std::string::npos) break;
+            start = colon + 1;
         }
 
-        // Also scan user's local applications
-        const char* home = getenv("HOME");
-        if (home) {
-            std::string localPath = std::string(home) + "/.local/share/applications/";
-            scanDirectory(localPath.c_str());
+        for (const auto& dir : dirs) {
+            scanDirectory(dir.c_str(), 0);
         }
 
         // Remove duplicates (by name)
@@ -192,35 +206,47 @@ private:
             [](const DesktopEntry& a, const DesktopEntry& b) {
                 return a.name < b.name;
             });
-        
+
         auto last = std::unique(m_entries.begin(), m_entries.end(),
             [](const DesktopEntry& a, const DesktopEntry& b) {
                 return a.name == b.name;
             });
         m_entries.erase(last, m_entries.end());
 
-        printf("[AppLauncher] Scanned %zu applications\n", m_entries.size());
+        printf("[AppLauncher] Scanned %zu applications from %zu dirs\n",
+               m_entries.size(), dirs.size());
     }
-    
-    void scanDirectory(const char* path) {
+
+    void scanDirectory(const char* path, int depth) {
         DIR* dir = opendir(path);
         if (!dir) return;
 
         struct dirent* entry;
         while ((entry = readdir(dir)) != nullptr) {
             std::string filename = entry->d_name;
-            
+            if (filename == "." || filename == "..") continue;
+
+            // Subdirectories (e.g. applications/kde/) - one nesting level
+            if (depth < 2) {
+                std::string sub = std::string(path) + "/" + filename;
+                DIR* probe = opendir(sub.c_str());
+                if (probe) {
+                    closedir(probe);
+                    scanDirectory(sub.c_str(), depth + 1);
+                    continue;
+                }
+            }
+
             // Only process .desktop files
-            if (filename.length() > 8 && 
+            if (filename.length() > 8 &&
                 filename.substr(filename.length() - 8) == ".desktop") {
-                
-                std::string fullPath = std::string(path) + filename;
+
+                std::string fullPath = std::string(path) + "/" + filename;
                 DesktopEntry de;
                 de.id = fullPath;
-                de.noDisplay = true;
-                
+
                 parseDesktopFile(fullPath, de);
-                
+
                 if (!de.noDisplay && !de.exec.empty()) {
                     // Remove field codes from Exec (%f, %F, %u, %U, etc.)
                     size_t pctPos = de.exec.find('%');
@@ -282,17 +308,9 @@ private:
             else if (key == "Comment") entry.comment = value;
             else if (key == "Icon") entry.icon = value;
             else if (key == "Categories") entry.categories = value;
+            else if (key == "Terminal") entry.terminal = (value == "true");
             else if (key == "NoDisplay") entry.noDisplay = (value == "true");
             else if (key == "Hidden") entry.noDisplay = (value == "true");
-            else if (key == "OnlyShowIn") {
-                // Only show if it matches our desktop
-                if (value.find("HAVEL") == std::string::npos && 
-                    value.find("GNOME") == std::string::npos &&
-                    value.find("KDE") == std::string::npos &&
-                    value.find("XFCE") == std::string::npos) {
-                    entry.noDisplay = true;
-                }
-            }
         }
 
         file.close();
@@ -303,8 +321,11 @@ private:
         if (m_visible) {
             m_searchText.clear();
             m_selectedIndex = 0;
+            m_hoverIndex = -1;
+            m_scrollStart = 0;
             filterResults();
-            printf("[AppLauncher] Shown\n");
+            printf("[AppLauncher] Shown (%zu entries, %zu visible)\n",
+                   m_entries.size(), m_filtered.size());
 
             // Enable text input for IME support
             // Get TextInputManager from Server via API
@@ -319,6 +340,8 @@ private:
     void hideLauncher() {
         m_visible = false;
         m_searchText.clear();
+        m_hoverIndex = -1;
+        m_scrollStart = 0;
         dropTree();
         printf("[AppLauncher] Hidden\n");
     }
@@ -334,13 +357,14 @@ private:
     
     void navigate(int delta) {
         if (m_filtered.empty()) return;
-        
+
         m_selectedIndex += delta;
         if (m_selectedIndex < 0) m_selectedIndex = 0;
         if (m_selectedIndex >= (int)m_filtered.size()) {
             m_selectedIndex = (int)m_filtered.size() - 1;
         }
-        
+        m_treeDirty = true;  // selection moved: rebuild the tree now
+
         printf("[AppLauncher] Selected: %s\n", m_filtered[m_selectedIndex].name.c_str());
     }
     
@@ -350,6 +374,7 @@ private:
         // Append UTF-8 character to search text
         m_searchText += utf8;
         m_selectedIndex = 0;
+        m_scrollStart = 0;
         filterResults();
         printf("[AppLauncher] Search: %s (%zu results)\n",
                m_searchText.c_str(), m_filtered.size());
@@ -370,6 +395,7 @@ private:
         
         m_searchText.erase(charStart);
         m_selectedIndex = 0;
+        m_scrollStart = 0;
         filterResults();
         printf("[AppLauncher] Search: %s (%zu results)\n",
                m_searchText.c_str(), m_filtered.size());
@@ -416,14 +442,86 @@ private:
         printf("[AppLauncher] Launching: %s (%s)\n",
                entry.name.c_str(), entry.exec.c_str());
 
+        // Terminal apps need a terminal or their output is nowhere and
+        // TUI apps have nowhere to run. Wrap in the configured emulator
+        // (spawn is argv-based, so no shell quoting is involved).
+        std::string cmd = entry.exec;
+        if (entry.terminal) {
+            auto& config = PluginConfig::getInstance();
+            std::string term = config.getValue("app_launcher", "terminal", "foot");
+            cmd = term + " -e " + entry.exec;
+        }
+
         // Spawn the application via C bridge
-        // The command is executed through the shell
         havel_cpp_server_spawn(
             static_cast<struct havel_cpp_server*>(m_api->getNativeHandle()),
-            entry.exec.c_str());
+            cmd.c_str());
 
         hideLauncher();
     }
+
+    // Command surface: the panel's launcher button, IPC and scripts.
+    bool onCommand(const std::string& cmd, const std::string& arg) override {
+        (void)arg;
+        if (cmd == "open" || cmd == "show") {
+            if (!m_visible) toggleLauncher();
+            return true;
+        }
+        if (cmd == "close" || cmd == "hide") {
+            if (m_visible) hideLauncher();
+            return true;
+        }
+        if (cmd == "toggle") {
+            toggleLauncher();
+            return true;
+        }
+        return false;
+    }
+
+    void onMouseMotion(int x, int y) override {
+        if (!m_visible) return;
+        int idx = itemAt(x, y);
+        if (idx >= 0 && idx != m_hoverIndex) {
+            m_hoverIndex = idx;
+            m_treeDirty = true;  // hover highlight redraws soon
+        }
+    }
+
+    void onMouseButton(uint32_t button, bool pressed, int x, int y) override {
+        if (!m_visible || !pressed) return;
+        if (button == 0x110) {  // left press: launch the clicked entry
+            int idx = itemAt(x, y);
+            if (idx >= 0) {
+                m_selectedIndex = idx;
+                launchSelected();
+            }
+            return;
+        }
+        if (button == 4) { navigate(-1); return; }   // wheel up
+        if (button == 5) { navigate(1); return; }    // wheel down
+    }
+
+    // Row under the cursor in the result list, -1 when outside it.
+    // Coordinates are the same screen space renderOverlay drew in.
+    int itemAt(int x, int y) {
+        int launcherWidth = 600;
+        int launcherHeight = 400;
+        int launcherX = (rendererScreenWidth() - launcherWidth) / 2;
+        int launcherY = (rendererScreenHeight() - launcherHeight) / 2;
+        int resultY = launcherY + 50 + 20;
+        int listX0 = launcherX + 10, listX1 = launcherX + launcherWidth - 10;
+        if (x < listX0 || x >= listX1) return -1;
+        if (y < resultY) return -1;
+        int itemHeight = 40;
+        int idx = (y - resultY) / itemHeight + m_scrollStart;
+        if (idx < 0 || idx >= (int)m_filtered.size()) return -1;
+        int maxVisible = (launcherHeight - 50 - 40) / itemHeight;
+        if (idx >= m_scrollStart + maxVisible) return -1;
+        return idx;
+    }
+
+    int rendererScreenWidth() { return m_renderer ? m_renderer->getScreenWidth() : 1280; }
+    int rendererScreenHeight() { return m_renderer ? m_renderer->getScreenHeight() : 720; }
     
     std::string toLower(const std::string& str) {
         std::string result = str;
@@ -439,9 +537,12 @@ private:
         // cleared every frame, so a throttled draw there would blink off
         // between draws; the persistent tree stays visible at 2 damage
         // frames a second instead of per-frame redraws that spun the
-        // render loop at full CPU (observed live).
+        // render loop at full CPU (observed live). Hover/scroll changes
+        // set m_treeDirty for an immediate rebuild.
         auto now = std::chrono::steady_clock::now();
-        if (m_tree && m_lastDraw + std::chrono::milliseconds(500) > now) return;
+        bool dirty = m_treeDirty;
+        m_treeDirty = false;
+        if (m_tree && !dirty && m_lastDraw + std::chrono::milliseconds(500) > now) return;
         m_lastDraw = now;
 
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
@@ -486,24 +587,37 @@ private:
         int resultHeight = launcherHeight - searchHeight - 40;
         int itemHeight = 40;
         int maxVisibleItems = resultHeight / itemHeight;
-        
+
+        // Scroll window follows the selection so keyboard navigation stays
+        // visible past the first screenful of results.
+        int startIndex = m_scrollStart;
+        if (m_selectedIndex < startIndex) startIndex = m_selectedIndex;
+        if (m_selectedIndex >= startIndex + maxVisibleItems)
+            startIndex = m_selectedIndex - maxVisibleItems + 1;
+        if (startIndex < 0) startIndex = 0;
+        if (!m_filtered.empty() && startIndex > (int)m_filtered.size() - 1)
+            startIndex = (int)m_filtered.size() - 1;
+        m_scrollStart = startIndex;
+
         // Draw visible results
-        int startIndex = 0;
-        int endIndex = m_filtered.size();
-        if ((int)m_filtered.size() > maxVisibleItems) {
+        int endIndex = (int)m_filtered.size();
+        if (endIndex > startIndex + maxVisibleItems) {
             endIndex = startIndex + maxVisibleItems;
         }
-        
+
         for (int i = startIndex; i < (int)endIndex && i < (int)m_filtered.size(); i++) {
             const DesktopEntry& entry = m_filtered[i];
             bool isSelected = (i == m_selectedIndex);
-            
+            bool isHovered = (i == m_hoverIndex);
+
             int itemY = resultY + (i - startIndex) * itemHeight;
-            
+
             // Draw item background
-            Color itemBg = isSelected ? Color(0.3f, 0.4f, 0.5f, 0.8f) : Color(0.0f, 0.0f, 0.0f, 0.3f);
+            Color itemBg = isSelected ? Color(0.3f, 0.4f, 0.5f, 0.8f)
+                                      : isHovered ? Color(0.22f, 0.28f, 0.35f, 0.7f)
+                                                  : Color(0.0f, 0.0f, 0.0f, 0.3f);
             renderer->drawRect((float)(launcherX + 10), (float)itemY, (float)(launcherWidth - 20), (float)(itemHeight - 2), itemBg);
-            
+
             // Draw app name
             renderer->drawText(entry.name.c_str(), (float)(launcherX + 20), (float)(itemY + 25), 16.0f, isSelected ? Color(1.0f, 1.0f, 1.0f, 1.0f) : Color(0.8f, 0.8f, 0.8f, 1.0f));
         }

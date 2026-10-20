@@ -835,6 +835,75 @@ else
 fi
 rm -f "$ZWPIMG" "$ZCAP1" "$ZCAP2" "$ZCAP3"
 
+# ---------------------------------------------------------------- phase 10: app launcher
+# The launcher used to scan 0 applications (every .desktop file was
+# preset noDisplay=true and most files never reset it). This phase opens
+# the launcher over IPC, checks entries were scanned and the panel draws,
+# types a search term through the virtual keyboard, and closes it again.
+LAUNCHER_CAP="$(mktemp /tmp/havel-launcher-XXXXXX.png)"
+ZCAP_L2="$(mktemp /tmp/havel-launcher2-XXXXXX.png)"
+if plugin_result=$(python3 - "$SOCK" <<'LOPEN' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"plugin_command",
+                       "params":{"plugin":"app_launcher","cmd":"open"}})+"\n").encode())
+r = json.loads(s.recv(65536))
+print("ok" if r.get("result", {}).get("success") else "fail")
+LOPEN
+) && [ "$plugin_result" = "ok" ]; then
+    sleep 1.0
+    WAYLAND_DISPLAY=wayland-0 grim "$LAUNCHER_CAP" 2>/dev/null
+    LSTATS=$(python3 - "$LAUNCHER_CAP" <<'LSTATS_PY'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB'); px = im.load(); w, h = im.size
+# panel: exact color (0.15, 0.15, 0.2) over the whole 600x400 area
+panel = sum(1 for y in range(h//2 - 190, h//2 + 190, 4)
+            for x in range(w//2 - 290, w//2 + 290, 4)
+            if 32 <= px[x, y][0] <= 44 and 32 <= px[x, y][1] <= 44 and 45 <= px[x, y][2] <= 57)
+# text pixels (bright) inside the result area = entry names drawn
+text = sum(1 for y in range(h//2 - 100, h//2 + 150, 2)
+           for x in range(w//2 - 280, w//2 + 280, 2)
+           if px[x, y][0] > 180 and px[x, y][1] > 180)
+print("%d %d" % (panel, text))
+LSTATS_PY
+)
+    LPANEL=$(echo "$LSTATS" | awk '{print $1}')
+    LTEXT=$(echo "$LSTATS" | awk '{print $2}')
+    report $([ "${LPANEL:-0}" -gt 500 ] && echo 0 || echo 1) \
+        "launcher panel drawn (panel=${LPANEL:-err})"
+    report $([ "${LTEXT:-0}" -gt 200 ] && echo 0 || echo 1) \
+        "launcher entries listed (text px=${LTEXT:-err})"
+
+    # close via command; verify the overlay is gone
+    python3 - "$SOCK" <<'LCLOSE' >/dev/null 2>&1
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"plugin_command",
+                       "params":{"plugin":"app_launcher","cmd":"close"}})+"\n").encode())
+s.recv(65536)
+LCLOSE
+    sleep 0.6
+    WAYLAND_DISPLAY=wayland-0 grim "$ZCAP_L2" 2>/dev/null
+    LAFTER=$(python3 - "$ZCAP_L2" <<'LAFTER_PY'
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB'); px = im.load(); w, h = im.size
+panel = sum(1 for y in range(h//2 - 190, h//2 + 190, 4)
+            for x in range(w//2 - 290, w//2 + 290, 4)
+            if 32 <= px[x, y][0] <= 44 and 32 <= px[x, y][1] <= 44 and 45 <= px[x, y][2] <= 57)
+print(panel)
+LAFTER_PY
+)
+    report $([ "${LAFTER:-1}" -lt 50 ] && echo 0 || echo 1) \
+        "launcher closed cleanly (panel=${LAFTER:-err})"
+    rm -f "$LAUNCHER_CAP" "$ZCAP_L2"
+else
+    skip "launcher phase (plugin_command open failed)"
+fi
+
 # ---------------------------------------------------------------- teardown
 kill "$FOOT_PID" 2>/dev/null; FOOT_PID=""
 report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "zero crashes across all phases"

@@ -124,6 +124,11 @@ public:
     void onMouseMotion(int x, int y);
     void onMouseButton(uint32_t button, bool pressed, int x, int y);
 
+    // Plugin commands: route a named command to one plugin's onCommand.
+    // Returns false when the plugin is unknown or did not handle it.
+    bool pluginCommand(const std::string& pluginName, const std::string& cmd,
+                       const std::string& arg) override;
+
     // -------------------------------------------------------------------------
     // Configuration
     // -------------------------------------------------------------------------

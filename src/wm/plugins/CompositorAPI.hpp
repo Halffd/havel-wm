@@ -141,6 +141,12 @@ public:
     // Native handle for C bridge (for spawning apps)
     virtual void* getNativeHandle() = 0;
 
+    // Send a command to a named plugin ("app_launcher", "open") - the
+    // panel's launcher button, IPC and scripts all route through this.
+    virtual bool pluginCommand(const std::string& pluginName,
+                               const std::string& cmd,
+                               const std::string& arg = "") = 0;
+
     // Keybinding registration (future)
     // virtual void registerKeybinding(uint32_t mods, uint32_t key, Callback cb) = 0;
 };

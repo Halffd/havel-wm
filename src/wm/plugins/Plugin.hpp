@@ -273,6 +273,15 @@ public:
     virtual void onViewUnmap(const ViewEvent& event) { (void)event; }
     virtual void onViewDestroy(const ViewEvent& event) { (void)event; }
     virtual bool onKey(const KeyEvent& event) { (void)event; return false; }
+
+    /**
+     * Plugin command hook: other plugins, the panel and IPC address a
+     * plugin by name with a command string ("open", "close", ...).
+     * Returns true when the command was handled.
+     */
+    virtual bool onCommand(const std::string& cmd, const std::string& arg) {
+        (void)cmd; (void)arg; return false;
+    }
     
     // -------------------------------------------------------------------------
     // Overlay Rendering (optional)

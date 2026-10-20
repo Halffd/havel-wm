@@ -356,6 +356,17 @@ void PluginManager::onMouseMotion(int x, int y) {
     }
 }
 
+bool PluginManager::pluginCommand(const std::string& pluginName, const std::string& cmd,
+                                  const std::string& arg) {
+    for (auto& plugin : m_plugins) {
+        if (plugin && plugin->getName() == pluginName) {
+            return plugin->onCommand(cmd, arg);
+        }
+    }
+    LOG_WARN("[PluginManager] pluginCommand: no plugin named '%s'", pluginName.c_str());
+    return false;
+}
+
 void PluginManager::onMouseButton(uint32_t button, bool pressed, int x, int y) {
     for (auto& plugin : m_plugins) {
         plugin->onMouseButton(button, pressed, x, y);

@@ -1772,6 +1772,24 @@ bool Server::startIPCServer(const std::string& socketPath) {
     // ========================================================================
     // Plugin Commands
     // ========================================================================
+    m_ipcServer->registerCommand("plugin_command", [this](const std::string& args) -> std::string {
+        // {"plugin":"app_launcher","cmd":"open","arg":""}
+        try {
+            auto j = nlohmann::json::parse(args);
+            std::string plugin = j.value("plugin", "");
+            std::string cmd = j.value("cmd", "");
+            std::string arg = j.value("arg", "");
+            if (plugin.empty() || cmd.empty())
+                return m_ipcServer->createErrorResponse(-5, "Missing plugin or cmd");
+            bool ok = m_pluginManager.pluginCommand(plugin, cmd, arg);
+            JsonObject r;
+            r["success"] = ok;
+            return m_ipcServer->jsonToString(r);
+        } catch (const std::exception& e) {
+            return m_ipcServer->createErrorResponse(-1, e.what());
+        }
+    });
+
     m_ipcServer->registerCommand("get_plugins", [this](const std::string& args) -> std::string {
         return ipcGetPlugins();
     });
