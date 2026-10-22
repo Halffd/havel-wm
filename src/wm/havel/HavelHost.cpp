@@ -14,6 +14,14 @@
 
 using namespace havel;
 
+// SDK entry point that installs the real compile pipeline behind
+// ModuleCompilerHook. Defined in the embedded language archive
+// (havel-lang/compiler/core/SourceModuleCompilerHook.cpp); that SDK
+// header is not on the compositor's include path, so declare it here.
+namespace havel::compiler {
+bool registerSourceModuleCompilerHook();
+}
+
 // The compositor context passed to every host function via userdata.
 struct HavelCompositorCtx {
     Server* server;
@@ -244,21 +252,36 @@ static int hf_lock_screen(HavelState* H, void*) {
 // output, or "status" pushing the JSON state string.
 static int hf_zoom(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    const char* action = arg_str(H, 0);
+    // Copy: havel_tostring points into one static buffer (see hf_settings)
+    std::string a = arg_str(H, 0) ? arg_str(H, 0) : "";
     int64_t output = havel_gettop(H) >= 1 ? arg_int(H, 1) : 0;
-    if (ctx && ctx->server && action) {
-        std::string a = action;
+    if (ctx && ctx->server && !a.empty()) {
         auto* s = ctx->server;
         if (a == "in") s->zoomIn((int)output);
         else if (a == "out") s->zoomOut((int)output);
         else if (a == "reset") s->zoomReset((int)output);
         else if (a == "toggle") s->zoomToggle((int)output);
+        else if (a == "push_start") s->zoomPushStart((int)output);
+        else if (a == "push_end") s->zoomPushEnd((int)output);
         else if (a == "mode") {
-            if (havel_gettop(H) >= 2) s->zoomSetMode((int)arg_int(H, 2));
-            else s->zoomCycleMode();
+            // zoom("mode", "lens" | 1): name or index from arg 1;
+            // no argument cycles
+            if (havel_gettop(H) >= 2) {
+                std::string ms = arg_str(H, 1) ? arg_str(H, 1) : "";
+                int mode;
+                if (ms == "lens") mode = 1;
+                else if (ms == "strip") mode = 2;
+                else if (ms == "custom") mode = 3;
+                else if (ms == "fullscreen") mode = 0;
+                else mode = (int)arg_int(H, 1);
+                s->zoomSetMode(mode);
+            } else {
+                s->zoomCycleMode();
+            }
         }
         else if (a == "status") {
-            havel_pushstring(H, s->zoomStatusJson().c_str());
+            std::string st = s->zoomStatusJson();
+            havel_pushstring(H, st.c_str());
             return HAVEL_OK;
         }
     }
@@ -294,14 +317,16 @@ static int hf_open_path(HavelState* H, void*) {
 // and applies the setting live.
 static int hf_settings(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
-    const char* key = arg_str(H, 0);
-    if (!key || !ctx || !ctx->server) {
+    // Copy immediately: havel_tostring returns a pointer into one static
+    // buffer, so a later arg_str call would alias an earlier result.
+    std::string key = arg_str(H, 0) ? arg_str(H, 0) : "";
+    if (key.empty() || !ctx || !ctx->server) {
         havel_pushnil(H);
         return HAVEL_OK;
     }
     if (havel_gettop(H) >= 2) {
-        const char* value = arg_str(H, 1);
-        if (value) ctx->server->settingsSet(key, value);
+        std::string value = arg_str(H, 1) ? arg_str(H, 1) : "";
+        if (!value.empty()) ctx->server->settingsSet(key, value);
         havel_pushnil(H);
         return HAVEL_OK;
     }
@@ -540,6 +565,13 @@ bool HavelHost::init(Server* server) {
     auto* ctx = new HavelCompositorCtx{server};
     havel_setuserdata(m_H, ctx);
 
+    // The SDK-side compiler hook self-registers through a static
+    // initializer; lazy archive linking can drop that object (nothing
+    // references the TU otherwise), which makes every loadstring/eval
+    // report "no compiler available in this runtime". Reference it
+    // explicitly so the real pipeline is always the registered hook.
+    havel::compiler::registerSourceModuleCompilerHook();
+
     registerHostFunctions();
     m_initialized = true;
     LOG_INFO("[Havel] Language embedded (%s)", havel_version());
@@ -659,6 +691,94 @@ bool HavelHost::runString(const std::string& source, const std::string& name) {
         return false;
     }
     havel_restore_chunk(m_H, pin);
+    havel_pop(m_H, 1);
+    return true;
+}
+
+// Serialize a value on the stack for the REPL. Scalars print raw, arrays
+// recurse through havel_arraylen/getindex, aggregates we cannot enumerate
+// degrade to a placeholder instead of crashing.
+static void havelSerializeValue(HavelState* H, int idx, std::string* out, int depth);
+
+void HavelHost::serializeValue(int idx, std::string* out) {
+    havelSerializeValue(m_H, idx, out, 0);
+}
+
+static void havelSerializeValue(HavelState* H, int idx, std::string* out, int depth) {
+    if (depth > 6) {
+        *out += "...";
+        return;
+    }
+    int t = havel_type(H, idx);
+    switch (t) {
+        case HAVEL_TNIL:
+            *out += "nil";
+            break;
+        case HAVEL_TBOOLEAN:
+            *out += havel_toboolean(H, idx) ? "true" : "false";
+            break;
+        case HAVEL_TINT:
+        case HAVEL_TFLOAT:
+        case HAVEL_TNUMBER: {
+            double n = havel_tonumber(H, idx);
+            char buf[32];
+            if (n == (long long)n && n > -1e15 && n < 1e15)
+                snprintf(buf, sizeof(buf), "%lld", (long long)n);
+            else
+                snprintf(buf, sizeof(buf), "%g", n);
+            *out += buf;
+            break;
+        }
+        case HAVEL_TSTRING:
+            *out += havel_tostring(H, idx) ? havel_tostring(H, idx) : "";
+            break;
+        case HAVEL_TARRAY: {
+            *out += "[";
+            size_t len = havel_arraylen(H, idx);
+            for (size_t i = 0; i < len && i < 32; i++) {
+                if (i) *out += ", ";
+                havel_getindex(H, idx, (int)i + 1);  // 1-based indexing
+                havelSerializeValue(H, -1, out, depth + 1);
+                havel_pop(H, 1);
+            }
+            if (len > 32) *out += ", ...";
+            *out += "]";
+            break;
+        }
+        case HAVEL_TFUNCTION:
+            *out += "<fn>";
+            break;
+        default: {
+            // Objects/tuples/sets: no key-enumeration primitive exposed,
+            // show the kind and size instead of guessing the layout.
+            size_t len = havel_rawlen(H, idx);
+            *out += "{";
+            *out += (t == HAVEL_TOBJECT ? "object" : "value");
+            char buf[32];
+            snprintf(buf, sizeof(buf), ": %zu fields}", len);
+            *out += buf;
+            break;
+        }
+    }
+}
+
+bool HavelHost::evalString(const std::string& source, std::string* result,
+                           const std::string& name) {
+    if (!m_initialized || !m_H) {
+        m_lastError = "not initialized";
+        return false;
+    }
+    void* pin = havel_pin_main_chunk(m_H);
+    int status = havel_loadstring(m_H, source.c_str(), name.c_str());
+    if (status != HAVEL_OK) {
+        havel_restore_chunk(m_H, pin);
+        m_lastError = havel_errmsg(m_H) ? havel_errmsg(m_H) : "load failed";
+        havel_settop(m_H, 0);
+        return false;
+    }
+    havel_restore_chunk(m_H, pin);
+    // loadstring executed the chunk; the top of the stack holds its value
+    if (result) serializeValue(-1, result);
     havel_pop(m_H, 1);
     return true;
 }

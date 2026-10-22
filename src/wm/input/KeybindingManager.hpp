@@ -56,6 +56,9 @@ public:
     
     // List all registered bindings (for debugging)
     void listBindings() const;
+
+    // Read access for introspection (get_keybindings IPC / REPL)
+    const std::vector<Keybinding>& bindings() const { return m_bindings; }
     
     // Get binding count (for debugging)
     size_t getBindingCount() const { return m_bindings.size(); }

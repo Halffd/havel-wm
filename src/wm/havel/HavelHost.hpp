@@ -69,6 +69,15 @@ public:
     // Run a script source string. Returns false on error.
     bool runString(const std::string& source, const std::string& name = "snippet");
 
+    // Evaluate a source snippet and serialize the produced value (REPL
+    // path: unlike runString, the result comes back as text).
+    bool evalString(const std::string& source, std::string* result,
+                    const std::string& name = "repl");
+
+    // Serialize a stack value into text (used by evalString; exposed for
+    // host functions that need to report values)
+    void serializeValue(int idx, std::string* out);
+
     bool isInitialized() const { return m_initialized; }
     const std::string& lastError() const { return m_lastError; }
 

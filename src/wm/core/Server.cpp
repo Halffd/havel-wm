@@ -1914,6 +1914,44 @@ bool Server::startIPCServer(const std::string& socketPath) {
         return m_ipcServer->createErrorResponse(-3, err);
     });
 
+    // Introspection: outputs (geometry from the C layout) and keybindings
+    m_ipcServer->registerCommand("get_outputs", [this](const std::string& args) -> std::string {
+        (void)args;
+        auto* native = (havel_wlr_server_t*)nativeHandle();
+        nlohmann::json arr = nlohmann::json::array();
+        if (native) {
+            for (int i = 0; i < 16; i++) {
+                int x = 0, y = 0, w = 0, h = 0, primary = 0;
+                char name[64] = {0};
+                if (!havel_wlr_get_output_info(native, i, &x, &y, &w, &h,
+                                               name, sizeof(name), &primary))
+                    break;
+                arr.push_back({{"index", i},
+                               {"name", std::string(name)},
+                               {"x", x}, {"y", y}, {"width", w}, {"height", h},
+                               {"primary", primary != 0}});
+            }
+        }
+        nlohmann::json r;
+        r["outputs"] = arr;
+        r["count"] = arr.size();
+        return r.dump();
+    });
+
+    m_ipcServer->registerCommand("get_keybindings", [this](const std::string& args) -> std::string {
+        (void)args;
+        nlohmann::json arr = nlohmann::json::array();
+        for (const auto& b : m_keybindingManager.bindings()) {
+            arr.push_back({{"name", b.name},
+                           {"modifiers", b.modifiers},
+                           {"keysym", b.keysym}});
+        }
+        nlohmann::json r;
+        r["keybindings"] = arr;
+        r["count"] = arr.size();
+        return r.dump();
+    });
+
     // File manager integration (validated paths, no shell)
     m_ipcServer->registerCommand("file_list", [this](const std::string& args) -> std::string {
         return ipcFileList(args);
@@ -2203,6 +2241,27 @@ bool Server::startIPCServer(const std::string& socketPath) {
             return m_ipcServer->createErrorResponse(-1, err.empty() ? "script failed" : err);
         }
         return m_ipcServer->createSuccessResponse("script executed");
+    });
+
+    // Evaluate an expression and return its serialized value (REPL path).
+    // {"source": "1 + 2"} -> {"success": true, "result": "3"}
+    m_ipcServer->registerCommand("havel_eval", [this](const std::string& args) -> std::string {
+        if (!m_havelHost) {
+            return m_ipcServer->createErrorResponse(-5, "Havel host not initialized");
+        }
+        std::string source = m_ipcServer->extractJsonString(args, "source");
+        if (source.empty()) {
+            return m_ipcServer->createErrorResponse(-5, "havel_eval: needs source");
+        }
+        std::string result;
+        if (!m_havelHost->evalString(source, &result)) {
+            std::string err = m_havelHost->lastError();
+            return m_ipcServer->createErrorResponse(-1, err.empty() ? "eval failed" : err);
+        }
+        JsonObject r;
+        r["success"] = true;
+        r["result"] = result;
+        return m_ipcServer->jsonToString(r);
     });
 #endif
 

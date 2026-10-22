@@ -544,6 +544,12 @@ install(FILES havel-wm.desktop
     DESTINATION share/wayland-sessions
 )
 
+# REPL: plain stdio binary, no Qt dependency
+add_subdirectory(src/shell/repl)
+install(TARGETS havel-repl
+    RUNTIME DESTINATION bin
+)
+
 # Build panel if Qt6 is available
 if(PANEL_ENABLED)
     add_subdirectory(src/shell/panel)

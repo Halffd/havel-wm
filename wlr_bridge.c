@@ -3720,6 +3720,38 @@ void havel_wlr_set_brightness_for_output(havel_wlr_server_t *server, int output_
     LOG_WARN("[Brightness] Output %d not found", output_index);
 }
 
+// Query an output's geometry (layout position + mode size), name and
+// primary flag. Returns false when output_index is out of range.
+bool havel_wlr_get_output_info(struct havel_wlr_server *server, int output_index,
+                                int* x, int* y, int* w, int* h,
+                                char* name, size_t name_size, int* primary) {
+    if (!server) return false;
+    int i = 0;
+    struct havel_output *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        if (i == output_index) {
+            struct wlr_output_layout_output *lo =
+                wlr_output_layout_get(server->output_layout, output->output);
+            if (lo) {
+                if (x) *x = lo->x;
+                if (y) *y = lo->y;
+            } else {
+                if (x) *x = 0;
+                if (y) *y = 0;
+            }
+            if (w) *w = output->output->width;
+            if (h) *h = output->output->height;
+            if (name && name_size > 0) {
+                snprintf(name, name_size, "%s", output->output->name);
+            }
+            if (primary) *primary = output->is_primary ? 1 : 0;
+            return true;
+        }
+        i++;
+    }
+    return false;
+}
+
 // Per-monitor zoom control with cursor-centered zoom
 void havel_wlr_set_zoom_for_output(havel_wlr_server_t *server, int output_index, float zoom, 
                                     float cursor_x, float cursor_y) {

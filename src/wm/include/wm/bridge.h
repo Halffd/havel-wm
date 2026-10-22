@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -214,6 +215,11 @@ float havel_wlr_get_zoom(struct havel_wlr_server *server, int output_index);
 // output_frame). centre < 0 means "follow the live cursor".
 void havel_wlr_set_zoom_for_output(struct havel_wlr_server *server, int output_index,
                                     float zoom, float center_x, float center_y);
+
+// Output geometry query (layout position + mode size + name + primary)
+bool havel_wlr_get_output_info(struct havel_wlr_server *server, int output_index,
+                                int* x, int* y, int* w, int* h,
+                                char* name, size_t name_size, int* primary);
 
 // Start the persistent self-injection keyboard (background wayland-client
 // connection to the compositor's own socket)

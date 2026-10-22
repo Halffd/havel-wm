@@ -449,23 +449,36 @@ else
     # Thumbnail probe: a third window with a distinctive solid background.
     # Its cell then shows the captured content (red pixels inside the
     # grid); before the capture path existed, cells were flat
-    # placeholders. kitty needs LIBGL_ALWAYS_SOFTWARE on the headless
-    # compositor (its EGL/ZINK init fails otherwise - observed: instant
-    # exit, no map).
+    # placeholders. alacritty goes first: its config-file colour override
+    # is the one proven here (28211 red samples on this box). kitty's
+    # EGL/ZINK init fails headless in this environment, and this foot
+    # build rejects [colors] from a config file (version-dependent), so
+    # both are fallbacks that may end in a honest skip.
     THUMB_RED=1
-    if command -v kitty >/dev/null 2>&1; then
+    if command -v alacritty >/dev/null 2>&1; then
+        THUMB_CONF="$(mktemp /tmp/havel-alacred-XXXXXX.toml)"
+        printf '[colors.primary]\nbackground = "#ff0000"\n' > "$THUMB_CONF"
+        WAYLAND_DISPLAY=wayland-0 timeout 110 alacritty --config-file "$THUMB_CONF" \
+            -e sh -c 'sleep 100' > /dev/null 2>&1 &
+        GRID_PIDS="$GRID_PIDS $!"
+    elif command -v kitty >/dev/null 2>&1; then
         WAYLAND_DISPLAY=wayland-0 LIBGL_ALWAYS_SOFTWARE=1 timeout 110 kitty \
             -o background=#ff0000 -o background_opacity=1 \
             -e sh -c 'sleep 100' > /dev/null 2>&1 &
         GRID_PIDS="$GRID_PIDS $!"
+    else
+        THUMB_RED=0
+    fi
+    if [ "$THUMB_RED" = "1" ]; then
         for _ in $(seq 1 100); do
             if [ "$(grep -acE 'View mapped=true' "$LOG")" -ge $((MAPS_BEFORE + 3)) ]; then
                 break
             fi
             sleep 0.2
         done
-    else
-        THUMB_RED=0
+        if [ "$(grep -acE 'View mapped=true' "$LOG")" -lt $((MAPS_BEFORE + 3)) ]; then
+            THUMB_RED=0   # probe window never mapped: skip the colour check
+        fi
     fi
 
     # Hold Alt, tap Tab, wait for the capture, release Alt - all on ONE
@@ -549,7 +562,10 @@ print(sum(1 for y in range(int(h*0.30), int(h*0.70), 2)
           if px[x, y][0] > 200 and px[x, y][1] < 80 and px[x, y][2] < 80))" 2>/dev/null || echo 0)
     if [ "$THUMB_RED" -eq 1 ]; then
         report $([ "${REDPX:-0}" -gt 300 ] && echo 0 || echo 1) "window thumbnail rendered in cell (red px: ${REDPX:-err})"
+    else
+        skip "window thumbnail colour check (no red probe window mapped)"
     fi
+    [ -n "${THUMB_CONF:-}" ] && rm -f "$THUMB_CONF"
     DOWNPANEL=$(python3 - "$GRID_DOWN" <<'DOWN_PY'
 import sys
 from PIL import Image
@@ -1114,6 +1130,57 @@ EOF
     [ -n "$RL_PID" ] && wait "$RL_PID" 2>/dev/null
     rm -rf "$RL_HOME"
     LOG="$OLD_LOG"
+fi
+
+# ---------------------------------------------------------------- phase 15: repl + introspection
+# The interactive interpreter (havel-repl) evaluates through havel_eval
+# and the C-API string handling is exercised end to end: host-function
+# string arguments and host string returns (the old C-API resolved them
+# through a colliding side table - settings("K","V") once stored a
+# stale zoom-status JSON as the key). Introspection: get_outputs and
+# get_keybindings answer with real state.
+REPL_BIN="$BUILD_DIR/src/shell/repl/havel-repl"
+if [ ! -x "$REPL_BIN" ]; then
+    skip "repl phase (havel-repl not built)"
+else
+    REPL_OUT=$(printf '1 + 2\nsettings("harness_repl_k", "harness_repl_v")\nsettings("harness_repl_k")\n:quit\n' \
+        | timeout 20 env HAVEL_IPC_SOCKET="$SOCK" "$REPL_BIN" 2>/dev/null | sed 's/^havel> //')
+    report $(echo "$REPL_OUT" | grep -qx "3" && echo 0 || echo 1) \
+        "repl evaluates expressions ($(echo "$REPL_OUT" | grep -m1 . | head -c 40))"
+    report $(echo "$REPL_OUT" | grep -qx "harness_repl_v" && echo 0 || echo 1) \
+        "repl host string args/returns (settings round-trip)"
+    # restore: drop the harness key from the settings file
+    python3 - <<'CLEANKEY' 2>/dev/null
+import json, os
+p = os.path.expanduser("~/.config/havel-wm/settings.json")
+try:
+    d = json.load(open(p)); d.pop("harness_repl_k", None)
+    json.dump(d, open(p, "w"), indent=2)
+except Exception:
+    pass
+CLEANKEY
+
+    GOUT=$(python3 - "$SOCK" <<'GOUT' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_outputs","params":{}})+"\n").encode())
+print(s.recv(65536).decode())
+GOUT
+)
+    report $(echo "$GOUT" | grep -q '"count": *1' && echo "$GOUT" | grep -q '"width": *1280' && echo 0 || echo 1) \
+        "get_outputs reports geometry ($(echo "$GOUT" | head -c 70))"
+    GKB=$(python3 - "$SOCK" <<'GKB' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_keybindings","params":{}})+"\n").encode())
+print(s.recv(65536).decode())
+GKB
+)
+    GKB_N=$(echo "$GKB" | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',{}).get('count',0))" 2>/dev/null)
+    report $([ "${GKB_N:-0}" -gt 5 ] && echo 0 || echo 1) \
+        "get_keybindings lists bindings (count=${GKB_N:-err})"
 fi
 
 # ---------------------------------------------------------------- teardown
