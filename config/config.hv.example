@@ -88,6 +88,21 @@ plugin_config("zoom", "custom_y", "-1")
 // zoom("in", 0)
 
 // ---------------------------------------------------------------------
+// Scripting / introspection (also reachable from havel-repl)
+//
+//   reload_config()          re-run this file (old keybinds are dropped
+//                            first; a broken file leaves them intact)
+//   settings(key)            read a persisted setting (nil when unset)
+//   settings(key, value)     write + apply; known keys act immediately
+//                            (gamma, animations, plugin.<name>.<key>...)
+//   open_path(path)          directory -> file manager, file -> xdg-open
+//   zoom("status")           JSON zoom state
+// ---------------------------------------------------------------------
+
+// settings("background_color", "0.08,0.09,0.12")
+// keybind("Meta+F5", fn() { reload_config() })
+
+// ---------------------------------------------------------------------
 // Keybindings
 //
 // keybind(spec, fn) - spec is "Mods+Key"; the closure runs on press.

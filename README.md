@@ -235,6 +235,43 @@ echo '{"method":"get_windows"}' | socat - UNIX-CONNECT:/tmp/havel-wm.sock
 
 See `test_ipc.sh` for more examples.
 
+### Interactive interpreter (`havel-repl`)
+
+`build/src/shell/repl/havel-repl` connects to the compositor socket and
+evaluates Havel expressions against the running session:
+
+```
+$ havel-repl
+havel> 1 + 2
+3
+havel> get_workspace()
+0
+havel> zoom("status")
+{"mode":"fullscreen","outputs":[],"step":1.25,"toggle_level":2.0}
+havel> :quit
+```
+
+State (variables, keybinds, settings) lives in the compositor and
+persists between lines. `'\\'` at the end of a line continues an
+expression; parse errors print their source location and the session
+survives. The socket path comes from the argument,
+`$HAVEL_IPC_SOCKET`, or `$XDG_RUNTIME_DIR/havel-wm.sock`.
+
+Scripting surface added alongside it:
+
+| Command | Purpose |
+|---------|---------|
+| `havel_eval` | evaluate a snippet, return the serialized value |
+| `reload_config` | re-run config.hv (failed reloads keep the old bindings) |
+| `settings` | get/set/list persisted settings; `plugin.*` keys apply live |
+| `plugin_command` | address a plugin (`app_launcher` open/close/toggle) |
+| `file_*` / `open_path` | file operations and open-in-manager (HOME/tmp contained) |
+| `zoom` | in/out/reset/toggle/push/mode/status/configure |
+| `get_outputs` / `get_keybindings` | monitor geometry, registered bindings |
+
+Havel host functions mirror these: `settings`, `reload_config`,
+`open_path`, `zoom`, `plugin_config`.
+
 ---
 
 ## Plugins
