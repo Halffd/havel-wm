@@ -1236,14 +1236,16 @@ void Server::zoomFeedCapture(int outputIndex, const uint32_t* pixels, int w, int
 
 bool Server::zoomGetCapture(int outputIndex, const uint32_t** pixels, int* w, int* h,
                             float* srcX, float* srcY, uint64_t* seq) const {
-    if (outputIndex < 0 || outputIndex >= kMaxZoomOutputs || !pixels) return false;
+    if (outputIndex < 0 || outputIndex >= kMaxZoomOutputs) return false;
     const auto& c = m_zoomCapture[outputIndex];
     if (c.seq == 0 || c.pixels.empty()) return false;
-    *pixels = c.pixels.data();
-    *w = c.w;
-    *h = c.h;
-    *srcX = c.srcX;
-    *srcY = c.srcY;
+    // Null out-params are allowed: the zoom plugin probes the sequence
+    // number alone to detect fresh captures for its persistent tree.
+    if (pixels) *pixels = c.pixels.data();
+    if (w) *w = c.w;
+    if (h) *h = c.h;
+    if (srcX) *srcX = c.srcX;
+    if (srcY) *srcY = c.srcY;
     if (seq) *seq = c.seq;
     return true;
 }

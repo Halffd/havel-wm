@@ -52,6 +52,11 @@ public:
         for (int i = 0; i < 8; i++) {
             m_api->setZoomForOutput(i, 1.0f);
         }
+        // The persistent magnifier tree must go with the plugin or a
+        // frozen lens stays on screen (nothing redraws it afterwards).
+        if (m_renderer && m_tree) {
+            m_renderer->destroyPersistentTree(&m_tree);
+        }
         printf("[ZoomPlugin] Finalized (zoom reset)\n");
         m_api = nullptr;
     }
@@ -187,20 +192,50 @@ public:
         box.h = out.h;
         box.underCursor = out.underCursor;
 
-        if (m_api->zoomMode() == 0) return;  // fullscreen mode: C-side scale only
-        if (!out.underCursor) return;        // magnifier follows the pointer
-        if (!m_api->zoomActive(out.index)) return;
+        // Decide whether the magnifier should be visible at all, and drop
+        // the persistent tree when not (an old tree would stay frozen on
+        // screen - nothing redraws while hidden).
+        bool want = false;
+        int idx = out.index;
+        if (m_api->zoomMode() != 0 && out.underCursor && m_api->zoomActive(idx)) {
+            want = m_anim[idx].mag >= 1.05f;  // not visually zoomed yet => off
+        }
+        if (!want) {
+            if (m_tree) renderer->destroyPersistentTree(&m_tree);
+            m_lastGeomKey = 0;
+            return;
+        }
 
-        float mag = m_anim[out.index].mag;
-        if (mag < 1.05f) return;  // not visually zoomed yet (or already off)
+        // Draw into a PERSISTENT tree rebuilt only on change. The earlier
+        // version redrew the magnifier into the per-frame tree on EVERY
+        // frame - on GPU backends the capture never succeeds, so the
+        // placeholder plus a fresh capture request re-damaged the output
+        // forever and the render loop spun at full rate, starving wayland
+        // clients and IPC (the documented failure mode of per-frame
+        // overlay redraws; observed by a user as frozen empty windows,
+        // dead shortcuts and a stale layout on both monitors).
+        float mag = m_anim[idx].mag;
+        double curX = m_api->getCursorX();
+        double curY = m_api->getCursorY();
+        uint64_t captureSeq = 0;
+        m_api->zoomGetCapture(idx, nullptr, nullptr, nullptr, nullptr, nullptr, &captureSeq);
+        uint64_t geomKey = geomKeyFor(out, box, curX, curY, mag, captureSeq);
+        if (m_tree && geomKey == m_lastGeomKey) return;  // nothing changed
+        m_lastGeomKey = geomKey;
+
+        m_renderer = renderer;
+        if (m_tree) renderer->destroyPersistentTree(&m_tree);
+        m_tree = renderer->createPersistentTree();
+        if (!m_tree) return;
+        renderer->setTargetTree(m_tree);
 
         // Display box in scene coordinates, source region in output-local
         // coordinates (that is what the C capture clamps against).
         FloatRect display = displayBox(out, box);
         float srcW = display.w / mag;
         float srcH = display.h / mag;
-        float clx = (float)m_api->getCursorX() - (float)out.x;
-        float cly = (float)m_api->getCursorY() - (float)out.y;
+        float clx = (float)curX - (float)out.x;
+        float cly = (float)curY - (float)out.y;
 
         // The capture reads the rendered frame, which already contains the
         // magnifier drawn last frame - keep the source outside the display
@@ -210,7 +245,19 @@ public:
         clx = std::min(std::max(clx, srcW / 2), (float)box.w - srcW / 2);
         cly = std::min(std::max(cly, srcH / 2), (float)box.h - srcH / 2);
 
-        m_api->zoomRequestCapture(out.index, clx, cly, (int)std::lround(srcW), (int)std::lround(srcH));
+        // Re-request pixels only when the wanted region actually moved or
+        // the magnification changed; a static cursor must not spin the
+        // capture path (GPU buffers never yield pixels - retried only on
+        // movement so a permanent failure costs nothing at rest).
+        Anim& a = m_anim[idx];
+        bool regionMoved = (int)clx != a.lastReqX || (int)cly != a.lastReqY ||
+                           (int)std::lround(srcW) != a.lastReqW;
+        if (regionMoved) {
+            a.lastReqX = (int)clx;
+            a.lastReqY = (int)cly;
+            a.lastReqW = (int)std::lround(srcW);
+            m_api->zoomRequestCapture(idx, clx, cly, (int)std::lround(srcW), (int)std::lround(srcH));
+        }
 
         // Draw the freshest capture (one frame stale, standard for a
         // magnifier) stretched over the display box.
@@ -218,22 +265,22 @@ public:
         int pw = 0, ph = 0;
         float sx = 0, sy = 0;
         uint64_t seq = 0;
-        bool have = m_api->zoomGetCapture(out.index, &pixels, &pw, &ph, &sx, &sy, &seq);
-        if (have && seq != m_anim[out.index].capSeq) {
-            m_anim[out.index].capSeq = seq;
-            m_anim[out.index].captureWorks = true;
+        bool have = m_api->zoomGetCapture(idx, &pixels, &pw, &ph, &sx, &sy, &seq);
+        if (have && seq != a.capSeq) {
+            a.capSeq = seq;
+            a.captureWorks = true;
         }
 
         // Dim backing + accent border
         renderer->drawRect(display, Color(0.0f, 0.0f, 0.0f, 0.55f));
         if (have && pixels && pw > 0 && ph > 0) {
             renderer->drawPixels(pixels, pw, ph, display.x, display.y, display.w, display.h);
-        } else if (!m_anim[out.index].captureWarned) {
+        } else if (!a.captureWarned) {
             // GPU-backed framebuffers expose no CPU pixels; say so once
             // instead of leaving a silent black box.
-            m_anim[out.index].captureWarned = true;
+            a.captureWarned = true;
             printf("[ZoomPlugin] output %d: no CPU capture (GPU buffer?) - magnifier shows placeholder only\n",
-                   out.index);
+                   idx);
         }
         renderer->drawBorder(display, Color(0.1f, 0.65f, 0.9f, 0.95f), 2.0f);
 
@@ -241,6 +288,8 @@ public:
         snprintf(label, sizeof(label), "%.1fx", mag);
         renderer->drawText(label, display.x + 6.0f, display.y + 4.0f, 13.0f,
                            Color(0.9f, 0.95f, 1.0f, 0.95f));
+
+        renderer->setTargetTree(nullptr);
     }
 
 private:
@@ -252,6 +301,7 @@ private:
         uint64_t capSeq = 0;
         bool captureWorks = false;
         bool captureWarned = false;
+        int lastReqX = -1, lastReqY = -1, lastReqW = -1;  // last capture request
     };
     struct OutBox {
         int x = 0, y = 0, w = 0, h = 0;
@@ -268,6 +318,35 @@ private:
     std::map<int, Anim> m_anim;
     std::map<int, OutBox> m_boxes;
     std::chrono::steady_clock::time_point m_lastTick;
+
+    // Persistent magnifier tree (rebuilt only when the geometry key
+    // changes; see renderOverlay for why per-frame drawing starved the
+    // compositor).
+    wlr_scene_tree_t* m_tree = nullptr;
+    OverlayRenderer* m_renderer = nullptr;
+    uint64_t m_lastGeomKey = 0;
+
+    // Change key for the magnifier: output, cursor position (1px buckets),
+    // animated magnification, mode, active flag and capture generation.
+    // Anything that would alter the drawn pixels changes this key.
+    uint64_t geomKeyFor(const CompositorAPI::OutputTarget& out, const OutBox& box,
+                        double curX, double curY, float mag, uint64_t capSeq) {
+        uint64_t k = 1469598103934665603ull;  // FNV offset basis
+        auto mix = [&k](uint64_t v) {
+            k ^= v;
+            k *= 1099511628211ull;
+        };
+        mix((uint64_t)out.index);
+        mix((uint64_t)(int64_t)(curX * 2.0));
+        mix((uint64_t)(int64_t)(curY * 2.0));
+        mix((uint64_t)(int64_t)(mag * 256.0f));
+        mix((uint64_t)m_api->zoomMode());
+        mix(m_api->zoomActive(out.index) ? 1 : 0);
+        mix(capSeq);
+        mix((uint64_t)box.w);
+        mix((uint64_t)box.h);
+        return k;
+    }
 
     // Output under the pointer: box containment test against the layout
     // cursor position. Falls back to the primary (index 0) before the

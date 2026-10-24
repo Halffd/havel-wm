@@ -68,6 +68,7 @@ static uint64_t get_monotonic_time_ms(void) {
 #include <wlr/types/wlr_tablet_v2.h>
 #include <wlr/types/wlr_fractional_scale_v1.h>
 #include <wlr/types/wlr_export_dmabuf_v1.h>
+#include <pixman.h>
 #include <wlr/types/wlr_color_management_v1.h>
 #include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
 #include <wlr/util/log.h>
@@ -346,6 +347,9 @@ struct havel_output {
     float zoom_center_y;
     bool zoom_pos_override;  // scene output position moved for zoom; must be
                              // restored to the layout position on zoom-out
+    float committed_scale;   // last scale handed to a commit; a change needs
+                             // a full-damage repaint (partial damage across
+                             // a scale change stacks mixed-scale patches)
 
     // Gamma LUT buffers (allocated once per output)
     uint16_t *gamma_ramp_red;
@@ -1907,13 +1911,54 @@ static void output_frame(struct wl_listener *listener, void *data) {
     bool want_capture = havel_cpp_zoom_take_request(
         server->cpp_server, output_index, &cap_cx, &cap_cy, &cap_w, &cap_h);
 
+    // The zoom path changes the output scale; a scale transition invalidates
+    // cached node layouts and partial damage regions - commit with FULL
+    // damage or the frame becomes a patchwork of mixed-scale updates, and
+    // zoom-out must reset the scale explicitly or the output stays shrunk
+    // (observed: content stuck at half size in the top-left corner after
+    // zooming back out).
+    float target_scale = (output->zoom != 1.0f && output->zoom > 0.0f)
+                             ? output->zoom
+                             : 1.0f;
+    bool scale_transition = (target_scale != output->committed_scale);
+
     if (output->zoom != 1.0f && output->zoom > 0.0f) {
         LOG_DEBUG("[FRAME] %s: committing with zoom %.2f", output->output->name, output->zoom);
         if (!wlr_scene_output_build_state(output->scene_output, &state, &options)) {
             LOG_ERROR("[FRAME] %s: scene_output_build_state failed", output->output->name);
-        } else if (!wlr_output_commit_state(output->output, &state)) {
-            LOG_ERROR("[FRAME] %s: output_commit_state failed (zoom=%.2f)",
-                      output->output->name, output->zoom);
+        } else {
+            if (scale_transition) {
+                pixman_region32_t full;
+                pixman_region32_init_rect(&full, 0, 0,
+                                          (unsigned int)output->output->width,
+                                          (unsigned int)output->output->height);
+                wlr_output_state_set_damage(&state, &full);
+                pixman_region32_fini(&full);
+            }
+            if (!wlr_output_commit_state(output->output, &state)) {
+                LOG_ERROR("[FRAME] %s: output_commit_state failed (zoom=%.2f)",
+                          output->output->name, output->zoom);
+            } else {
+                output->committed_scale = target_scale;
+            }
+        }
+    } else if (scale_transition &&
+               wlr_scene_output_build_state(output->scene_output, &state, &options)) {
+        // Zoom ended: hand the output its normal scale back through a real
+        // commit (skipping the state set would leave the shrunk scale in
+        // place forever).
+        wlr_output_state_set_scale(&state, 1.0f);
+        pixman_region32_t full;
+        pixman_region32_init_rect(&full, 0, 0,
+                                  (unsigned int)output->output->width,
+                                  (unsigned int)output->output->height);
+        wlr_output_state_set_damage(&state, &full);
+        pixman_region32_fini(&full);
+        if (!wlr_output_commit_state(output->output, &state)) {
+            LOG_ERROR("[FRAME] %s: output_commit_state failed (scale reset)",
+                      output->output->name);
+        } else {
+            output->committed_scale = 1.0f;
         }
     } else if (want_capture && cap_w > 0 && cap_h > 0 &&
                wlr_scene_output_build_state(output->scene_output, &state, &options)) {
@@ -2076,6 +2121,7 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     output->zoom_center_x = -1.0f;  // -1 = not set
     output->zoom_center_y = -1.0f;
     output->zoom_pos_override = false;
+    output->committed_scale = 1.0f;
 
     // Allocate gamma LUT buffers once per output
     size_t gamma_size = wlr_output_get_gamma_size(wlr_output);

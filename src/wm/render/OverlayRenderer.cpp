@@ -166,9 +166,14 @@ void OverlayRenderer::drawTexture(uint32_t texture, float x, float y, float w, f
 void OverlayRenderer::drawPixels(const uint32_t* pixels, int pw, int ph,
                                   float x, float y, float w, float h) {
     if (!m_initialized || !pixels || pw <= 0 || ph <= 0) return;
+    // Honor the target tree like every other draw: pixels into a
+    // persistent tree (zoom magnifier) must survive past this frame -
+    // parenting to the frame tree made them vanish on the next beginFrame
+    // while the surrounding rects persisted.
     wlr_scene_buffer_t* sb = havel_scene_pixels(
-        m_frameTree, pixels, pw, ph, (int)x, (int)y, (int)w, (int)h);
-    if (sb) m_frameSceneBuffers.push_back(sb);
+        m_targetTree ? m_targetTree : m_frameTree,
+        pixels, pw, ph, (int)x, (int)y, (int)w, (int)h);
+    if (sb && !m_targetTree) m_frameSceneBuffers.push_back(sb);
 }
 
 void OverlayRenderer::drawText(const char* text, float x, float y, float size, const Color& color) {
