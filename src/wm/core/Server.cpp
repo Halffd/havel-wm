@@ -1470,6 +1470,11 @@ void Server::addMonitorRule(const std::string& name, int x, int y) {
     if (name.empty()) return;
     m_monitorRules[name] = {x, y};
     LOG_INFO("[Config] monitor rule: %s at (%d,%d)", name.c_str(), x, y);
+    // Outputs added later consult the rule at placement time; one already
+    // running gets moved now, so config.hv and runtime calls behave the same.
+    if (m_nativeHandle) {
+        havel_wlr_place_output((havel_wlr_server_t*)m_nativeHandle, name.c_str(), x, y);
+    }
 }
 
 bool Server::monitorRuleFor(const std::string& name, int* x, int* y) const {

@@ -106,6 +106,10 @@ void havel_cpp_zoom_feed(struct havel_cpp_server* server, int output_index,
 bool havel_cpp_monitor_rule_lookup(struct havel_cpp_server* server, const char* name,
                                     int* x, int* y);
 
+// Re-place an already-running output at an explicit layout position.
+bool havel_wlr_place_output(struct havel_wlr_server* server, const char* name,
+                             int x, int y);
+
 // Application spawning (for App Launcher): fork+exec, no shell
 void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command);
 

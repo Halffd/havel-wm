@@ -1759,19 +1759,30 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // 0.21). The scene's first-child rect (created at server init)
     // renders the wallpaper color behind everything. The old TODO here
     // dropped the color entirely - the desktop rendered black.
+    // The rect tracks the WHOLE layout box (not one output's mode): a
+    // monitor rule that moves an output extends the layout, and a
+    // mode-sized rect at (0,0) left the moved output black (observed).
     if (server->bg_rect) {
+        struct wlr_box layout_box = {0};
+        wlr_output_layout_get_box(server->output_layout, NULL, &layout_box);
         float bg[4] = { bgR, bgG, bgB, 1.0f };
         bool color_changed = memcmp(server->bg_rect->color, bg, sizeof bg) != 0;
-        bool size_changed = server->bg_rect->width != output->output->width ||
-                            server->bg_rect->height != output->output->height;
+        bool size_changed = server->bg_rect->width != layout_box.width ||
+                            server->bg_rect->height != layout_box.height;
+        bool pos_changed = server->bg_rect->node.x != layout_box.x ||
+                           server->bg_rect->node.y != layout_box.y;
         if (color_changed) {
             memcpy(server->bg_rect->color, bg, sizeof bg);
         }
         if (size_changed) {
             wlr_scene_rect_set_size(server->bg_rect,
-                                    output->output->width, output->output->height);
+                                    layout_box.width, layout_box.height);
         }
-        if (color_changed || size_changed) {
+        if (pos_changed) {
+            wlr_scene_node_set_position(&server->bg_rect->node,
+                                        layout_box.x, layout_box.y);
+        }
+        if (color_changed || size_changed || pos_changed) {
             // Scene commits only redraw damaged regions: toggling the
             // node damages the rect's area so the new color lands.
             wlr_scene_node_set_enabled(&server->bg_rect->node, false);
@@ -4445,6 +4456,42 @@ static void wallpaper_fit_output(struct havel_wlr_server *server) {
         server->wallpaper_tree, server->wallpaper_pixels,
         server->wallpaper_w, server->wallpaper_h,
         box.x, box.y, box.width, box.height);
+}
+
+// Place an output by name at an explicit layout position (declarative
+// monitor_rule). Returns false when no output carries that name.
+bool havel_wlr_place_output(struct havel_wlr_server *server, const char *name,
+                             int x, int y) {
+    if (!server || !name) return false;
+    struct havel_output *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        if (strcmp(output->output->name, name) == 0) {
+            if (wlr_output_layout_get(server->output_layout, output->output)) {
+                wlr_output_layout_remove(server->output_layout, output->output);
+            }
+            wlr_output_layout_add(server->output_layout, output->output, x, y);
+            // Re-bind the scene output to the NEW layout entry: the old one
+            // was destroyed by the remove, and without re-registration the
+            // scene output keeps its stale position and the output renders
+            // black (observed live on a rule-moved second monitor).
+            if (server->scene_output_layout) {
+                struct wlr_output_layout_output *lo =
+                    wlr_output_layout_get(server->output_layout, output->output);
+                if (lo) {
+                    wlr_scene_output_layout_add_output(server->scene_output_layout,
+                                                       lo, output->scene_output);
+                }
+            }
+            wlr_output_schedule_frame(output->output);
+            // A pixel wallpaper was fitted to the OLD layout box: re-fit
+            // to the new one or the moved output shows black.
+            wallpaper_fit_output(server);
+            LOG_INFO("[OUTPUT] %s placed at (%d,%d) by monitor rule (live)",
+                     name, x, y);
+            return true;
+        }
+    }
+    return false;
 }
 
 void havel_wlr_get_pointer(struct havel_wlr_server *server, double *x, double *y) {
