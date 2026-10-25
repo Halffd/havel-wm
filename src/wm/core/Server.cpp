@@ -5,6 +5,8 @@
 #include <ui/lock/ScreenLock.hpp>
 #include <wm/Layout.hpp>
 #include <wm/plugins/Plugins.hpp>
+#include <wm/plugins/ServerDecorationPlugin.hpp>
+#include <wm/core/WindowGroupManager.hpp>
 #include <shell/IPCServer.hpp>
 #include "core/CoreWindowManager.hpp"
 #include "core/NotificationDaemon.hpp"
@@ -56,7 +58,10 @@ Server::Server() {
         if (Window* w = m_coreWindowManager.getWindow(id)) m_coreWindowManager.resizeWindow(w, width, height);
     };
     actions.setFloating = [this](uint64_t id, bool floating) {
-        if (Window* w = m_coreWindowManager.getWindow(id)) m_coreWindowManager.setFloating(w, floating);
+        Window* w = m_coreWindowManager.getWindow(id);
+        LOG_INFO("[Config] set_floating id=%lu -> %d (window %s)", (unsigned long)id,
+                 floating ? 1 : 0, w ? "found" : "NULL");
+        if (w) m_coreWindowManager.setFloating(w, floating);
     };
     actions.switchWorkspace = [this](uint32_t ws) { setActiveWorkspace(ws); };
     m_windowManager.attach(&m_coreWindowManager, std::move(actions));
@@ -159,7 +164,7 @@ Workspace* Server::activeWorkspace() const {
 }
 
 void Server::setActiveWorkspace(uint32_t id) {
-    if (id >= WORKSPACE_COUNT) return;
+    if (id >= workspaceCount()) return;
 
     LOG_INFO("Switching to workspace %u", id);
 
@@ -181,14 +186,14 @@ void Server::setActiveWorkspace(uint32_t id) {
 
 void Server::workspaceStep(bool backwards) {
     uint32_t next = backwards
-        ? (m_activeWorkspace + WORKSPACE_COUNT - 1) % WORKSPACE_COUNT
-        : (m_activeWorkspace + 1) % WORKSPACE_COUNT;
+        ? (m_activeWorkspace + workspaceCount() - 1) % workspaceCount()
+        : (m_activeWorkspace + 1) % workspaceCount();
     LOG_DEBUG("Workspace step: %u -> %u", m_activeWorkspace, next);
     setActiveWorkspace(next);
 }
 
 void Server::workspaceStepTo(uint32_t target) {
-    if (target >= WORKSPACE_COUNT) return;
+    if (target >= workspaceCount()) return;
     LOG_DEBUG("Workspace step to: %u", target);
     setActiveWorkspace(target);
 }
@@ -402,6 +407,18 @@ void Server::onViewUnmapped(View* view) {
 
     if (m_workspaces[view->workspaceId()]->isTilingEnabled()) {
         arrangeWorkspace(view->workspaceId());
+    }
+}
+
+void Server::onViewAppIdChanged(View* view, const std::string& appId) {
+    if (!view || appId.empty()) return;
+
+    view->setAppId(appId);
+
+    // Keep the core Window wrapper in sync — the shell projection and
+    // IPC queries read from it (floating rules match against this).
+    if (Window* window = m_coreWindowManager.getWindow(view)) {
+        window->setAppId(appId);
     }
 }
 
@@ -639,7 +656,7 @@ void Server::focusNextMru(bool backwards) {
 // Window enumeration implementation
 std::vector<View*> Server::getAllViews() const {
     std::vector<View*> allViews;
-    for (uint32_t ws = 0; ws < WORKSPACE_COUNT; ++ws) {
+    for (uint32_t ws = 0; ws < workspaceCount(); ++ws) {
         auto* workspace = m_workspaces[ws].get();
         if (workspace) {
             auto wsViews = workspace->views();
@@ -650,7 +667,7 @@ std::vector<View*> Server::getAllViews() const {
 }
 
 std::vector<View*> Server::getViewsInWorkspace(uint32_t workspaceId) const {
-    if (workspaceId >= WORKSPACE_COUNT) return {};
+    if (workspaceId >= workspaceCount()) return {};
     auto* workspace = m_workspaces[workspaceId].get();
     return workspace ? workspace->views() : std::vector<View*>{};
 }
@@ -662,7 +679,7 @@ View* Server::getFocusedView() const {
 
 View* Server::getViewById(uint64_t id) const {
     // Search all workspaces for view with matching windowId
-    for (uint32_t ws = 0; ws < WORKSPACE_COUNT; ++ws) {
+    for (uint32_t ws = 0; ws < workspaceCount(); ++ws) {
         auto* workspace = m_workspaces[ws].get();
         if (workspace) {
             for (View* view : workspace->views()) {
@@ -687,7 +704,7 @@ std::string Server::getViewTitle(View* view) const {
 }
 
 void Server::arrangeWorkspace(uint32_t id) {
-    if (id >= WORKSPACE_COUNT) return;
+    if (id >= workspaceCount()) return;
 
     auto* ws = m_workspaces[id].get();
     if (!ws || !ws->isTilingEnabled()) return;
@@ -724,13 +741,13 @@ void Server::arrangeWorkspace(uint32_t id) {
 }
 
 void Server::setOutputGeometry(uint32_t workspaceId, const Rect& geom) {
-    if (workspaceId < WORKSPACE_COUNT) {
+    if (workspaceId < workspaceCount()) {
         m_outputGeoms[workspaceId] = geom;
     }
 }
 
 Rect Server::outputGeometry(uint32_t workspaceId) const {
-    if (workspaceId < WORKSPACE_COUNT) {
+    if (workspaceId < workspaceCount()) {
         auto it = m_outputGeoms.find(workspaceId);
         if (it != m_outputGeoms.end()) {
             return it->second;
@@ -1004,7 +1021,7 @@ void Server::moveViewToWorkspace(uint32_t ws) {
 }
 
 void Server::moveViewToWorkspace(View* view, uint32_t ws) {
-    if (!view || ws >= WORKSPACE_COUNT) return;
+    if (!view || ws >= workspaceCount()) return;
     if (view->workspaceId() == ws) return;
 
     // Move the compositor-side view between workspaces (this is what
@@ -1033,8 +1050,8 @@ void Server::moveViewToWorkspaceRelative(bool next) {
     auto* ws = activeWorkspace();
     if (ws && ws->activeView()) {
         uint32_t target = next 
-            ? (m_activeWorkspace + 1) % WORKSPACE_COUNT
-            : (m_activeWorkspace + WORKSPACE_COUNT - 1) % WORKSPACE_COUNT;
+            ? (m_activeWorkspace + 1) % workspaceCount()
+            : (m_activeWorkspace + workspaceCount() - 1) % workspaceCount();
         moveViewToWorkspace(target);
     }
 }
@@ -1378,6 +1395,92 @@ std::string Server::ipcSettings(const std::string& args) {
 }
 
 // ============================================================================
+// Declarative configuration (config.hv statements, applied live)
+// ============================================================================
+
+void Server::setGaps(int px) {
+    if (px < 0) px = 0;
+    if (px > 200) px = 200;
+    Layout::setGaps(px);
+    LOG_INFO("[Config] gaps -> %d (tiling enabled)", px);
+    // Gaps are a tiling concept: declaring them opts the workspaces into
+    // tiling (tiling is opt-in otherwise; default placement is cascade).
+    for (uint32_t ws = 0; ws < m_workspaceCount; ws++) {
+        if (m_workspaces[ws] && !m_workspaces[ws]->isTilingEnabled())
+            m_workspaces[ws]->setTilingEnabled(true);
+        arrangeWorkspace(ws);
+    }
+}
+
+void Server::setBorderWidth(int px) {
+    if (px < 0) px = 0;
+    if (px > 40) px = 40;
+    DecorationTheme::BORDER_WIDTH = px;
+    LOG_INFO("[Config] border_size -> %d", px);
+    // Decorations redraw from the theme each pass; nothing to invalidate.
+}
+
+void Server::addFloatingRule(const std::string& appId) {
+    if (appId.empty()) return;
+    auto* mgr = static_cast<WindowGroupManager*>(m_windowGroupManager);
+    if (!mgr) {
+        LOG_WARN("[Config] floating_rule: window group manager not up yet");
+        return;
+    }
+    WindowRule rule;
+    rule.appId = appId;
+    rule.floating = true;
+    mgr->addWindowRule(rule);
+}
+
+void Server::setDefaultLayout(const std::string& name) {
+    if (name.empty()) return;
+    m_defaultLayout = name;
+    // The custom-layouts plugin owns the alternative arrangements; route
+    // through the plugin-command path so it applies its own state.
+    if (name != "master")
+        m_pluginManager.pluginCommand("custom_layouts", "layout", name);
+    LOG_INFO("[Config] default_layout -> %s", name.c_str());
+}
+
+void Server::setWorkspaceCount(uint32_t n) {
+    if (n < 1) n = 1;
+    if (n > WORKSPACE_COUNT) n = WORKSPACE_COUNT;
+    if (n == m_workspaceCount) return;
+
+    // Shrinking rehomes every view of the removed workspaces into the
+    // last surviving one first - dropping them would strand the windows.
+    if (n < m_workspaceCount) {
+        for (uint32_t ws = n; ws < m_workspaceCount; ws++) {
+            for (auto* view : m_workspaces[ws]->views()) {
+                if (!view) continue;
+                moveViewToWorkspace(view, n - 1);
+            }
+        }
+    }
+    m_workspaceCount = n;
+    if (m_activeWorkspace >= n) {
+        setActiveWorkspace(n - 1);
+    }
+    arrangeWorkspace(n - 1);
+    LOG_INFO("[Config] workspace_count -> %u", n);
+}
+
+void Server::addMonitorRule(const std::string& name, int x, int y) {
+    if (name.empty()) return;
+    m_monitorRules[name] = {x, y};
+    LOG_INFO("[Config] monitor rule: %s at (%d,%d)", name.c_str(), x, y);
+}
+
+bool Server::monitorRuleFor(const std::string& name, int* x, int* y) const {
+    auto it = m_monitorRules.find(name);
+    if (it == m_monitorRules.end()) return false;
+    if (x) *x = it->second.first;
+    if (y) *y = it->second.second;
+    return true;
+}
+
+// ============================================================================
 // Animation Control
 // ============================================================================
 
@@ -1456,6 +1559,7 @@ void Server::setViewPosition(View* view, int x, int y, bool animate) {
         state.currentX = x;
         state.currentY = y;
         // Call C layer directly
+        LOG_DEBUG("[VIEW] direct position: (%d,%d) handle=%p", x, y, view->nativeHandle());
         havel_wlr_set_view_position(view->nativeHandle(), x, y);
     }
 }
@@ -2801,7 +2905,7 @@ std::string Server::ipcSetWindowAlwaysOnTop(const std::string& args) {
 
 std::string Server::ipcGetWorkspaces() {
     JsonArray workspaces;
-    for (uint32_t i = 0; i < WORKSPACE_COUNT; ++i) {
+    for (uint32_t i = 0; i < workspaceCount(); ++i) {
         JsonObject ws;
         ws["id"] = i;
         ws["active"] = (i == m_activeWorkspace);
@@ -2823,9 +2927,9 @@ std::string Server::ipcGetWorkspaces() {
 std::string Server::ipcWorkspaceStep(int direction) {
     uint32_t target;
     if (direction > 0) {
-        target = (m_activeWorkspace + 1) % WORKSPACE_COUNT;
+        target = (m_activeWorkspace + 1) % workspaceCount();
     } else {
-        target = (m_activeWorkspace == 0) ? (WORKSPACE_COUNT - 1) : (m_activeWorkspace - 1);
+        target = (m_activeWorkspace == 0) ? (workspaceCount() - 1) : (m_activeWorkspace - 1);
     }
     setActiveWorkspace(target);
     return m_ipcServer->createSuccessResponse("Switched to workspace " + std::to_string(target));
@@ -2834,7 +2938,7 @@ std::string Server::ipcWorkspaceStep(int direction) {
 std::string Server::ipcMoveToWorkspace(const std::string& args) {
     int windowId = m_ipcServer->extractJsonInt(args, "window_id", -1);
     int workspace = m_ipcServer->extractJsonInt(args, "workspace", -1);
-    if (windowId < 0 || workspace < 0 || static_cast<uint32_t>(workspace) >= WORKSPACE_COUNT) {
+    if (windowId < 0 || workspace < 0 || static_cast<uint32_t>(workspace) >= workspaceCount()) {
         return m_ipcServer->createErrorResponse(-5, "Invalid window_id or workspace");
     }
     Window* window = m_coreWindowManager.getWindow(static_cast<uint64_t>(windowId));
@@ -2910,7 +3014,7 @@ std::string Server::ipcGetStats() {
     JsonObject stats;
     stats["uptime_ms"] = (uint64_t)uptimeMs;
     stats["window_count"] = m_coreWindowManager.getAllWindows().size();
-    stats["workspace_count"] = WORKSPACE_COUNT;
+    stats["workspace_count"] = workspaceCount();
     return m_ipcServer->jsonToString(stats);
 }
 

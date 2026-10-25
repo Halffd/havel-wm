@@ -1183,6 +1183,163 @@ GKB
         "get_keybindings lists bindings (count=${GKB_N:-err})"
 fi
 
+# ---------------------------------------------------------------- phase 16: declarative config
+# config.hv statements applied live: workspace_count (with window
+# rehoming on shrink), gaps (pixel-verified window edge), floating_rule
+# (spawn floats), default_layout (plugin routed), border_size.
+if [ "${HAS_EMBED:-0}" -eq 0 ]; then
+    skip "declarative config (no havel embed)"
+else
+    hrun() {
+        python3 - "$SOCK" "$1" <<'HRUN' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"havel_run",
+                       "params":{"source":sys.argv[2]}})+"\n").encode())
+r = json.loads(s.recv(65536)); s.close()
+print("ok" if "error" not in r else json.dumps(r["error"]))
+HRUN
+    }
+    winfield() {
+        python3 - "$SOCK" "$1" "${2:-}" <<'WFIELD' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_windows","params":{}})+"\n").encode())
+r = json.loads(s.recv(65536)); s.close()
+wins = r.get("result", [])
+if isinstance(wins, dict): wins = wins.get("windows", [])
+for w in wins:
+    if "foot" in str(w.get("appId", "")) + str(w.get("title", "")):
+        v = w.get(sys.argv[2], "")
+        print(v if isinstance(v, str) else ("True" if v is True else ("False" if v is False else v)))
+        break
+WFIELD
+    }
+    # tile/unfloat the first foot window (placement is cascade by default)
+    setfloat() {
+        python3 - "$SOCK" "$1" <<'SFLT' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_windows","params":{}})+"\n").encode())
+r = json.loads(s.recv(65536)); s.close()
+wins = r.get("result", [])
+if isinstance(wins, dict): wins = wins.get("windows", [])
+for w in wins:
+    if "foot" in str(w.get("appId", "")) + str(w.get("title", "")):
+        s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"set_floating",
+                               "params":{"id": w["id"], "floating": sys.argv[2] == "true"}})+"\n").encode())
+        s.recv(65536); break
+SFLT
+    }
+
+    # -- workspace_count: 10 -> 5 -> 3 with a window parked on ws 4
+    hrun 'workspace_count(5)' >/dev/null
+    sleep 0.3
+    WSC=$(python3 - "$SOCK" <<'WSC' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_workspaces","params":{}})+"\n").encode())
+r = json.loads(s.recv(65536)); s.close()
+res = r.get("result", {})
+if isinstance(res, dict): res = res.get("workspaces", [])
+print(len(res) if isinstance(res, list) else -1)
+WSC
+)
+    report $([ "$WSC" = "5" ] && echo 0 || echo 1) "workspace_count(5) applied (count=$WSC)"
+
+    # spawn a window, move it to workspace 4 (index), then shrink to 3:
+    # it must rehome to the last surviving workspace (index 2)
+    (WAYLAND_DISPLAY=wayland-0 timeout 40 foot -e sh -c 'sleep 30' > /dev/null 2>&1 &)
+    sleep 1.5
+    FOOT_ID=$(winfield id)
+    python3 - "$SOCK" "$FOOT_ID" <<'MVS' >/dev/null 2>&1
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"move_to_workspace",
+                       "params":{"window_id": int(sys.argv[2]), "workspace": 4}})+"\n").encode())
+s.recv(65536)
+MVS
+    sleep 0.5
+    WS4=$(winfield workspace)
+    report $([ "$WS4" = "4" ] && echo 0 || echo 1) "window on workspace 4 (ws=$WS4)"
+    hrun 'workspace_count(3)' >/dev/null
+    sleep 0.5
+    WS_AFTER=$(winfield workspace)
+    report $([ "$WS_AFTER" = "2" ] && echo 0 || echo 1) \
+        "shrinking rehomes windows (ws=$WS_AFTER, want 2)"
+    hrun 'workspace(0)' >/dev/null
+    hrun 'workspace_count(10)' >/dev/null
+
+    # -- gaps: a fresh foot on the active workspace, tiled, edge tracked.
+    # Own app-id: an earlier phase's foot would match a generic search and
+    # the arrange would land on the wrong workspace.
+    (WAYLAND_DISPLAY=wayland-0 timeout 60 foot -a harness_gaps -e sh -c 'sleep 55' > /dev/null 2>&1 &)
+    sleep 2
+    setfloat_harness() {
+        python3 - "$SOCK" "$1" <<'SFLG' 2>/dev/null
+import socket, json, sys
+# ONE connection for the query and the mutation: fresh connections reuse
+# fd numbers and a stale event-loop source race resets the second one.
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+def rpc(m, p):
+    s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":m,"params":p})+"\n").encode())
+    return json.loads(s.recv(65536))
+r = rpc("get_windows", {})
+wins = r.get("result", [])
+if isinstance(wins, dict): wins = wins.get("windows", [])
+for w in wins:
+    if w.get("appId") == "harness_gaps":
+        rpc("set_floating", {"id": w["id"], "floating": sys.argv[2] == "true"})
+        break
+s.close()
+SFLG
+    }
+    setfloat_harness false
+    hrun 'gaps(60)' >/dev/null
+    sleep 1
+    WAYLAND_DISPLAY=wayland-0 grim /tmp/opencode/gaps60.png 2>/dev/null
+    hrun 'gaps(10)' >/dev/null
+    sleep 1
+    WAYLAND_DISPLAY=wayland-0 grim /tmp/opencode/gaps10.png 2>/dev/null
+    GAPX=$(python3 - <<'GAPX' 2>/dev/null
+from PIL import Image
+def edge(p):
+    im = Image.open(p).convert('RGB'); px = im.load()
+    for x in range(0, 400):
+        c = px[x, 400]
+        if abs(c[0]-25) > 4 or abs(c[1]-25) > 4 or abs(c[2]-38) > 4:
+            return x
+    return -1
+a = edge('/tmp/opencode/gaps60.png'); b = edge('/tmp/opencode/gaps10.png')
+print(a, b)
+GAPX
+)
+    G60=$(echo "$GAPX" | awk '{print $1}'); G10=$(echo "$GAPX" | awk '{print $2}')
+    report $([ "${G60:-0}" -ge 50 ] && [ "${G60:-0}" -le 80 ] && [ "${G10:-0}" -le 30 ] && echo 0 || echo 1) \
+        "gaps move the tiled edge (g60=${G60:-err} g10=${G10:-err})"
+    rm -f /tmp/opencode/gaps60.png /tmp/opencode/gaps10.png
+
+    # -- floating_rule: a foot with the ruled app-id must spawn floating
+    hrun 'floating_rule("harness_float")' >/dev/null
+    (WAYLAND_DISPLAY=wayland-0 timeout 30 foot -a harness_float -e sh -c 'sleep 20' > /dev/null 2>&1 &)
+    sleep 1.5
+    FLT=$(winfield floating)
+    report $([ "$FLT" = "True" ] && echo 0 || echo 1) "floating_rule floats the match (floating=$FLT)"
+
+    # -- default_layout + border_size reach their handlers
+    hrun 'default_layout("grid")' >/dev/null
+    report $(wait_for_log "Layout: grid" 5 && echo 0 || echo 1) "default_layout routed to the plugin"
+    hrun 'border_size(4)' >/dev/null
+    report $(wait_for_log "border_size -> 4" 5 && echo 0 || echo 1) "border_size applied"
+    hrun 'border_size(1)' >/dev/null
+fi
+
 # ---------------------------------------------------------------- teardown
 kill "$FOOT_PID" 2>/dev/null; FOOT_PID=""
 report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "zero crashes across all phases"

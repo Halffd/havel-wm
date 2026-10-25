@@ -130,6 +130,22 @@ private:
         applyLayout();
     }
 
+    // Command surface for default_layout() in config.hv: accepts the
+    // names the plugin's own keybindings use.
+    bool onCommand(const std::string& cmd, const std::string& arg) override {
+        if (cmd != "layout") return false;
+        if (arg == "master" || arg == "master-stack") setLayout(Layout::MASTER_STACK);
+        else if (arg == "horizontal") setLayout(Layout::HORIZONTAL);
+        else if (arg == "vertical") setLayout(Layout::VERTICAL);
+        else if (arg == "grid") setLayout(Layout::GRID);
+        else if (arg == "monocle") setLayout(Layout::MONOCLE);
+        else {
+            printf("[CustomLayoutsPlugin] unknown layout '%s'\n", arg.c_str());
+            return false;
+        }
+        return true;
+    }
+
     void increaseMasterCount() {
         m_masterCount++;
         printf("[CustomLayoutsPlugin] Master count: %d\n", m_masterCount);

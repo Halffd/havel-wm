@@ -931,14 +931,18 @@ static void xdg_view_handle_unmap(struct wl_listener *listener, void *data) {
 
 static void xdg_handle_app_id(struct wl_listener *listener, void *data) {
     struct havel_xdg_view *view = wl_container_of(listener, view, set_app_id);
-    
+
     if (!view || !view->cpp_view || !view->xdg_surface->toplevel) return;
-    
+
     const char *app_id = view->xdg_surface->toplevel->app_id;
     LOG_INFO("[XDG] App ID set: %s", app_id ? app_id : "(null)");
-    
-    // C++ layer owns View metadata - it will query via CompositorAPI
-    // The View object stores appId, we just need to ensure it's available
+
+    // Propagate into the C++ layer (View + core Window projection).
+    // This used to be a log-only stub: window rules, app-id matched
+    // IPC queries and the shell projection all saw an empty app id.
+    if (app_id && view->server && view->server->cpp_server) {
+        havel_cpp_on_view_app_id_changed(view->server->cpp_server, view->cpp_view, app_id);
+    }
 }
 
 static void xdg_handle_title(struct wl_listener *listener, void *data) {
@@ -2178,6 +2182,15 @@ static void server_new_output(struct wl_listener *listener, void *data) {
         // coordinate off by 1280).
         wlr_output_layout_add(server->output_layout, wlr_output, 0, 0);
     } else {
+        // Declarative monitor rule wins over the automatic side-by-side
+        // placement (config.hv: monitor_rule("HDMI-A-1", 0, 0)).
+        int rx = 0, ry = 0;
+        if (havel_cpp_monitor_rule_lookup(server->cpp_server, wlr_output->name,
+                                          &rx, &ry)) {
+            wlr_output_layout_add(server->output_layout, wlr_output, rx, ry);
+            LOG_INFO("[OUTPUT] %s placed at (%d,%d) by monitor rule",
+                     wlr_output->name, rx, ry);
+        } else {
         // Second (or subsequent) monitor - position to the right of the
         // previous one.
         //
@@ -2205,6 +2218,7 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 
             LOG_INFO("[OUTPUT] Positioned %s at (%d,%d) to the right of %s",
                      wlr_output->name, x, y, prev->output->name);
+        }
         }
     }
 

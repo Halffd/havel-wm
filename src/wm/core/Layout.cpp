@@ -1,6 +1,9 @@
 #include <wm/Layout.hpp>
+#include <Logger.h>
 
 namespace havel {
+
+int Layout::s_gaps = 10;
 
 void Layout::arrangeMasterStack(const std::vector<View*>& views,
                                 const Rect& availableRect) {
@@ -16,11 +19,13 @@ void Layout::arrangeMasterStack(const std::vector<View*>& views,
         }
     }
 
+    LOG_DEBUG("[Layout] master-stack: %zu of %zu views mapped (gap %d)",
+              mappedViews.size(), views.size(), s_gaps);
     if (mappedViews.empty()) {
         return;
     }
 
-    const int gap = DEFAULT_GAP;
+    const int gap = s_gaps;
     Rect inner = {
         availableRect.x + gap,
         availableRect.y + gap,

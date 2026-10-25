@@ -19,8 +19,12 @@ public:
     static void arrangeMasterStack(const std::vector<View*>& views,
                                    const Rect& availableRect);
 
+    // Declarative configuration: gap between tiled windows and the edges.
+    static void setGaps(int px) { s_gaps = px < 0 ? 0 : px; }
+    static int gaps() { return s_gaps; }
+
 private:
-    static constexpr int DEFAULT_GAP = 10;
+    static int s_gaps;
     static constexpr int MASTER_RATIO_PERCENT = 60;
 };
 

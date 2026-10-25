@@ -590,7 +590,8 @@ void PluginManager::setActiveWorkspace(uint32_t id) {
 }
 
 uint32_t PluginManager::getWorkspaceCount() {
-    return WORKSPACE_COUNT;
+    if (!m_server) return WORKSPACE_COUNT;
+    return static_cast<Server*>(m_server)->workspaceCount();
 }
 
 void PluginManager::setViewPosition(View* view, int x, int y) {

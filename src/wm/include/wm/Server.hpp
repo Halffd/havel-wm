@@ -60,6 +60,7 @@ public:
     // Title change from the C bridge: syncs the core Window (which the
     // shell projection reads) and re-broadcasts to IPC listeners.
     void onViewTitleChanged(View* view, const std::string& title);
+    void onViewAppIdChanged(View* view, const std::string& appId);
     void onViewDestroyed(View* view);
 
     // Input handling - returns true if consumed by compositor
@@ -275,6 +276,16 @@ public:
     const std::map<std::string, std::string>& settingsAll() const { return m_settings; }
     void settingsLoad();  // read + apply persisted settings (boot)
     std::string ipcSettings(const std::string& args);
+
+    // Declarative configuration (config.hv statements, applied live)
+    void setGaps(int px);                        // tiling gap in px
+    void setBorderWidth(int px);                 // decoration border in px
+    void addFloatingRule(const std::string& appId);
+    void setDefaultLayout(const std::string& name);
+    void setWorkspaceCount(uint32_t n);          // 1..WORKSPACE_COUNT
+    uint32_t workspaceCount() const { return m_workspaceCount; }
+    void addMonitorRule(const std::string& name, int x, int y);
+    bool monitorRuleFor(const std::string& name, int* x, int* y) const;
     // Window group management
     void* windowGroupManager() const { return m_windowGroupManager; }
     void setWindowGroupManager(void* manager) { m_windowGroupManager = manager; }
@@ -400,6 +411,11 @@ private:
     ZoomConfig m_zoomConfig;
     std::map<int, ZoomTargets> m_zoomTargets;
     std::map<std::string, std::string> m_settings;  // persisted settings store
+
+    // Declarative configuration state
+    uint32_t m_workspaceCount = WORKSPACE_COUNT;
+    std::map<std::string, std::pair<int, int>> m_monitorRules;  // output name -> x,y
+    std::string m_defaultLayout = "master";
     struct ZoomCaptureRequest {
         bool pending = false;
         float cx = 0, cy = 0;

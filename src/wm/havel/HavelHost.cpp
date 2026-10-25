@@ -358,6 +358,73 @@ static int hf_reload_config(HavelState* H, void*) {
     return HAVEL_OK;
 }
 
+// ---------------------------------------------------------------------------
+// Declarative configuration statements (all applied live)
+// ---------------------------------------------------------------------------
+
+// gaps(px): tiling gap between and around tiled windows.
+static int hf_gaps(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    if (ctx && ctx->server) ctx->server->setGaps((int)arg_int(H, 0));
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// border_size(px): decoration border thickness.
+static int hf_border_size(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    if (ctx && ctx->server) ctx->server->setBorderWidth((int)arg_int(H, 0));
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// animations(bool): enable/disable view animations.
+static int hf_animations(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    if (ctx && ctx->server) ctx->server->setAnimationsEnabled(havel_toboolean(H, 0) != 0);
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// floating_rule(app_id): windows with this app id spawn floating.
+static int hf_floating_rule(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    const char* id = arg_str(H, 0);
+    if (ctx && ctx->server && id) ctx->server->addFloatingRule(id);
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// default_layout(name): "master" (built-in) or a custom-layouts name
+// (grid, horizontal, vertical) routed to the plugin.
+static int hf_default_layout(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    const char* name = arg_str(H, 0);
+    if (ctx && ctx->server && name) ctx->server->setDefaultLayout(name);
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// workspace_count(n): 1..10 visible workspaces. Shrinking rehomes the
+// windows of removed workspaces into the last surviving one.
+static int hf_workspace_count(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    if (ctx && ctx->server) ctx->server->setWorkspaceCount((uint32_t)arg_int(H, 0));
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// monitor_rule(name, x, y): pin an output to a layout position instead
+// of the automatic side-by-side placement.
+static int hf_monitor_rule(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    const char* name = arg_str(H, 0);
+    if (ctx && ctx->server && name)
+        ctx->server->addMonitorRule(name, (int)arg_int(H, 1), (int)arg_int(H, 2));
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
 // plugin_config(plugin, key, value): set a plugin setting from config.hv
 // and apply it live. Values are strings; numbers/bools are converted
 // here so `plugin_config("alt_tab", "columns", 4)` works.
@@ -628,6 +695,20 @@ void HavelHost::registerHostFunctions() {
     havel_pushcfunction_with_ctx(m_H, hf_settings, nullptr, "settings");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_reload_config, nullptr, "reload_config");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_gaps, nullptr, "gaps");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_border_size, nullptr, "border_size");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_animations, nullptr, "animations");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_floating_rule, nullptr, "floating_rule");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_default_layout, nullptr, "default_layout");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_workspace_count, nullptr, "workspace_count");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_monitor_rule, nullptr, "monitor_rule");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_get_workspace, nullptr, "get_workspace");
     havel_pop(m_H, 1);

@@ -54,6 +54,7 @@ void havel_cpp_on_view_unmapped(struct havel_cpp_server* server, void* c_view);
 // XDG title change: propagates the new toplevel title into the C++ layer
 // (View + core Window) and re-broadcasts to IPC subscribers.
 void havel_cpp_on_view_title_changed(struct havel_cpp_server* server, void* c_view, const char* title);
+void havel_cpp_on_view_app_id_changed(struct havel_cpp_server* server, void* c_view, const char* app_id);
 void havel_cpp_on_view_destroyed(struct havel_cpp_server* server, void* c_view);
 
 // Input events - returns true if consumed by compositor
@@ -100,6 +101,10 @@ bool havel_cpp_zoom_take_request(struct havel_cpp_server* server, int output_ind
 // Copies the pixels; caller frees.
 void havel_cpp_zoom_feed(struct havel_cpp_server* server, int output_index,
                           const uint32_t* pixels, int w, int h, float src_x, float src_y);
+
+// Declarative monitor rule lookup (config.hv monitor_rule statements).
+bool havel_cpp_monitor_rule_lookup(struct havel_cpp_server* server, const char* name,
+                                    int* x, int* y);
 
 // Application spawning (for App Launcher): fork+exec, no shell
 void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command);

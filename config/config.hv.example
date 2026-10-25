@@ -25,6 +25,30 @@ cursor_mode("auto")
 // HAVEL_PLACEMENT=center  (env var, not Havel — read at startup)
 
 // ---------------------------------------------------------------------
+// Declarative configuration (all applied live, also callable later
+// through havel_run / the repl)
+//
+//   gaps(px)               tiling gap; declaring it enables tiling
+//   border_size(px)        decoration border thickness
+//   animations(bool)       view animations on/off
+//   workspace_count(n)     1..10 visible workspaces (shrinking rehomes
+//                          the windows of removed workspaces)
+//   default_layout(name)   "master" or a custom-layouts name
+//                          (grid, horizontal, vertical, monocle)
+//   floating_rule(app_id)  windows with this app id spawn floating
+//   monitor_rule(name,x,y) pin an output to a layout position instead
+//                          of the automatic side-by-side placement
+// ---------------------------------------------------------------------
+
+gaps(10)
+border_size(1)
+animations(true)
+workspace_count(10)
+// default_layout("grid")
+// floating_rule("pavucontrol")
+// monitor_rule("HDMI-A-1", 0, 0)
+
+// ---------------------------------------------------------------------
 // Plugin settings
 //
 // plugin_config(plugin, key, value) writes the setting and applies it to

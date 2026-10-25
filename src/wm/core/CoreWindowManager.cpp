@@ -1,5 +1,6 @@
 #include "CoreWindowManager.hpp"
 #include <wm/Server.hpp>
+#include <Logger.h>
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cstdio>
@@ -324,7 +325,16 @@ void CoreWindowManager::setWindowGeometry(Window* window, int x, int y, int w, i
 
 void CoreWindowManager::setFloating(Window* window, bool floating) {
     if (!window) return;
+    LOG_INFO("[WindowManager] setFloating id=%lu -> %d (workspace %u)",
+             (unsigned long)window->id(), floating ? 1 : 0, window->workspace());
     window->setFloating(floating);
+    // Re-tile: un-floating joins the tiling layout, floating leaves it -
+    // without the arrange the window keeps its old (cascade) position and
+    // gap/geometry changes never reach it (observed: set_floating(false)
+    // left the window frozen at its floating spot).
+    if (m_server) {
+        m_server->arrangeWorkspace(window->workspace());
+    }
 }
 
 void CoreWindowManager::toggleFloating(Window* window) {

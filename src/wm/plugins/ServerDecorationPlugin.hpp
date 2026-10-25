@@ -16,7 +16,9 @@ namespace havel {
 // deco_theme_t pattern — a single theme object the renderer reads).
 struct DecorationTheme {
     static constexpr int TITLE_BAR_HEIGHT = 32;
-    static constexpr int BORDER_WIDTH = 1;
+    // Runtime-configurable (declarative border_size()); a plain constant
+    // would bake the value into every draw call site.
+    static inline int BORDER_WIDTH = 1;
     static constexpr int CORNER_RADIUS = 8;
 
     static constexpr int SHADOW_OFFSET_X = 4;

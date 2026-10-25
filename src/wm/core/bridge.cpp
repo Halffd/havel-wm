@@ -147,6 +147,12 @@ void havel_cpp_on_view_title_changed(struct havel_cpp_server* server, void* c_vi
     server->server->onViewTitleChanged(view, std::string(title));
 }
 
+void havel_cpp_on_view_app_id_changed(struct havel_cpp_server* server, void* c_view, const char* app_id) {
+    if (!server || !c_view || !app_id) return;
+    auto* view = static_cast<havel::View*>(c_view);
+    server->server->onViewAppIdChanged(view, std::string(app_id));
+}
+
 void havel_cpp_on_view_destroyed(struct havel_cpp_server* server, void* c_view) {
     if (!server || !c_view) return;
     auto* view = static_cast<havel::View*>(c_view);
@@ -214,6 +220,14 @@ bool havel_cpp_zoom_take_request(struct havel_cpp_server* server, int output_ind
                                   float* cx, float* cy, int* w, int* h) {
     if (!server || !server->server) return false;
     return server->server->zoomTakeCaptureRequest(output_index, cx, cy, w, h);
+}
+
+// Declarative monitor rule lookup: does config.hv pin this output name
+// to a position? Returns false when no rule exists.
+bool havel_cpp_monitor_rule_lookup(struct havel_cpp_server* server, const char* name,
+                                    int* x, int* y) {
+    if (!server || !server->server || !name) return false;
+    return server->server->monitorRuleFor(name, x, y);
 }
 
 void havel_cpp_zoom_feed(struct havel_cpp_server* server, int output_index,
