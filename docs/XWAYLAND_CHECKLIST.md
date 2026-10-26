@@ -58,7 +58,7 @@ evdev/pc105/us.
 | # | Item | Code path | How to verify | Status |
 |---|------|-----------|---------------|--------|
 | 4.1 | Click-to-focus on X surfaces: hit test falls through to the xwayland branch, `wlr_xwayland_surface_activate`, raise, keyboard enter | `wlr_bridge.c:2892-2900` | click an X window; it takes keyboard | needs real pointer / inject via warp_cursor+click_pointer IPC |
-| 4.2 | Keyboard focus actually delivered to X (xwayland shares the seat via wlroots' Xwayland seat glue) — **`wlr_xwayland_set_seat` is never called in wlr_bridge.c** | grep returns nothing; wlroots 0.20 requires `wlr_xwayland_set_seat(xwayland, seat)` for key events to reach X clients | type into a focused X client | **POTENTIAL GAP — wlroots 0.20 docs say the seat must be set; without it X clients may never receive key events. Verify on DRM; if broken, one-line fix after seat creation** |
+| 4.2 | Keyboard focus delivered to X via `wlr_xwayland_set_seat` — **FIXED this session**: the seat is now wired at the first backend input device and again at the first virtual-keyboard arrival (the path that fires under headless; the backend exposes zero input devices there), idempotent via `server->xwayland_seat_set` | boot log: `[XWayland] seat wired for X key events (virtual keyboard)` — observed in headless smoke | type into a focused X client on DRM — delivery to a real client still needs a live X app | **wired + smoke-verified headless; client-level delivery UNVERIFIED (no X clients installed)** |
 | 4.3 | Screen lock gates input for X clients too (the C-side lock gates run before any seat notify) | `wlr_bridge.c:2780-2785` (button), `2903-2906` (axis), `2705-2711` (motion) — fixed in 90c20bf | lock screen; X client receives nothing | fixed this session; headless-verified logic, X-client runtime UNVERIFIED |
 | 4.4 | `close_view` on an X window sends `wlr_xwayland_surface_close` (WM_DELETE) | `wlr_bridge.c:621-625` (kind-tagged dispatch) | IPC `close` on an X window; client exits cleanly (not killed) | UNVERIFIED — needs X client |
 | 4.5 | App-id matching / window rules see X windows' class as app id | `wlr_bridge.c:1448-1449` (`xsurface->class` passed as appId into `createXdgView`) | `floating_rule("some-x-class")` matches an X client | covered by 2.2 (`get_windows` app field) |
@@ -85,10 +85,10 @@ is never miscast (the old unconditional cast crashed on XWayland).
 
 | # | Gap | Evidence |
 |---|-----|----------|
-| 6.1 | `wlr_xwayland_set_seat` never called — key delivery to X clients depends on wlroots' implicit seat pickup; if typing into X windows does nothing, this is the first thing to fix | `grep -n "wlr_xwayland_set_seat" wlr_bridge.c src/` → no matches |
-| 6.2 | No `set_title`/`set_app_id`/`request_fullscreen`/`request_maximize` listeners for XWayland surfaces (only `request_configure`, `associate`, `dissociate`, `destroy`) — title changes and client-initiated maximize/fullscreen requests from X clients are ignored | wlr_bridge.c:1422-1433 (four listeners only); XDG has all of them at 1217-1242 |
-| 6.3 | XWayland DnD (`src/wm/core/XWaylandDnD.cpp`) is a WIP stub — **excluded from the build** (CMakeLists.txt:179-181) and `handleXWaylandDnDEvent` has no caller; Xdnd messages cannot reach it | CMakeLists.txt:179 comment "XWaylandDnD - WIP, needs wlroots integration" |
-| 6.4 | `createXwaylandView` (Server.cpp:240) has **no caller** — xwayland views actually route through `createXdgView` with the X class as appId (wlr_bridge.c:1449); the dedicated function is dead code per AGENTS.md | grep callers: none |
+| 6.1 | ~~`wlr_xwayland_set_seat` never called~~ **FIXED (this session)**: wired at first backend input device AND at first virtual-keyboard arrival (headless has zero backend devices, so the virtual-keyboard hook is the one that fires there). Idempotent via `server->xwayland_seat_set`. | wlr_bridge.c `server_new_input` + `server_new_virtual_keyboard`; boot log: "[XWayland] seat wired for X key events (virtual keyboard)" — **observed in headless smoke** |
+| 6.2 | ~~Missing set_title/set_class/request_fullscreen/request_maximize/request_activate listeners~~ **FIXED (this session)**: all five added with XDG-equivalent handlers (title/class propagate to the C++ View + window model; fullscreen forwards through `wlr_xwayland_surface_set_fullscreen`; maximize configures to full output size; activate raises + activates). Removed again in the destroy path. | wlr_bridge.c `xwayland_handle_*` handlers + registration in `server_new_xwayland_surface` + `wl_list_remove` in `xwayland_view_handle_destroy` |
+| 6.3 | XWayland DnD (`src/wm/core/XWaylandDnD.cpp`) is a WIP stub — **excluded from the build** (CMakeLists.txt:179-181) and `handleXWaylandDnDEvent` has no caller; Xdnd messages cannot reach it | CMakeLists.txt:179 comment "XWaylandDnD - WIP, needs wlroots integration" — still open |
+| 6.4 | ~~`createXwaylandView` dead code~~ **FIXED (this session)**: deleted from Server.cpp and Server.hpp; a comment at the former declaration site records that XWayland surfaces route through `createXdgView` with the X class as appId. | git grep createXwaylandView → only the explanatory comment |
 | 6.5 | Scene-graph xwayland views (`scene_view_create_xwayland`) hardcode float geometry 640x480 at (150,150) — cosmetic; the real layout comes from the wlr scene tree | wlr_bridge.c:3986-3989 |
 | 6.6 | No test in the harness covers XWayland — all items above marked VERIFIED are code-reading verified; the harness runs zero X clients | tests/runtime/run_runtime_tests.sh (no xwayland phase) |
 
@@ -122,6 +122,10 @@ tr '\0' '\n' < /proc/$(pgrep -x havel-wm)/environ | grep DISPLAY   # 1.2
   4.3 lock gates, 5.9 reparent) — compile + harness-verified, X-client
   runtime pending
 - 2 design-verified (associate ordering 2.4, eager server 1.1)
-- 6 documented gaps, of which 6.1 (seat) and 6.4 (dead function) are
-  actionable now; 6.2 (missing listeners) is the largest functional
-  hole after the seat question
+- Of the 6 gaps found by this checklist, 3 are now FIXED (6.1 seat
+  wiring — headless-smoked, 6.2 five missing listeners, 6.4 dead
+  createXwaylandView); 6.3 (DnD stub) and 6.6 (no harness phase)
+  remain open; 6.5 is cosmetic
+- Runtime harness after the fixes: 71 passed, 0 failed, 0 skipped
+- Client-level items remain honestly UNVERIFIED: no X test clients in
+  this environment (xeyes/xclock/xterm absent)

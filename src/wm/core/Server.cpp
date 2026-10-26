@@ -237,27 +237,7 @@ View* Server::createXdgView(void* c_view, uint32_t workspace_id, const char* app
     return view;
 }
 
-View* Server::createXwaylandView(void* xwaylandSurface) {
-    auto* view = new View();
-    view->setWorkspaceId(m_activeWorkspace);
-    view->setNativeHandle(xwaylandSurface);
-    view->setFloating(true); // Xwayland defaults to floating
-
-    auto* ws = m_workspaces[m_activeWorkspace].get();
-    if (ws) {
-        ws->addView(view);
-    }
-
-    // Register with window manager for taskbar integration
-    uint64_t windowId = m_windowManager.registerWindow(view, "xwayland", "XWayland Window");
-    view->setWindowId(windowId);
-
-    LOG_DEBUG("Created XWayland view, workspace=%u windowId=%lu", m_activeWorkspace, windowId);
-    return view;
-}
-
 void Server::onViewMapped(View* view) {
-    if (!view) return;
 
     LOG_INFO("[Server] onViewMapped: %p (workspace=%u, windowId=%lu)",
              (void*)view, view->workspaceId(), view->windowId());

@@ -194,6 +194,8 @@ struct havel_wlr_server {
 
     struct wlr_xwayland *xwayland;
     struct wl_listener new_xwayland_surface;
+    bool xwayland_seat_set;  // seat wired after creation (xwayland is
+                             // created before the seat in init)
 
     // Layer-shell v1 (for waybar, notifications, etc.)
     struct wlr_layer_shell_v1 *layer_shell;
@@ -446,6 +448,11 @@ struct havel_xwayland_view {
     int pending_cascade_x;  // -1 while unset (no cascade)
     int pending_cascade_y;
     struct wl_listener request_configure;  // xsurface->events.request_configure
+    struct wl_listener set_title;          // xsurface->events.set_title
+    struct wl_listener set_class;          // xsurface->events.set_class
+    struct wl_listener request_fullscreen; // xsurface->events.request_fullscreen
+    struct wl_listener request_maximize;   // xsurface->events.request_maximize
+    struct wl_listener request_activate;   // xsurface->events.request_activate
 };
 
 // Forward function declarations
@@ -1300,6 +1307,74 @@ static void server_new_xdg_surface(struct wl_listener *listener, void *data) {
 // XWayland View Handlers
 // ============================================================================
 
+// X-surface title/class changes: propagate into the C++ View and the
+// window model, same as the XDG set_title/set_app_id handlers. Without
+// these, an X client renaming its window left the taskbar, switcher and
+// get_windows stuck with the creation-time title.
+static void xwayland_handle_title(struct wl_listener *listener, void *data) {
+    struct havel_xwayland_view *view = wl_container_of(listener, view, set_title);
+    (void)data;
+    if (!view || !view->cpp_view) return;
+    const char *title = view->xsurface ? view->xsurface->title : NULL;
+    LOG_INFO("[XWayland] Title set: %s", title ? title : "(null)");
+    if (title && view->server && view->server->cpp_server) {
+        havel_cpp_on_view_title_changed(view->server->cpp_server, view->cpp_view, title);
+    }
+}
+
+static void xwayland_handle_class(struct wl_listener *listener, void *data) {
+    struct havel_xwayland_view *view = wl_container_of(listener, view, set_class);
+    (void)data;
+    if (!view || !view->cpp_view) return;
+    const char *class_name = view->xsurface ? view->xsurface->class : NULL;
+    LOG_INFO("[XWayland] Class set: %s", class_name ? class_name : "(null)");
+    // The X class plays the app-id role for window rules and matching.
+    if (class_name && view->server && view->server->cpp_server) {
+        havel_cpp_on_view_app_id_changed(view->server->cpp_server, view->cpp_view, class_name);
+    }
+}
+
+// Client-initiated fullscreen: forward through the same API the IPC
+// path uses so the X window and the scene node agree.
+static void xwayland_handle_request_fullscreen(struct wl_listener *listener, void *data) {
+    struct havel_xwayland_view *view = wl_container_of(listener, view, request_fullscreen);
+    (void)data;
+    if (!view || !view->xsurface) return;
+    LOG_INFO("[XWayland] Fullscreen request for %p", (void*)view);
+    wlr_xwayland_surface_set_fullscreen(view->xsurface, view->xsurface->fullscreen);
+}
+
+// Client-initiated maximize: X has no server-side maximized state, so
+// honor it with a full-output configure (the client keeps its restore
+// geometry), same contract as the XDG maximize handler.
+static void xwayland_handle_request_maximize(struct wl_listener *listener, void *data) {
+    struct havel_xwayland_view *view = wl_container_of(listener, view, request_maximize);
+    (void)data;
+    if (!view || !view->xsurface) return;
+    LOG_INFO("[XWayland] Maximize request for %p", (void*)view);
+    struct havel_output *output = NULL;
+    if (!wl_list_empty(&view->server->outputs)) {
+        struct wl_list *next = view->server->outputs.next;
+        output = wl_container_of(next, output, link);
+    }
+    if (output && output->output) {
+        wlr_xwayland_surface_configure(view->xsurface, view->xsurface->x,
+                                       view->xsurface->y,
+                                       output->output->width,
+                                       output->output->height);
+    }
+}
+
+// _NET_ACTIVE_WINDOW: focus + raise, mirroring the click path.
+static void xwayland_handle_request_activate(struct wl_listener *listener, void *data) {
+    struct havel_xwayland_view *view = wl_container_of(listener, view, request_activate);
+    (void)data;
+    if (!view || !view->xsurface || !view->scene_tree) return;
+    LOG_INFO("[XWayland] Activate request for %p", (void*)view);
+    wlr_xwayland_surface_activate(view->xsurface, true);
+    wlr_scene_node_raise_to_top(&view->scene_tree->node);
+}
+
 static void xwayland_view_handle_destroy(struct wl_listener *listener, void *data) {
     struct havel_xwayland_view *view = wl_container_of(listener, view, destroy);
 
@@ -1316,6 +1391,11 @@ static void xwayland_view_handle_destroy(struct wl_listener *listener, void *dat
     wl_list_remove(&view->associate.link);
     wl_list_remove(&view->dissociate.link);
     wl_list_remove(&view->request_configure.link);
+    wl_list_remove(&view->set_title.link);
+    wl_list_remove(&view->set_class.link);
+    wl_list_remove(&view->request_fullscreen.link);
+    wl_list_remove(&view->request_maximize.link);
+    wl_list_remove(&view->request_activate.link);
 
     // Notify C++ layer - C++ destroys View object
     // DO NOT access view-> members after this point!
@@ -1427,6 +1507,21 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
     wl_signal_add(&xsurface->events.request_configure, &view->request_configure);
     view->pending_cascade_x = -1;
     view->pending_cascade_y = -1;
+
+    // The X-side twins of the XDG listeners: title/class changes and
+    // client-initiated fullscreen/maximize/activate. Without these the
+    // window model never heard about X renames and X clients could not
+    // fullscreen themselves.
+    view->set_title.notify = xwayland_handle_title;
+    wl_signal_add(&xsurface->events.set_title, &view->set_title);
+    view->set_class.notify = xwayland_handle_class;
+    wl_signal_add(&xsurface->events.set_class, &view->set_class);
+    view->request_fullscreen.notify = xwayland_handle_request_fullscreen;
+    wl_signal_add(&xsurface->events.request_fullscreen, &view->request_fullscreen);
+    view->request_maximize.notify = xwayland_handle_request_maximize;
+    wl_signal_add(&xsurface->events.request_maximize, &view->request_maximize);
+    view->request_activate.notify = xwayland_handle_request_activate;
+    wl_signal_add(&xsurface->events.request_activate, &view->request_activate);
 
     // Apply geometry: only when the X client requested a specific
     // position (not 0,0 and not the -1 sentinel). The cascade spawn
@@ -2641,6 +2736,16 @@ static void server_new_virtual_keyboard(struct wl_listener *listener, void *data
     // the keyboard->events.key signal fires regardless. Attach through
     // the same path as physical keyboards.
     server_new_keyboard(server, device);
+
+    // A virtual keyboard counts as a seat input device too - wire the
+    // xwayland seat here as well: the headless backend exposes zero
+    // backend input devices, so server_new_input never fires there and
+    // X key events would never be routed without this.
+    if (server->xwayland && !server->xwayland_seat_set) {
+        wlr_xwayland_set_seat(server->xwayland, server->seat);
+        server->xwayland_seat_set = true;
+        LOG_INFO("[XWayland] seat wired for X key events (virtual keyboard)");
+    }
 }
 
 static void server_new_input(struct wl_listener *listener, void *data) {
@@ -2690,6 +2795,15 @@ static void server_new_input(struct wl_listener *listener, void *data) {
         caps |= WL_SEAT_CAPABILITY_KEYBOARD;
     }
     wlr_seat_set_capabilities(server->seat, caps);
+
+    // XWayland needs the seat for key events to reach X clients; the
+    // xwayland server is created BEFORE the seat in init, so wire it
+    // here on the first input device (idempotent on later devices).
+    if (server->xwayland && !server->xwayland_seat_set) {
+        wlr_xwayland_set_seat(server->xwayland, server->seat);
+        server->xwayland_seat_set = true;
+        LOG_INFO("[XWayland] seat wired for X key events");
+    }
 }
 
 // ============================================================================

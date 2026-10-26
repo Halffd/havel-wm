@@ -54,7 +54,9 @@ public:
     // View lifecycle (called from C bridge)
     // Returns raw pointer - C++ owns View, C stores opaque handle
     View* createXdgView(void* c_view, uint32_t workspace_id, const char* appId, const char* title);
-    View* createXwaylandView(void* xwaylandSurface);
+    // XWayland surfaces route through createXdgView with the X class as
+    // appId (wlr_bridge.c server_new_xwayland_surface) - no dedicated
+    // factory needed.
     void onViewMapped(View* view);
     void onViewUnmapped(View* view);
     // Title change from the C bridge: syncs the core Window (which the
