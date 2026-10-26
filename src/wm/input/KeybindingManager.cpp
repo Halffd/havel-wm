@@ -43,21 +43,6 @@ void KeybindingManager::unregisterKeybinding(const char* name) {
     }
 }
 
-void KeybindingManager::unregisterByPrefix(const std::string& prefix) {
-    auto it = m_bindings.begin();
-    int removed = 0;
-    while (it != m_bindings.end()) {
-        if (it->name.rfind(prefix, 0) == 0) {
-            LOG_DEBUG("[Keybinding] Unregistered: %s", it->name.c_str());
-            it = m_bindings.erase(it);
-            removed++;
-        } else {
-            ++it;
-        }
-    }
-    LOG_INFO("[Keybinding] Unregistered %d binding(s) with prefix '%s'",
-             removed, prefix.c_str());
-}
 
 void KeybindingManager::unregisterByPrefixSave(const std::string& prefix,
                                                std::vector<Keybinding>* saved) {

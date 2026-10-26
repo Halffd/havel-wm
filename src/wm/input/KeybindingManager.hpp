@@ -41,15 +41,13 @@ public:
     // Unregister a keybinding
     void unregisterKeybinding(const char* name);
 
-    // Unregister every binding whose name starts with the prefix
-    // (config reload drops all "havel:" script bindings before re-running
-    // config.hv, since registerKeybinding refuses duplicate combos)
-    void unregisterByPrefix(const std::string& prefix);
-
-    // Same, but the removed bindings are moved into *saved so a failed
-    // config reload can restore the previous state.
+    // Unregister every binding whose name starts with the prefix, moving the
+    // removed bindings into *saved so a failed config reload can restore the
+    // previous state (config.hv re-runs drop all "havel:" script bindings,
+    // since registerKeybinding refuses duplicate combos).
     void unregisterByPrefixSave(const std::string& prefix,
                                 std::vector<Keybinding>* saved);
+
     
     // Handle key event - returns true if consumed
     bool handleKey(uint32_t keysym, bool pressed, uint32_t modifiers);

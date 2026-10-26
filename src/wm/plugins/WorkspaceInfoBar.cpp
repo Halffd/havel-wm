@@ -84,11 +84,22 @@ public:
         // Remember every output that renders a pass, so the panel is
         // drawn once per monitor. Without this the single bar sat at
         // scene (0,0) with the first output's width and the second
-        // monitor had no taskbar at all.
+        // monitor had no taskbar at all. lastSeenMs lets the draw loop
+        // drop outputs that stop rendering (unplugged monitors).
         CompositorAPI::OutputTarget out = m_api->currentOutputTarget();
+        uint64_t seenMs = nowMs();
         if (out.w > 0 && out.h > 0) {
             m_outputs.resize(std::max(m_outputs.size(), (size_t)out.index + 1));
-            m_outputs[out.index] = out;
+            m_outputs[out.index].out = out;
+            m_outputs[out.index].lastSeenMs = seenMs;
+        }
+        // Prune entries whose output has not rendered a pass recently.
+        for (auto it = m_outputs.begin(); it != m_outputs.end();) {
+            if (it->out.w > 0 && seenMs - it->lastSeenMs > 2000) {
+                it = m_outputs.erase(it);
+            } else {
+                ++it;
+            }
         }
 
         // PERSISTENT tree rebuilt at 1 Hz (clock minute changes at most
@@ -120,7 +131,8 @@ public:
         snprintf(wsStr, sizeof(wsStr), "Workspace %u", currentWs + 1);
 
         size_t drawn = 0;
-        for (const auto& o : m_outputs) {
+        for (const auto& cached : m_outputs) {
+            const auto& o = cached.out;
             if (o.w <= 0 || o.h <= 0) continue;
             drawBar(renderer, o, currentWs, timeStr, timeWidth);
             drawn++;
@@ -166,35 +178,73 @@ public:
         }
     }
 
-    void onMouseButton(uint32_t button, bool pressed, int x, int y) override {
-        if (!m_visible || !pressed || button != 0x110) return;  // left press only
+    bool onMouseButton(uint32_t button, bool pressed, int x, int y) override {
+        if (!m_visible || !pressed || button != 0x110) return false;
         int idx = hitAt(x, y);
-        if (idx < 0 || idx >= (int)m_hits.size()) return;
+        if (idx < 0 || idx >= (int)m_hits.size()) return false;
         const PanelHit& hit = m_hits[idx];
         switch (hit.kind) {
             case HIT_LAUNCHER:
                 m_api->pluginCommand("app_launcher", "open");
                 LOG_INFO("[Panel] launcher button");
-                break;
+                return true;
             case HIT_WORKSPACE:
                 m_api->setActiveWorkspace((uint32_t)hit.index);
                 LOG_INFO("[Panel] workspace %d", hit.index + 1);
                 m_treeDirty = true;
-                break;
+                return true;
             case HIT_WINDOW:
                 if (hit.view) {
                     m_api->focusView((View*)hit.view);
                     LOG_INFO("[Panel] focused: %s", hit.title.c_str());
+                    return true;
                 }
                 break;
             default:
                 break;
         }
+        return false;
+    }
+
+    void onViewDestroy(const ViewEvent& event) override {
+        // Purge the destroyed view from the cached collections: m_hits
+        // holds raw View pointers captured at tree-build time and
+        // m_buttons holds taskbar entries - both go stale (UAF on the
+        // next click/hover hit-test) until the next rebuild.
+        if (!event.view) return;
+        void* dead = event.view;
+        bool removed = false;
+        for (auto it = m_buttons.begin(); it != m_buttons.end();) {
+            if (it->viewPtr == dead) {
+                it = m_buttons.erase(it);
+                removed = true;
+            } else {
+                ++it;
+            }
+        }
+        for (auto it = m_hits.begin(); it != m_hits.end();) {
+            if (it->view == dead) {
+                it = m_hits.erase(it);
+                removed = true;
+            } else {
+                ++it;
+            }
+        }
+        if (m_hoverHit >= (int)m_hits.size()) m_hoverHit = HIT_NONE;
+        if (removed) m_treeDirty = true;  // drop its taskbar button now
     }
 
 private:
     CompositorAPI* m_api = nullptr;
-    std::vector<CompositorAPI::OutputTarget> m_outputs;
+
+    // Outputs seen by overlay passes; lastSeenMs prunes unplugged outputs
+    // (there is no OutputRemoved dispatch to plugins - a dead entry would
+    // otherwise keep drawing a bar on a monitor that no longer exists).
+    struct OutputCache {
+        CompositorAPI::OutputTarget out;
+        uint64_t lastSeenMs = 0;
+    };
+    std::vector<OutputCache> m_outputs;
 
     // Click targets, rebuilt with the tree (absolute scene coords)
     enum { HIT_NONE = -1, HIT_LAUNCHER = 0, HIT_WORKSPACE = 1, HIT_WINDOW = 2, HIT_CLOCK = 3 };
@@ -236,18 +286,58 @@ private:
     OverlayRenderer* m_renderer = nullptr;
     bool m_treeDirty = false;
 
+    // The exact usable-area rect reserveWorkarea last wrote (and the bar
+    // parameters it was computed with). reserveWorkarea inverts this to
+    // recover the base area before re-reserving, so repeated calls never
+    // shrink the area incrementally.
+    struct ReservedArea {
+        bool valid = false;
+        int x = 0, y = 0, w = 0, h = 0;
+        int barHeight = 0;
+        bool atBottom = false;
+    };
+    ReservedArea m_lastReserve;
+
+    static uint64_t nowMs() {
+        return (uint64_t)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
     // Windows need the workarea shrunk so they never sit under the panel.
+    // Idempotent: the base area is recovered by inverting our own last
+    // reservation (when the stored area is still ours) instead of reading
+    // the already-shrunk stored value, so reloads do not compound the
+    // shrink. When the stored area was written by someone else (the C
+    // side's update_usable_area on output enable / layer-shell changes),
+    // it IS the fresh base and we reserve on top of it.
     void reserveWorkarea() {
         if (!m_api) return;
-        int h = m_api->getOutputHeight();
-        int w = m_api->getOutputWidth();
-        for (uint32_t ws = 0; ws < m_api->getWorkspaceCount(); ws++) {
-            if (m_atBottom) {
-                m_api->setOutputGeometry(ws, 0, 0, w, h - m_barHeight);
-            } else {
-                m_api->setOutputGeometry(ws, 0, m_barHeight, w, h - m_barHeight);
-            }
+        int storedW = m_api->getOutputWidth();
+        int storedH = m_api->getOutputHeight();
+        int baseX = 0, baseY = 0, baseW = storedW, baseH = storedH;
+        if (m_lastReserve.valid && storedW == m_lastReserve.w &&
+            storedH == m_lastReserve.h) {
+            // Stored area is still our own reservation - undo it.
+            baseX = m_lastReserve.x;
+            baseY = m_lastReserve.atBottom
+                        ? m_lastReserve.y
+                        : m_lastReserve.y - m_lastReserve.barHeight;
+            baseW = m_lastReserve.w;
+            baseH = m_lastReserve.h + m_lastReserve.barHeight;
         }
+
+        int x = baseX, y = baseY, w = baseW, h = baseH;
+        if (m_atBottom) {
+            h -= m_barHeight;
+        } else {
+            y += m_barHeight;
+            h -= m_barHeight;
+        }
+
+        for (uint32_t ws = 0; ws < m_api->getWorkspaceCount(); ws++) {
+            m_api->setOutputGeometry(ws, x, y, w, h);
+        }
+        m_lastReserve = ReservedArea{true, x, y, w, h, m_barHeight, m_atBottom};
     }
 
     void collectTaskbarButtons() {

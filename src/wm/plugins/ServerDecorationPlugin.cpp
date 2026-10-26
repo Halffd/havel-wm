@@ -5,7 +5,6 @@
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/bridge.h>
 #include <cstdio>
-#include <cmath>
 
 namespace havel {
 
@@ -60,8 +59,8 @@ void ServerDecorationPlugin::onMouseMotion(int mx, int my) {
     m_api->scheduleRedraw();
 }
 
-void ServerDecorationPlugin::onMouseButton(uint32_t button, bool pressed, int mx, int my) {
-    if (!pressed || button != 0x110) return;  // Only handle left button press
+bool ServerDecorationPlugin::onMouseButton(uint32_t button, bool pressed, int mx, int my) {
+    if (!pressed || button != 0x110) return false;  // Only handle left button press
 
     onMouseMotion(mx, my);  // Update hover state
 
@@ -69,17 +68,18 @@ void ServerDecorationPlugin::onMouseButton(uint32_t button, bool pressed, int mx
         switch (m_hoveredButton) {
             case DecoButton::Close:
                 handleCloseClick(m_hoveredView);
-                break;
+                return true;
             case DecoButton::Maximize:
                 handleMaximizeClick(m_hoveredView);
-                break;
+                return true;
             case DecoButton::Minimize:
                 handleMinimizeClick(m_hoveredView);
-                break;
+                return true;
             default:
                 break;
         }
     }
+    return false;
 }
 
 void ServerDecorationPlugin::onViewMap(const ViewEvent& event) {
@@ -170,14 +170,6 @@ void ServerDecorationPlugin::renderOverlay(void* rendererPtr) {
     // Render decorations for all non-minimized windows
     for (auto& [viewPtr, deco] : m_decorations) {
         if (deco.minimized) continue;  // No decorations for minimized windows
-
-        // Smooth focus transition: focusBlend moves toward the target
-        // (1.0 = focused, 0.0 = unfocused) each frame
-        float target = deco.focused ? 1.0f : 0.0f;
-        float delta = 0.08f;  // per-frame step (200ms at 60fps)
-        if (deco.focusBlend < target) deco.focusBlend = std::min(deco.focusBlend + delta, target);
-        else if (deco.focusBlend > target) deco.focusBlend = std::max(deco.focusBlend - delta, target);
-
         // Render shadow first (behind window)
         renderShadow(renderer, deco);
 
@@ -214,18 +206,6 @@ uint64_t ServerDecorationPlugin::decorationSignature() const {
     h ^= (uint64_t)m_hoveredView;
     h = h * 3 + (uint64_t)m_hoveredButton;
     return h;
-}
-
-// Interpolate between two RGBA colours (per-channel lerp).
-static std::array<float, 4> blendColors(
-    const std::array<float, 4>& focused, const std::array<float, 4>& unfocused, float t) {
-    t = t < 0 ? 0 : (t > 1 ? 1 : t);
-    return {
-        focused[0] * t + unfocused[0] * (1 - t),
-        focused[1] * t + unfocused[1] * (1 - t),
-        focused[2] * t + unfocused[2] * (1 - t),
-        focused[3] * t + unfocused[3] * (1 - t)
-    };
 }
 
 void ServerDecorationPlugin::renderShadow(OverlayRenderer* renderer, const WindowDecoration& deco) {

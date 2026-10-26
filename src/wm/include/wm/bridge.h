@@ -105,6 +105,16 @@ void havel_cpp_zoom_feed(struct havel_cpp_server* server, int output_index,
 // Declarative monitor rule lookup (config.hv monitor_rule statements).
 bool havel_cpp_monitor_rule_lookup(struct havel_cpp_server* server, const char* name,
                                     int* x, int* y);
+// Is the screen lock currently intercepting input? (C gates seat
+// notifications on this.)
+bool havel_cpp_is_screen_locked(struct havel_cpp_server* server);
+
+// Overlay consumption protocol: plugins that handled a pointer press
+// return true here so the C layer stops the event before the seat
+// notify and the window underneath never sees it.
+bool havel_cpp_on_pointer_button_consumed(struct havel_cpp_server* server,
+                                           uint32_t button, double x, double y);
+
 
 // Re-place an already-running output at an explicit layout position.
 bool havel_wlr_place_output(struct havel_wlr_server* server, const char* name,
@@ -179,6 +189,11 @@ void havel_wlr_minimize_view(void* c_view);
 void havel_wlr_focus_view(void* c_view);
 void havel_wlr_raise_view(void* c_view);
 void havel_wlr_close_view(void* c_view);
+// Move a view's scene node to another workspace's scene tree. The C++
+// model move alone leaves the node in the old workspace's tree - the
+// window never appears on the target workspace (observed live).
+void havel_wlr_reparent_view_workspace(void* c_view, uint32_t workspace_id);
+
 
 // View texture capture (for Alt-Tab thumbnails)
 uint32_t havel_wlr_capture_view_texture(void* c_view);
@@ -192,11 +207,14 @@ void havel_wlr_inject_key(struct havel_wlr_server *server, uint32_t keycode, boo
 // the real wlr_cursor and runs the same motion/button dispatch chain the
 // hardware path uses, so plugins (Alt-Tab hover/buttons, hot corners)
 // see it.
-void havel_wlr_warp_pointer(struct havel_wlr_server *server, double x, double y);
-void havel_wlr_click_pointer(struct havel_wlr_server *server, uint32_t button, bool pressed);
+// Returns false when the warp was rejected (out of layout bounds).
+bool havel_wlr_warp_pointer(struct havel_wlr_server *server, double x, double y);
+// Returns false when the seat is missing.
+bool havel_wlr_click_pointer(struct havel_wlr_server *server, uint32_t button, bool pressed);
 // Feed a scroll tick through the plugin dispatch path (same as a wheel).
 void havel_wlr_scroll_pointer(struct havel_wlr_server *server, double dx, double dy);
-void havel_wlr_get_pointer(struct havel_wlr_server *server, double *x, double *y);
+// Returns false (with *x/*y set to -1) when there is no cursor.
+bool havel_wlr_get_pointer(struct havel_wlr_server *server, double *x, double *y);
 // Cursor visibility and theme (IPC hide_cursor / show_cursor /
 // set_cursor_theme).
 void havel_wlr_hide_cursor(struct havel_wlr_server *server);

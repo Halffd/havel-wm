@@ -297,14 +297,23 @@ public:
     // Input Handling (optional)
     // -------------------------------------------------------------------------
     
+    // Pointer input. Presses route through PluginManager::dispatchMouseButton
+    // BEFORE the seat notify: returning true means the plugin handled the
+    // click and the event stops (the client window underneath must not see
+    // it - overlay clicks used to focus/raise the window behind the panel).
+    // Releases are always broadcast; a plugin that consumed a press still
+    // sees its release so held-button state cannot stick.
     virtual void onMouseMotion(int x, int y) { (void)x; (void)y; }
-    virtual void onMouseButton(uint32_t button, bool pressed, int x, int y) {
-        (void)button; (void)pressed; (void)x; (void)y;
+    virtual bool onMouseButton(uint32_t button, bool pressed, int x, int y) {
+        (void)button; (void)pressed; (void)x; (void)y; return false;
     }
     
     // -------------------------------------------------------------------------
     // Logging (protected)
     // -------------------------------------------------------------------------
+    
+protected:
+    
     
 protected:
     Plugin() = default;

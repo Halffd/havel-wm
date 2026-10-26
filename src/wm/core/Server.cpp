@@ -20,7 +20,7 @@
 #include <filesystem>
 #include <unistd.h>
 #include <sys/types.h>
-#include <cstdio>
+#include <climits>
 #ifdef HAVE_HAVEL_LANG
 #include <wm/havel/HavelHost.hpp>
 #endif
@@ -1006,17 +1006,7 @@ void Server::focusFirstLastView(bool first) {
 void Server::moveViewToWorkspace(uint32_t ws) {
     auto* currentWs = activeWorkspace();
     if (currentWs && currentWs->activeView()) {
-        View* view = currentWs->activeView();
-        // Remove from current workspace
-        currentWs->removeView(view);
-        view->setWorkspaceId(ws);
-        // Add to target workspace
-        auto* targetWs = m_workspaces[ws].get();
-        if (targetWs) {
-            targetWs->addView(view);
-            LOG_INFO("Moved view to workspace %u", ws);
-            arrangeWorkspace(ws);
-        }
+        moveViewToWorkspace(currentWs->activeView(), ws);
     }
 }
 
@@ -1033,6 +1023,13 @@ void Server::moveViewToWorkspace(View* view, uint32_t ws) {
         targetWs->addView(view);
         LOG_INFO("Moved view %p to workspace %u", (void*)view, ws);
         arrangeWorkspace(ws);
+    }
+    // ...and reparent the scene node into the target workspace's tree -
+    // the model move alone left the node in the old tree, so the window
+    // never appeared on the target workspace (and stayed visible on the
+    // old one) until an unrelated arrange happened to fix nothing.
+    if (view->nativeHandle()) {
+        havel_wlr_reparent_view_workspace(view->nativeHandle(), ws);
     }
 
     // ...and keep the core window model in sync. The IPC window list
@@ -1104,10 +1101,41 @@ void Server::zoomConfigure(const std::string& json) {
     // here would drift from what the plugin actually renders.
     try {
         auto j = nlohmann::json::parse(json);
-        if (j.contains("step")) m_zoomConfig.step = j["step"].get<float>();
-        if (j.contains("max_level")) m_zoomConfig.maxLevel = j["max_level"].get<float>();
-        if (j.contains("max_mag")) m_zoomConfig.maxMag = j["max_mag"].get<float>();
-        if (j.contains("toggle_level")) m_zoomConfig.toggleLevel = j["toggle_level"].get<float>();
+        // Degenerate values would break the zoom math outright (division
+        // by step, levels below 1 clamp immediately), so reject them
+        // instead of storing.
+        if (j.contains("step")) {
+            float v = j["step"].get<float>();
+            if (v <= 1.0f) {
+                LOG_WARN("[Zoom] step must be > 1.0, got %.2f - ignored", v);
+            } else {
+                m_zoomConfig.step = v;
+            }
+        }
+        if (j.contains("max_level")) {
+            float v = j["max_level"].get<float>();
+            if (v < 1.0f) {
+                LOG_WARN("[Zoom] max_level must be >= 1.0, got %.2f - ignored", v);
+            } else {
+                m_zoomConfig.maxLevel = v;
+            }
+        }
+        if (j.contains("max_mag")) {
+            float v = j["max_mag"].get<float>();
+            if (v <= 0.0f) {
+                LOG_WARN("[Zoom] max_mag must be > 0, got %.2f - ignored", v);
+            } else {
+                m_zoomConfig.maxMag = v;
+            }
+        }
+        if (j.contains("toggle_level")) {
+            float v = j["toggle_level"].get<float>();
+            if (v <= 0.0f) {
+                LOG_WARN("[Zoom] toggle_level must be > 0, got %.2f - ignored", v);
+            } else {
+                m_zoomConfig.toggleLevel = v;
+            }
+        }
         LOG_INFO("[Zoom] Configured (step %.2f toggle %.2f)",
                  m_zoomConfig.step, m_zoomConfig.toggleLevel);
     } catch (const std::exception& e) {
@@ -1281,7 +1309,40 @@ std::string settingsStorePath() {
 
 // Apply one setting immediately where a handler exists. Unknown keys are
 // simply stored - scripts and the REPL read them via settings_get.
-void Server::settingsSet(const std::string& key, const std::string& value) {
+bool Server::settingsSet(const std::string& key, const std::string& value) {
+    // Validate BEFORE storing: a bad value must not poison the live map
+    // or get persisted for the next boot.
+    if (key == "gamma" || key == "brightness") {
+        float f = 0.0f;
+        try {
+            f = std::stof(value);
+        } catch (const std::exception&) {
+            LOG_WARN("[Settings] %s wants a float, got '%s'",
+                     key.c_str(), value.c_str());
+            return false;
+        }
+        if (key == "gamma" && (f <= 0.0f || f > 10.0f)) {
+            LOG_WARN("[Settings] gamma %s out of range (0,10]", value.c_str());
+            return false;
+        }
+        if (key == "brightness" && (f < 0.0f || f > 1.0f)) {
+            LOG_WARN("[Settings] brightness %s out of range [0,1]", value.c_str());
+            return false;
+        }
+    } else if (key == "temperature") {
+        int t = 0;
+        try {
+            t = std::stoi(value);
+        } catch (const std::exception&) {
+            LOG_WARN("[Settings] temperature wants an int, got '%s'", value.c_str());
+            return false;
+        }
+        if (t < 1000 || t > 10000) {
+            LOG_WARN("[Settings] temperature %d out of range [1000,10000]", t);
+            return false;
+        }
+    }
+
     m_settings[key] = value;
 
     if (key == "gamma") {
@@ -1314,7 +1375,9 @@ void Server::settingsSet(const std::string& key, const std::string& value) {
         }
     }
 
-    // Persist (best effort: a failed write keeps the live value only)
+    // Persist atomically: write a sibling temp file, flush it, then rename
+    // over the target so a crash mid-write never leaves a truncated
+    // settings.json behind.
     std::string path = settingsStorePath();
     if (!path.empty()) {
         std::error_code ec;
@@ -1322,9 +1385,31 @@ void Server::settingsSet(const std::string& key, const std::string& value) {
             std::filesystem::path(path).parent_path(), ec);
         nlohmann::json j = nlohmann::json::object();
         for (const auto& [k, v] : m_settings) j[k] = v;
-        std::ofstream out(path);
-        if (out) out << j.dump(2);
+        std::filesystem::path target(path);
+        std::filesystem::path tmp = target;
+        tmp += ".tmp";
+        {
+            std::ofstream out(tmp, std::ios::trunc);
+            if (!out) {
+                LOG_WARN("[Settings] Cannot write %s", tmp.string().c_str());
+                return true;  // live value still applied
+            }
+            out << j.dump(2);
+            out.flush();
+            if (!out) {
+                LOG_WARN("[Settings] Short write to %s", tmp.string().c_str());
+                std::filesystem::remove(tmp, ec);
+                return true;
+            }
+        }  // close (and flush) before the rename
+        std::filesystem::rename(tmp, target, ec);
+        if (ec) {
+            LOG_WARN("[Settings] Atomic replace of %s failed: %s",
+                     target.string().c_str(), ec.message().c_str());
+            std::filesystem::remove(tmp, ec);
+        }
     }
+    return true;
 }
 
 std::string Server::settingsGet(const std::string& key) const {
@@ -1343,11 +1428,15 @@ void Server::settingsLoad() {
         int applied = 0;
         for (auto it = j.begin(); it != j.end(); ++it) {
             if (!it.value().is_string()) continue;
-            // settingsSet re-saves; suppress by writing the map directly
-            // and applying the handler logic through settingsSet is fine
-            // here too (boot-time, one write).
-            settingsSet(it.key(), it.value().get<std::string>());
-            applied++;
+            // One bad persisted value must not abort the remaining keys:
+            // each apply (and its re-save of the store) is isolated here.
+            try {
+                settingsSet(it.key(), it.value().get<std::string>());
+                applied++;
+            } catch (const std::exception& e) {
+                LOG_WARN("[Settings] Skipping %s: %s",
+                         it.key().c_str(), e.what());
+            }
         }
         LOG_INFO("[Settings] Loaded %d persisted setting(s)", applied);
     } catch (const std::exception& e) {
@@ -1366,7 +1455,8 @@ std::string Server::ipcSettings(const std::string& args) {
             nlohmann::json v = j["value"];
             if (!v.is_string())
                 return m_ipcServer->createErrorResponse(-2, "value must be a string");
-            settingsSet(key, v.get<std::string>());
+            if (!settingsSet(key, v.get<std::string>()))
+                return m_ipcServer->createErrorResponse(-6, "Invalid value for " + key);
             nlohmann::json r;
             r["success"] = true;
             r["key"] = key;
@@ -1892,9 +1982,8 @@ bool Server::startIPCServer(const std::string& socketPath) {
     // back through these.
     m_ipcServer->setCursorWarpCallback([this](int x, int y) -> bool {
         if (!m_nativeHandle) return false;
-        havel_wlr_warp_pointer((struct havel_wlr_server*)m_nativeHandle,
-                               (double)x, (double)y);
-        return true;
+        return havel_wlr_warp_pointer((struct havel_wlr_server*)m_nativeHandle,
+                                       (double)x, (double)y);
     });
     m_ipcServer->setCursorVisibilityCallback([this](bool visible) {
         if (!m_nativeHandle) return;
@@ -1912,15 +2001,16 @@ bool Server::startIPCServer(const std::string& socketPath) {
     m_ipcServer->setCursorQueryCallback([this](int* x, int* y) -> bool {
         if (!m_nativeHandle || !x || !y) return false;
         double px = -1, py = -1;
-        havel_wlr_get_pointer((struct havel_wlr_server*)m_nativeHandle, &px, &py);
+        if (!havel_wlr_get_pointer((struct havel_wlr_server*)m_nativeHandle, &px, &py))
+            return false;
         *x = (int)px;
         *y = (int)py;
         return true;
     });
     m_ipcServer->setPointerClickCallback([this](uint32_t button, bool pressed) -> bool {
         if (!m_nativeHandle) return false;
-        havel_wlr_click_pointer((struct havel_wlr_server*)m_nativeHandle, button, pressed);
-        return true;
+        return havel_wlr_click_pointer((struct havel_wlr_server*)m_nativeHandle,
+                                       button, pressed);
     });
 
     // Commands that are fully implemented inside IPCServer. The table pairs
@@ -2014,15 +2104,29 @@ bool Server::startIPCServer(const std::string& socketPath) {
         return ipcSettings(args);
     });
 
+    // Single reload_config handler: refreshes plugins.json AND the havel
+    // script config (config.hv) in one shot. (There used to be a second
+    // registration further down that only did plugins.json; since dispatch
+    // finds the first match it was dead code - and each half-reload left
+    // the other file stale.)
     m_ipcServer->registerCommand("reload_config", [this](const std::string& args) -> std::string {
-        std::string err = reloadHavelConfig();
-        if (err.empty()) {
-            JsonObject r;
-            r["success"] = true;
-            r["message"] = "config.hv reloaded";
-            return m_ipcServer->jsonToString(r);
-        }
-        return m_ipcServer->createErrorResponse(-3, err);
+        (void)args;
+        std::string hvErr = reloadHavelConfig();
+        // A missing config.hv (first boot) or a build without the havel
+        // embed is a normal state, not a reload failure - same policy as a
+        // missing plugins.json (defaults kept, not an error).
+        bool hvAbsent = hvErr.rfind("no config at ", 0) == 0 ||
+                        hvErr == "built without the havel embed";
+        if (!hvErr.empty() && !hvAbsent)
+            return m_ipcServer->createErrorResponse(-3, hvErr);
+        bool pluginsOk = m_pluginManager.reloadConfig();
+        JsonObject r;
+        r["success"] = true;
+        std::string msg = hvAbsent ? "config.hv absent; " : "config.hv reloaded; ";
+        msg += pluginsOk ? "plugins.json reloaded"
+                         : "no plugins.json (defaults kept)";
+        r["message"] = msg;
+        return m_ipcServer->jsonToString(r);
     });
 
     // Introspection: outputs (geometry from the C layout) and keybindings
@@ -2136,9 +2240,6 @@ bool Server::startIPCServer(const std::string& socketPath) {
     // ========================================================================
     // Configuration Commands
     // ========================================================================
-    m_ipcServer->registerCommand("reload_config", [this](const std::string& args) -> std::string {
-        return ipcReloadConfig();
-    });
 
     m_ipcServer->registerCommand("get_config", [this](const std::string& args) -> std::string {
         return ipcGetConfig();
@@ -2238,22 +2339,32 @@ bool Server::startIPCServer(const std::string& socketPath) {
         return m_ipcServer->jsonToString(r);
     });
 
-    // Wallpaper slideshow: set a list of PNGs and an interval
+    // Wallpaper slideshow: set a list of PNGs and an interval (seconds)
     m_ipcServer->registerCommand("set_wallpaper_slideshow", [this](const std::string& args) -> std::string {
         std::vector<std::string> paths;
-        size_t pos = 0;
-        while (true) {
-            size_t start = args.find("\"", pos);
-            if (start == std::string::npos) break;
-            size_t end = args.find("\"", start + 1);
-            if (end == std::string::npos) break;
-            std::string p = args.substr(start + 1, end - start - 1);
-            if (!p.empty() && p[0] == '/' && std::filesystem::is_regular_file(p)) {
-                paths.push_back(p);
+        int interval = 300;
+        try {
+            auto j = nlohmann::json::parse(args);
+            if (j.contains("paths") && j["paths"].is_array()) {
+                for (const auto& e : j["paths"]) {
+                    if (!e.is_string()) continue;
+                    std::string p = e.get<std::string>();
+                    if (!p.empty() && p[0] == '/' &&
+                        std::filesystem::is_regular_file(p)) {
+                        paths.push_back(p);
+                    }
+                }
             }
-            pos = end + 1;
+            if (j.contains("interval"))
+                interval = j["interval"].get<int>();
+        } catch (const std::exception& e) {
+            return m_ipcServer->createErrorResponse(-1,
+                std::string("Invalid JSON: ") + e.what());
         }
-        int interval = m_ipcServer->extractJsonInt(args, "interval", 300);
+        if (interval < 1) {
+            return m_ipcServer->createErrorResponse(-2,
+                "interval must be >= 1 second");
+        }
         if (paths.empty()) {
             return m_ipcServer->createErrorResponse(-5, "no valid wallpaper paths");
         }
@@ -2473,6 +2584,11 @@ std::string Server::reloadHavelConfig() {
     m_keybindingManager.unregisterByPrefixSave("havel:", &saved);
     if (!m_havelHost->runFile(path)) {
         std::string err = m_havelHost->lastError();
+        // The partially-executed config may have registered some of its
+        // own "havel:" bindings already. Drop everything the script
+        // namespace owns before restoring, or registerKeybinding's
+        // duplicate-combo refusal would silently discard saved bindings.
+        m_keybindingManager.unregisterByPrefixSave("havel:", nullptr);
         for (auto& b : saved) {
             m_keybindingManager.registerKeybinding(b.modifiers, b.keysym,
                                                    b.name.c_str(), b.callback);
@@ -2608,10 +2724,29 @@ std::string Server::ipcFileInfo(const std::string& args) {
 std::string Server::ipcFileOp(const std::string& op, const std::string& args) {
     // Mutating operations are contained to the user's home and /tmp:
     // the IPC socket is user-owned but file_delete must never become a
-    // root-ish primitive on system paths.
-    auto contained = [](const std::string& p) {
+    // root-ish primitive on system paths. Containment is exact-or-child
+    // (a sibling like /home/user-evil must not match /home/user) and is
+    // re-checked on the symlink-resolved path, so a link planted inside
+    // HOME cannot point the deletion outside.
+    auto underRoot = [](const std::string& p, const std::string& root) {
+        return p == root || p.rfind(root + "/", 0) == 0;
+    };
+    auto contained = [&](const std::string& p) {
         const char* home = getenv("HOME");
-        return (home && p.rfind(home, 0) == 0) || p.rfind("/tmp/", 0) == 0;
+        if (home && underRoot(p, home)) return true;
+        return underRoot(p, "/tmp");
+    };
+    // Resolve symlinks and re-check the real path. For not-yet-existing
+    // targets (mkdir, copy dst) resolve the parent instead; a failure to
+    // resolve means containment cannot be verified, so reject.
+    auto resolveContained = [&](const std::string& p) -> bool {
+        if (!contained(p)) return false;
+        char buf[PATH_MAX];
+        if (realpath(p.c_str(), buf)) return contained(buf);
+        size_t slash = p.find_last_of('/');
+        if (slash == std::string::npos || slash == 0) return false;
+        if (!realpath(p.substr(0, slash).c_str(), buf)) return false;
+        return contained(buf);
     };
     try {
         auto j = nlohmann::json::parse(args);
@@ -2628,7 +2763,7 @@ std::string Server::ipcFileOp(const std::string& op, const std::string& args) {
             std::string dst = get("dst");
             if (src.empty() || dst.empty())
                 return m_ipcServer->createErrorResponse(-2, "Missing or invalid src/dst");
-            if (!contained(src) || !contained(dst))
+            if (!resolveContained(src) || !resolveContained(dst))
                 return m_ipcServer->createErrorResponse(-2, "Paths must be under HOME or /tmp");
             if (op == "copy") ok = fm.copyFile(src, dst);
             else if (op == "move") ok = fm.moveFile(src, dst);
@@ -2636,14 +2771,14 @@ std::string Server::ipcFileOp(const std::string& op, const std::string& args) {
         } else if (op == "delete") {
             std::string p = get("path");
             if (p.empty()) return m_ipcServer->createErrorResponse(-2, "Missing or invalid path");
-            if (!contained(p))
+            if (!resolveContained(p))
                 return m_ipcServer->createErrorResponse(-2, "Path must be under HOME or /tmp");
             if (fm.isDirectory(p)) ok = fm.deleteDirectory(p);
             else ok = fm.deleteFile(p);
         } else if (op == "mkdir") {
             std::string p = get("path");
             if (p.empty()) return m_ipcServer->createErrorResponse(-2, "Missing or invalid path");
-            if (!contained(p))
+            if (!resolveContained(p))
                 return m_ipcServer->createErrorResponse(-2, "Path must be under HOME or /tmp");
             ok = fm.createDirectory(p);
         } else {
@@ -2815,14 +2950,6 @@ std::string Server::ipcCloseNotification(const std::string& args) {
     return m_ipcServer->createSuccessResponse("Notification closed");
 }
 
-std::string Server::ipcReloadConfig() {
-    if (!m_pluginManager.reloadConfig()) {
-        // reloadConfig fails when no config file exists (first-boot
-        // state); that's "reloaded, from defaults" not an error
-        return m_ipcServer->createSuccessResponse("Configuration reloaded (no config file; defaults)");
-    }
-    return m_ipcServer->createSuccessResponse("Configuration reloaded");
-}
 
 std::string Server::ipcGetConfig() {
     JsonObject config;

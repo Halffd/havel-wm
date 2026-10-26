@@ -180,8 +180,6 @@ plugin_config("alt_tab", "columns", 2)
 ```
 
 See `config/config.hv.example` for the full reference.
-```
-
 See `plugins.json.example` for all options.
 
 ---

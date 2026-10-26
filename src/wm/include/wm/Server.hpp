@@ -271,7 +271,8 @@ public:
     //   gamma, temperature, brightness, animations, background_color
     //   plugin.<plugin>.<key> -> plugin setting, applied immediately
     //   anything else -> stored for scripts/REPL
-    void settingsSet(const std::string& key, const std::string& value);
+    // Returns false (without storing) when a typed key's value is invalid.
+    bool settingsSet(const std::string& key, const std::string& value);
     std::string settingsGet(const std::string& key) const;
     const std::map<std::string, std::string>& settingsAll() const { return m_settings; }
     void settingsLoad();  // read + apply persisted settings (boot)
@@ -332,7 +333,6 @@ public:
     std::string ipcGetPlugins();
     std::string ipcNotify(const std::string& args);
     std::string ipcCloseNotification(const std::string& args);
-    std::string ipcReloadConfig();
     std::string ipcGetConfig();
     std::string ipcGetWindow(const std::string& args);
     std::string ipcGetWindowsByApp(const std::string& args);

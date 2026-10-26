@@ -195,31 +195,31 @@ public:
         }
     }
 
-    void onMouseButton(uint32_t button, bool pressed, int x, int y) override {
-        if (!m_visible || !pressed) return;
+    bool onMouseButton(uint32_t button, bool pressed, int x, int y) override {
+        if (!m_visible || !pressed) return false;
 
         // Wheel: scroll the grid (button 4 = up, 5 = down)
         if (button == 4 || button == 5) {
             int dir = (button == 5) ? 1 : -1;
             m_scrollRow += dir * 1;
             clampScroll();
-            return;
+            return true;
         }
 
         // Left press only
-        if (button != 0x110) return;  // BTN_LEFT
+        if (button != 0x110) return false;  // BTN_LEFT
 
         int cell = -1;
         HoverBtn btn = buttonAt(x, y, cell);
         if (cell < 0) {
             // Click outside the panel: cancel (Windows behavior)
             hide();
-            return;
+            return true;
         }
         switch (btn) {
-            case HoverBtn::Close: closeEntry(cell); return;
-            case HoverBtn::Hide:  hideEntry(cell);  return;
-            case HoverBtn::Move:  moveEntry(cell);  return;
+            case HoverBtn::Close: closeEntry(cell); return true;
+            case HoverBtn::Hide:  hideEntry(cell);  return true;
+            case HoverBtn::Move:  moveEntry(cell);  return true;
             case HoverBtn::None:
             default:
                 break;
@@ -227,6 +227,7 @@ public:
         // Click on the cell body: select + activate
         m_selectedIndex = cell;
         select();
+        return true;
     }
     
   void onViewMap(const ViewEvent& event) override {
@@ -237,9 +238,27 @@ public:
     }
     
   void onViewDestroy(const ViewEvent& event) override {
+    // Purge the destroyed view from the switcher: entries hold raw View
+    // pointers (UAF on the next click/hover/navigate) and would
+    // otherwise stay until the next show().
     if (m_visible) {
             printf("[AltTab] Window destroyed: %s\n",
                    event.title ? event.title : "unknown");
+        }
+    if (!event.view || m_windows.empty()) return;
+    void* dead = event.view;
+    for (size_t i = 0; i < m_windows.size(); ) {
+        if (m_windows[i].viewPtr == dead) {
+            m_windows.erase(m_windows.begin() + i);
+            if (m_selectedIndex >= (int)i && m_selectedIndex > 0) m_selectedIndex--;
+        } else {
+            ++i;
+        }
+    }
+    if (m_hoverCell >= (int)m_windows.size()) m_hoverCell = -1;
+    m_hoverBtn = HoverBtn::None;
+    if (m_windows.empty()) {
+            if (m_visible) hide();
         }
     }
     
@@ -371,6 +390,16 @@ private:
             return;
         }
 
+        // Focused first, then by title. Sorting MUST happen before the
+        // maxVisibleWindows cap: capping first truncated the list in
+        // collection order, so the focused window could be dropped and
+        // plain Alt+Tab had nothing meaningful to switch to.
+        std::sort(m_windows.begin(), m_windows.end(),
+            [focused](const WindowEntry& a, const WindowEntry& b) {
+                if (a.isFocused != b.isFocused) return a.isFocused;
+                return a.title < b.title;
+            });
+
         if (m_maxVisibleWindows > 0 && (int)m_windows.size() > m_maxVisibleWindows) {
             m_windows.resize((size_t)m_maxVisibleWindows);
             printf("[AltTab] Capped to maxVisibleWindows=%d\n", m_maxVisibleWindows);
@@ -378,13 +407,6 @@ private:
 
         printf("[AltTab] Collected %zu windows on workspace %u\n", 
                m_windows.size(), currentWorkspace);
-
-    // Focused first, then by title
-    std::sort(m_windows.begin(), m_windows.end(),
-            [focused](const WindowEntry& a, const WindowEntry& b) {
-                if (a.isFocused != b.isFocused) return a.isFocused;
-                return a.title < b.title;
-            });
 
     m_selectedIndex = 0;
         for (size_t i = 0; i < m_windows.size(); ++i) {

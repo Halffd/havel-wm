@@ -169,6 +169,21 @@ void havel_cpp_on_pointer_button(struct havel_cpp_server* server, uint32_t butto
     server->server->handlePointerButton(button, pressed, x, y);
 }
 
+// Screen lock state for the C-side seat gates (button/axis/motion).
+bool havel_cpp_is_screen_locked(struct havel_cpp_server* server) {
+    return server && server->server && server->server->isScreenLocked();
+}
+
+// Overlay consumption protocol: dispatch the press to the plugin layer
+// BEFORE the seat notify; true = a plugin handled it, C stops the event.
+bool havel_cpp_on_pointer_button_consumed(struct havel_cpp_server* server,
+                                           uint32_t button, double x, double y) {
+    if (!server || !server->server) return false;
+    return server->server->pluginManager().dispatchMouseButton(
+        button, true, (int)x, (int)y);
+}
+
+
 void havel_cpp_on_pointer_motion(struct havel_cpp_server* server, double x, double y) {
     if (!server) return;
     server->server->handlePointerMotion(x, y);
@@ -303,18 +318,6 @@ void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int hei
         if (dm) static_cast<havel::DesktopManager*>(dm)->updateSlideshow();
     }
 
-    
-    // Screen lock renders FIRST (over everything, under nothing): when
-    // locked, its overlay is the only thing that should be visible.
-    if (server->server->isScreenLocked()) {
-        auto* lock = server->server->screenLock();
-        const auto& out = server->server->overlayTarget();
-        if (lock) {
-            const auto& t = server->server->overlayTarget();
-            lock->render(renderer, t.x, t.y, t.w, t.h);
-        }
-    }
-
     // Render each plugin, then force the draw target back to the frame
     // tree. A plugin that returns early between setTargetTree(tree) and
     // setTargetTree(nullptr) would otherwise leak its persistent tree as
@@ -323,6 +326,17 @@ void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int hei
     for (auto& plugin : pluginManager.plugins()) {
         plugin->renderOverlay(renderer);
         renderer->setTargetTree(nullptr);
+    }
+
+    // Screen lock renders AFTER the plugin loop (still inside the
+    // overlay frame tree, before endFrame): plugins never paint over
+    // the lock screen.
+    if (server->server->isScreenLocked()) {
+        auto* lock = server->server->screenLock();
+        if (lock) {
+            const auto& t = server->server->overlayTarget();
+            lock->render(renderer, t.x, t.y, t.w, t.h);
+        }
     }
     renderer->endFrame();
 

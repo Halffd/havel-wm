@@ -1381,11 +1381,13 @@ static void xwayland_view_handle_configure(struct wl_listener *listener, void *d
         int cy = view->pending_cascade_y;
         wlr_scene_node_set_position(&view->scene_tree->node, cx, cy);
         wlr_xwayland_surface_configure(view->xsurface, cx, cy,
-                                       view->xsurface->width, view->xsurface->height);
+                                       event->width > 0 ? event->width : view->xsurface->width,
+                                       event->height > 0 ? event->height : view->xsurface->height);
         LOG_INFO("[XWayland] re-applying cascade %d,%d over client (%d,%d)",
                  cx, cy, event->x, event->y);
         return;
     }
+    // No cascade pending: honour the client's own request verbatim.
     wlr_xwayland_surface_configure(view->xsurface, event->x, event->y,
                                    event->width, event->height);
 }
@@ -1816,7 +1818,13 @@ static void output_frame(struct wl_listener *listener, void *data) {
     // zoomed the wrong region), and the position was never restored when
     // zoom returned to 1.0 - the output kept showing a shifted region.
     if (output->zoom != 1.0f && output->zoom > 0.0f) {
-        wlr_output_state_set_scale(&state, output->zoom);
+        // Only set the scale on a transition: wlroots treats ANY scale
+        // commit as force_update (whole-scene damage walk) - setting it
+        // every frame while zoomed made the render loop O(scene) per
+        // frame. build_state reads the committed scale otherwise.
+        if (output->zoom != output->committed_scale) {
+            wlr_output_state_set_scale(&state, output->zoom);
+        }
         if (own_lo) {
             // Follow the live cursor while it is on this output; keep the
             // last centre when it leaves (zoom must not jump on hover-out).
@@ -1957,23 +1965,26 @@ static void output_frame(struct wl_listener *listener, void *data) {
                 output->committed_scale = target_scale;
             }
         }
-    } else if (scale_transition &&
-               wlr_scene_output_build_state(output->scene_output, &state, &options)) {
-        // Zoom ended: hand the output its normal scale back through a real
-        // commit (skipping the state set would leave the shrunk scale in
-        // place forever).
+    } else if (scale_transition) {
+        // Zoom ended: hand the output its normal scale back. The scale
+        // goes into the state BEFORE build_state renders - build_state
+        // derives its transform from the committed scale when the pending
+        // state carries none, so setting it after rendered one stale
+        // zoomed frame. Full damage covers the rescale.
         wlr_output_state_set_scale(&state, 1.0f);
-        pixman_region32_t full;
-        pixman_region32_init_rect(&full, 0, 0,
-                                  (unsigned int)output->output->width,
-                                  (unsigned int)output->output->height);
-        wlr_output_state_set_damage(&state, &full);
-        pixman_region32_fini(&full);
-        if (!wlr_output_commit_state(output->output, &state)) {
-            LOG_ERROR("[FRAME] %s: output_commit_state failed (scale reset)",
-                      output->output->name);
-        } else {
-            output->committed_scale = 1.0f;
+        if (wlr_scene_output_build_state(output->scene_output, &state, &options)) {
+            pixman_region32_t full;
+            pixman_region32_init_rect(&full, 0, 0,
+                                      (unsigned int)output->output->width,
+                                      (unsigned int)output->output->height);
+            wlr_output_state_set_damage(&state, &full);
+            pixman_region32_fini(&full);
+            if (!wlr_output_commit_state(output->output, &state)) {
+                LOG_ERROR("[FRAME] %s: output_commit_state failed (scale reset)",
+                          output->output->name);
+            } else {
+                output->committed_scale = 1.0f;
+            }
         }
     } else if (want_capture && cap_w > 0 && cap_h > 0 &&
                wlr_scene_output_build_state(output->scene_output, &state, &options)) {
@@ -2086,7 +2097,11 @@ static void output_destroy(struct wl_listener *listener, void *data) {
     if (output->gamma_ramp_blue) {
         free(output->gamma_ramp_blue);
     }
-
+    // Every listener added at registration must be removed here or wlroots
+    // walks a freed link on the next signal emission. The damage listener
+    // (registered at output setup) was left behind: assert/UAF on any
+    // output destroy, including normal shutdown.
+    wl_list_remove(&output->damage.link);
     wl_list_remove(&output->frame.link);
     wl_list_remove(&output->needs_frame.link);
     wl_list_remove(&output->destroy.link);
@@ -2697,6 +2712,12 @@ static struct wlr_surface *seat_surface_at(struct havel_wlr_server *server, doub
 }
 
 static void process_cursor_motion(struct havel_wlr_server *server, uint32_t time_msec) {
+    // Locked: never move pointer focus onto a client surface.
+    if (server->cpp_server && havel_cpp_is_screen_locked(server->cpp_server)) {
+        wlr_cursor_set_xcursor(server->cursor, server->cursor_mgr, "left_ptr");
+        wlr_seat_pointer_clear_focus(server->seat);
+        return;
+    }
     double sx = 0.0, sy = 0.0;
     struct wlr_surface *surface = seat_surface_at(server, server->cursor->x, server->cursor->y, &sx, &sy);
 
@@ -2771,7 +2792,24 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
     struct havel_wlr_server *server = wl_container_of(listener, server, cursor_button);
     struct wlr_pointer_button_event *event = data;
 
+    // Screen lock: no pointer event may reach a client while locked.
+    // Swallow presses before the seat notify; releases drop too so the
+    // (never-delivered) press has no stray release.
+    if (server->cpp_server && havel_cpp_is_screen_locked(server->cpp_server)) {
+        return;
+    }
+
     wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
+
+    // Overlay consumption protocol: plugin overlays (panel, Alt-Tab,
+    // launcher) that handle the click stop it here - the old broadcast
+    // reached the window underneath and focused/raised it.
+    if (event->state == WL_POINTER_BUTTON_STATE_PRESSED &&
+        server->cpp_server &&
+        havel_cpp_on_pointer_button_consumed(server->cpp_server, event->button,
+                                             server->cursor->x, server->cursor->y)) {
+        return;
+    }
 
     // Process desktop events
     havel_cpp_process_desktop_mouse(server->cpp_server, event->button,
@@ -2877,8 +2915,13 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
 static void server_cursor_axis(struct wl_listener *listener, void *data) {
     struct havel_wlr_server *server = wl_container_of(listener, server, cursor_axis);
     struct wlr_pointer_axis_event *event = data;
+    // Locked: scroll belongs to the lock screen, not to clients.
+    if (server->cpp_server && havel_cpp_is_screen_locked(server->cpp_server)) {
+        return;
+    }
     wlr_seat_pointer_notify_axis(server->seat, event->time_msec, event->orientation,
         event->delta, event->delta_discrete, event->source, event->relative_direction);
+
 
     // Forward scroll to plugins too: the seat notification above only
     // reaches the focused client. Plugins (Alt-Tab grid, hot corners)
@@ -4053,6 +4096,29 @@ void havel_wlr_raise_view(void* c_view) {
         g_view_raise(c_view);
     }
 }
+// Move a view's scene node to another workspace's tree. C++ owns the
+// model (View::workspaceId); without this the node stayed in the old
+// workspace's tree and the window never showed on the target.
+void havel_wlr_reparent_view_workspace(void* c_view, uint32_t workspace_id) {
+    if (!c_view) return;
+    struct havel_wlr_server *server = g_running_server;
+    if (!server || workspace_id >= HAVEL_WORKSPACE_COUNT) return;
+
+    enum havel_view_kind kind = *(enum havel_view_kind*)c_view;
+    struct wlr_scene_tree *scene_tree = NULL;
+    if (kind == HAVEL_VIEW_XDG) {
+        scene_tree = ((struct havel_xdg_view*)c_view)->scene_tree;
+    } else if (kind == HAVEL_VIEW_XWAYLAND) {
+        scene_tree = ((struct havel_xwayland_view*)c_view)->scene_tree;
+    }
+    if (!scene_tree) return;
+
+    struct wlr_scene_tree *target = server->workspaces[workspace_id];
+    if (!target || &scene_tree->node.parent->node == &target->node) return;
+    wlr_scene_node_reparent(&scene_tree->node, target);
+    wlr_scene_node_raise_to_top(&scene_tree->node);
+}
+
 
 // Capture view thumbnail texture for Alt-Tab, Overview
 // Returns non-zero if texture capture succeeded (actual GL texture requires Vulkan-GLES interop)
@@ -4326,19 +4392,21 @@ void havel_wlr_inject_key(struct havel_wlr_server *server, uint32_t keycode,
 // Cursor control. Moving wlr_cursor directly and running the same
 // dispatch chain as the hardware pointer keeps client focus, interactive
 // grabs and plugin overlays (Alt-Tab hover/buttons, hot corners) in sync.
-void havel_wlr_warp_pointer(struct havel_wlr_server *server, double x, double y) {
-    if (!server || !server->cursor) return;
-    wlr_cursor_warp(server->cursor, NULL, x, y);
+bool havel_wlr_warp_pointer(struct havel_wlr_server *server, double x, double y) {
+    if (!server || !server->cursor) return false;
+    bool ok = wlr_cursor_warp(server->cursor, NULL, x, y);
+    if (!ok) return false;
     havel_cpp_on_pointer_decoration_motion(server->cpp_server,
                                            (int)server->cursor->x,
                                            (int)server->cursor->y);
     havel_cpp_on_pointer_motion(server->cpp_server, server->cursor->x, server->cursor->y);
     process_cursor_motion(server, get_monotonic_time_ms());
     LOG_DEBUG("[Inject] Pointer warped to (%.0f,%.0f)", server->cursor->x, server->cursor->y);
+    return true;
 }
 
-void havel_wlr_click_pointer(struct havel_wlr_server *server, uint32_t button, bool pressed) {
-    if (!server || !server->seat) return;
+bool havel_wlr_click_pointer(struct havel_wlr_server *server, uint32_t button, bool pressed) {
+    if (!server || !server->seat) return false;
     uint32_t t = (uint32_t)get_monotonic_time_ms();
     wlr_seat_pointer_notify_button(server->seat, t, button,
         pressed ? WL_POINTER_BUTTON_STATE_PRESSED : WL_POINTER_BUTTON_STATE_RELEASED);
@@ -4347,6 +4415,7 @@ void havel_wlr_click_pointer(struct havel_wlr_server *server, uint32_t button, b
     havel_cpp_on_pointer_button(server->cpp_server, button, pressed,
         server->cursor->x, server->cursor->y);
     LOG_DEBUG("[Inject] Pointer button 0x%x %s", button, pressed ? "down" : "up");
+    return true;
 }
 
 // Force software cursors on every output (or restore wlroots' choice).
@@ -4385,6 +4454,14 @@ void havel_wlr_show_cursor(struct havel_wlr_server *server) {
 void havel_wlr_set_cursor_theme(struct havel_wlr_server *server,
                                 const char *theme, int size) {
     if (!server || size < 16 || size > 128) return;
+    // Drop the cursor's reference to the OLD manager before freeing it:
+    // wlr_cursor keeps per-output xcursor pointers into the theme, and
+    // wlr_cursor_set_xcursor early-returns when the manager pointer and
+    // name match - a same-address realloc of the manager would leave the
+    // freed theme referenced forever.
+    if (server->cursor) {
+        wlr_cursor_unset_image(server->cursor);
+    }
     if (server->cursor_mgr) {
         wlr_xcursor_manager_destroy(server->cursor_mgr);
     }
@@ -4466,14 +4543,12 @@ bool havel_wlr_place_output(struct havel_wlr_server *server, const char *name,
     struct havel_output *output;
     wl_list_for_each(output, &server->outputs, link) {
         if (strcmp(output->output->name, name) == 0) {
-            if (wlr_output_layout_get(server->output_layout, output->output)) {
-                wlr_output_layout_remove(server->output_layout, output->output);
-            }
+            // add() alone repositions an existing entry (0.20 semantics:
+            // a layout member moves to the given coordinates). The old
+            // remove()/add() dance destroyed the layout entry, which
+            // tore down the wl_output global (every client re-fetched
+            // output geometry) and all output-cursors on each live rule.
             wlr_output_layout_add(server->output_layout, output->output, x, y);
-            // Re-bind the scene output to the NEW layout entry: the old one
-            // was destroyed by the remove, and without re-registration the
-            // scene output keeps its stale position and the output renders
-            // black (observed live on a rule-moved second monitor).
             if (server->scene_output_layout) {
                 struct wlr_output_layout_output *lo =
                     wlr_output_layout_get(server->output_layout, output->output);
@@ -4494,10 +4569,15 @@ bool havel_wlr_place_output(struct havel_wlr_server *server, const char *name,
     return false;
 }
 
-void havel_wlr_get_pointer(struct havel_wlr_server *server, double *x, double *y) {
-    if (!server || !server->cursor) { if (x) *x = -1; if (y) *y = -1; return; }
+bool havel_wlr_get_pointer(struct havel_wlr_server *server, double *x, double *y) {
+    if (!server || !server->cursor) {
+        if (x) *x = -1;
+        if (y) *y = -1;
+        return false;
+    }
     if (x) *x = server->cursor->x;
     if (y) *y = server->cursor->y;
+    return true;
 }
 
 void havel_wlr_scroll_pointer(struct havel_wlr_server *server, double dx, double dy) {

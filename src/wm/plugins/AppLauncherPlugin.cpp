@@ -481,33 +481,43 @@ private:
     void onMouseMotion(int x, int y) override {
         if (!m_visible) return;
         int idx = itemAt(x, y);
-        if (idx >= 0 && idx != m_hoverIndex) {
+        if (idx != m_hoverIndex) {
             m_hoverIndex = idx;
             m_treeDirty = true;  // hover highlight redraws soon
         }
     }
 
-    void onMouseButton(uint32_t button, bool pressed, int x, int y) override {
-        if (!m_visible || !pressed) return;
+    bool onMouseButton(uint32_t button, bool pressed, int x, int y) override {
+        if (!m_visible || !pressed) return false;
         if (button == 0x110) {  // left press: launch the clicked entry
             int idx = itemAt(x, y);
             if (idx >= 0) {
                 m_selectedIndex = idx;
                 launchSelected();
+                return true;
             }
-            return;
+            return false;
         }
-        if (button == 4) { navigate(-1); return; }   // wheel up
-        if (button == 5) { navigate(1); return; }    // wheel down
+        if (button == 4) { navigate(-1); return true; }   // wheel up
+        if (button == 5) { navigate(1); return true; }    // wheel down
+        return false;
     }
+
+    // Launcher geometry is computed ONCE per draw and stored here; the
+    // hit-testers below read the same box, so clicks always land on the
+    // pixels the last pass drew. (The old itemAt re-derived the box from
+    // renderer screen size - a different output's pass than the one that
+    // drew the launcher made hover/clicks land on the wrong rows or
+    // nowhere.)
+    Rect m_lastDrawBox{0, 0, 0, 0};
 
     // Row under the cursor in the result list, -1 when outside it.
     // Coordinates are the same screen space renderOverlay drew in.
     int itemAt(int x, int y) {
-        int launcherWidth = 600;
-        int launcherHeight = 400;
-        int launcherX = (rendererScreenWidth() - launcherWidth) / 2;
-        int launcherY = (rendererScreenHeight() - launcherHeight) / 2;
+        int launcherWidth = m_lastDrawBox.w;
+        int launcherHeight = m_lastDrawBox.h;
+        int launcherX = m_lastDrawBox.x;
+        int launcherY = m_lastDrawBox.y;
         int resultY = launcherY + 50 + 20;
         int listX0 = launcherX + 10, listX1 = launcherX + launcherWidth - 10;
         if (x < listX0 || x >= listX1) return -1;
@@ -519,9 +529,6 @@ private:
         if (idx >= m_scrollStart + maxVisible) return -1;
         return idx;
     }
-
-    int rendererScreenWidth() { return m_renderer ? m_renderer->getScreenWidth() : 1280; }
-    int rendererScreenHeight() { return m_renderer ? m_renderer->getScreenHeight() : 720; }
     
     std::string toLower(const std::string& str) {
         std::string result = str;
@@ -554,13 +561,15 @@ private:
 
         int screenWidth = renderer->getScreenWidth();
         int screenHeight = renderer->getScreenHeight();
-        
-        // Launcher dimensions
+
+        // Launcher dimensions - recorded for the hit-testers (itemAt)
+        // so clicks land on the box this pass actually drew.
         int launcherWidth = 600;
         int launcherHeight = 400;
         int launcherX = (screenWidth - launcherWidth) / 2;
         int launcherY = (screenHeight - launcherHeight) / 2;
-        
+        m_lastDrawBox = Rect{launcherX, launcherY, launcherWidth, launcherHeight};
+
         // Draw semi-transparent background
         renderer->drawRect(0, 0, screenWidth, screenHeight, Color(0.0f, 0.0f, 0.0f, 0.7f));
         

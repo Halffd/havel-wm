@@ -44,11 +44,6 @@ public:
 
     bool hasFloatGeom() const { return m_haveFloatGeom; }
 
-    // Stacking cascade index: negative means never placed by the
-    // spawn cascade (xwayland windows that set their own initial x/y
-    // keep it). 0-based; cycles every 8 before wrapping.
-    int floatCascadeIndex() const { return m_cascadeIndex; }
-    void setFloatCascadeIndex(int idx) { m_cascadeIndex = idx; }
 
     // State
     bool isMapped() const { return m_mapped; }
@@ -79,7 +74,6 @@ private:
     // opt-in via Workspace::setTilingEnabled.
     bool m_floating = true;
     bool m_haveFloatGeom = false;
-    int m_cascadeIndex = -1;
     bool m_mapped = false;
     float m_opacity = 1.0f;  // Opacity for animations (0.0 - 1.0)
     

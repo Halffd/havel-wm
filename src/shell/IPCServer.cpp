@@ -1243,7 +1243,11 @@ std::string IPCServer::handleGetCursorPosition(const std::string& args) {
         return result.dump();
     }
     int x = -1, y = -1;
-    m_queryCursor(&x, &y);
+    if (!m_queryCursor(&x, &y)) {
+        result["success"] = false;
+        result["error"] = "cursor query failed (compositor not ready?)";
+        return result.dump();
+    }
     result["success"] = true;
     result["x"] = x;
     result["y"] = y;
@@ -1257,7 +1261,7 @@ std::string IPCServer::handleWarpCursor(const std::string& args) {
     } catch (...) {
         return createError(0, -1, "Invalid JSON");
     }
-    
+
     int x = extractJsonInt(args, "x", 0);
     int y = extractJsonInt(args, "y", 0);
 
@@ -1267,7 +1271,11 @@ std::string IPCServer::handleWarpCursor(const std::string& args) {
         result["error"] = "cursor warp not wired to the compositor";
         return result.dump();
     }
-    m_warpCursor(x, y);
+    if (!m_warpCursor(x, y)) {
+        result["success"] = false;
+        result["error"] = "warp failed (out of layout bounds, or compositor not ready)";
+        return result.dump();
+    }
     result["success"] = true;
     result["x"] = x;
     result["y"] = y;
@@ -1286,7 +1294,11 @@ std::string IPCServer::handleClickPointer(const std::string& args) {
         result["error"] = "pointer click not wired to the compositor";
         return result.dump();
     }
-    m_clickPointer((uint32_t)button, pressed);
+    if (!m_clickPointer((uint32_t)button, pressed)) {
+        result["success"] = false;
+        result["error"] = "pointer click failed (compositor not ready)";
+        return result.dump();
+    }
     result["success"] = true;
     result["button"] = button;
     result["pressed"] = pressed;

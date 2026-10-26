@@ -93,46 +93,68 @@ public:
     }
 
     void onOutputFrame(const OutputFrameEvent& event) override {
-        if (!m_enabled) return;
+        if (!m_enabled || !m_api) return;
         if (!m_pointerMoved) return;
-        
+
         // Get cursor position from API
         int cursorX = (int)m_api->getCursorX();
         int cursorY = (int)m_api->getCursorY();
 
-        // Corner detection is per-monitor: on a multi-output layout the
-        // pointer's scene position must be compared against the corners
-        // of the output it is actually on, not the primary's full-size
-        // box (with two 1280-wide outputs, the right edge of monitor 2
-        // is at x=2559 - a single 1280-wide box could never see it).
-        CompositorAPI::OutputTarget out = m_api->currentOutputTarget();
-        if (out.w <= 0 || out.h <= 0) {
-            // No output context (single-output plugins path): fall back
-            // to the primary's dimensions at scene origin.
-            out.x = 0; out.y = 0;
-            out.w = m_api->getOutputWidth();
-            out.h = m_api->getOutputHeight();
+        // Corner detection is per-monitor, and it must run against the
+        // output the pointer is actually on. currentOutputTarget()
+        // returns the overlay target, which the C side sets later in
+        // the frame (during draw_overlays) - reading it here gave the
+        // PREVIOUS frame's output, so on a multi-monitor layout the
+        // corners were tested against the wrong box. Instead resolve
+        // the output under the cursor by box containment against the
+        // boxes cached by renderOverlay, where the per-pass target is
+        // guaranteed correct.
+        uint64_t nowMs = getMonotonicTimeMs();
+        const CompositorAPI::OutputTarget* out = nullptr;
+        CompositorAPI::OutputTarget fallback;
+        for (const auto& cached : m_outputBoxes) {
+            if (cached.out.w <= 0 || cached.out.h <= 0) continue;
+            // An output that stopped rendering has been unplugged; its
+            // box no longer exists in the layout.
+            if (nowMs - cached.lastSeenMs > 2000) continue;
+            if (cursorX >= cached.out.x && cursorX < cached.out.x + cached.out.w &&
+                cursorY >= cached.out.y && cursorY < cached.out.y + cached.out.h) {
+                out = &cached.out;
+                break;
+            }
         }
-        int relX = cursorX - out.x;
-        int relY = cursorY - out.y;
+        if (!out) {
+            // No cached box yet (before the first overlay pass): fall
+            // back to the primary's dimensions at scene origin.
+            fallback.x = 0;
+            fallback.y = 0;
+            fallback.w = m_api->getOutputWidth();
+            fallback.h = m_api->getOutputHeight();
+            out = &fallback;
+        }
+        int relX = cursorX - out->x;
+        int relY = cursorY - out->y;
 
         // Detect which corner of THIS output the pointer is in
-        Corner corner = detectCorner(relX, relY, out.w, out.h);
-        
-        // If cursor moved to a new corner
+        Corner corner = detectCorner(relX, relY, out->w, out->h);
+
         if (corner != m_lastCorner) {
-            if (m_lastCorner >= 0) {
-                // Cursor left previous corner - reset
-                m_cornerEnterTime = 0;
-            }
+            // Left the previous corner: reset cleanly so re-entering a
+            // corner always restarts the dwell. Arm the timer only for
+            // a real corner (corner == CORNER_NONE is -1: the old code
+            // armed it anyway and indexed m_cornerActions[-1] 250ms
+            // later).
+            m_cornerEnterTime = 0;
             m_lastCorner = corner;
-            m_cornerOutput = out;
-            m_cornerEnterTime = getMonotonicTimeMs();
-        } else if (m_cornerEnterTime > 0) {
+            if (corner >= 0) {
+                m_cornerOutput = *out;
+                m_cornerEnterTime = getMonotonicTimeMs();
+            }
+        } else if (corner >= 0 && m_cornerEnterTime > 0) {
             // Check if we've been in the corner long enough to trigger
             uint64_t elapsed = getMonotonicTimeMs() - m_cornerEnterTime;
             if (elapsed >= m_triggerDelay) {
-                triggerAction(m_cornerActions[(int)corner]);
+                triggerAction(m_cornerActions[corner]);
                 m_cornerEnterTime = 0;  // Reset to prevent repeated triggers
             }
         }
@@ -156,9 +178,23 @@ public:
     }
     
     void renderOverlay(void* rendererPtr) override {
-        if (!m_enabled || !rendererPtr || m_lastCorner < 0) return;
-        
+        if (!m_enabled || !rendererPtr) return;
+
         OverlayRenderer* renderer = static_cast<OverlayRenderer*>(rendererPtr);
+
+        // Cache every output's box as its pass runs: onOutputFrame uses
+        // these (via cursor containment) so corner detection does not
+        // depend on the overlay target, which is only valid during a
+        // draw pass (see the desync note there). Must run before the
+        // no-corner early return or the cache never fills while the
+        // pointer sits away from every corner.
+        if (CompositorAPI::OutputTarget out = m_api->currentOutputTarget();
+            out.w > 0 && out.h > 0) {
+            m_outputBoxes.resize(std::max(m_outputBoxes.size(), (size_t)out.index + 1));
+            m_outputBoxes[out.index] = {out, getMonotonicTimeMs()};
+        }
+
+        if (m_lastCorner < 0) return;
 
         // Highlight in scene coordinates: the corner's own monitor box.
         // (screenWidth/Height here belong to whichever output's pass is
@@ -201,6 +237,15 @@ private:
     CompositorAPI* m_api = nullptr;
     bool m_pointerMoved = false;
     CompositorAPI::OutputTarget m_cornerOutput;
+    // Per-output boxes cached during renderOverlay passes (the only place
+    // the target is guaranteed correct); onOutputFrame resolves the
+    // output under the cursor from these. lastSeenMs prunes outputs
+    // that stop rendering (unplug).
+    struct CachedOutput {
+        CompositorAPI::OutputTarget out;
+        uint64_t lastSeenMs = 0;
+    };
+    std::vector<CachedOutput> m_outputBoxes;
     bool m_haveFirstPos = false;
     int m_firstX = 0, m_firstY = 0;
     bool m_enabled;

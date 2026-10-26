@@ -373,6 +373,19 @@ void PluginManager::onMouseButton(uint32_t button, bool pressed, int x, int y) {
     }
 }
 
+bool PluginManager::dispatchMouseButton(uint32_t button, bool pressed, int x, int y) {
+    if (!pressed) {
+        onMouseButton(button, pressed, x, y);
+        return false;
+    }
+    for (auto& plugin : m_plugins) {
+        if (plugin && plugin->onMouseButton(button, pressed, x, y)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // ============================================================================
 // Configuration
 // ============================================================================

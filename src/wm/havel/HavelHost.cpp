@@ -197,8 +197,10 @@ static int hf_set_brightness(HavelState* H, void*) {
 static int hf_notify(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
     // Copy immediately: havel_tostring shares one static buffer.
-    std::string summary = arg_str(H, 0) ? arg_str(H, 0) : "";
-    std::string body = havel_gettop(H) >= 2 && arg_str(H, 1) ? arg_str(H, 1) : "";
+    const char* s0 = arg_str(H, 0);
+    const char* s1 = havel_gettop(H) >= 2 ? arg_str(H, 1) : nullptr;
+    std::string summary = s0 ? s0 : "";
+    std::string body = s1 ? s1 : "";
     if (ctx && ctx->server && !summary.empty()) {
         // Same path the IPC notify command uses
         std::string args = "{\"summary\":\"" + summary +
@@ -222,7 +224,6 @@ static int hf_log(HavelState* H, void*) {
 // up on backends that only advertise a plane and in screen captures.
 //
 //   cursor_mode("software")
-extern "C" void havel_wlr_set_software_cursor(struct havel_wlr_server*, bool);
 static int hf_cursor_mode(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
     std::string mode = arg_str(H, 0) ? arg_str(H, 0) : "";
@@ -319,15 +320,19 @@ static int hf_settings(HavelState* H, void*) {
     auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
     // Copy immediately: havel_tostring returns a pointer into one static
     // buffer, so a later arg_str call would alias an earlier result.
-    std::string key = arg_str(H, 0) ? arg_str(H, 0) : "";
+    const char* k = arg_str(H, 0);
+    std::string key = k ? k : "";
     if (key.empty() || !ctx || !ctx->server) {
         havel_pushnil(H);
         return HAVEL_OK;
     }
     if (havel_gettop(H) >= 2) {
-        std::string value = arg_str(H, 1) ? arg_str(H, 1) : "";
-        if (!value.empty()) ctx->server->settingsSet(key, value);
-        havel_pushnil(H);
+        const char* v = arg_str(H, 1);
+        std::string value = v ? v : "";
+        // settingsSet returns false when a typed key rejects the value;
+        // surface that so scripts can detect the failure.
+        havel_pushboolean(H, value.empty() ? 0 :
+            (ctx->server->settingsSet(key, value) ? 1 : 0));
         return HAVEL_OK;
     }
     std::string value = ctx->server->settingsGet(key);
@@ -818,7 +823,7 @@ static void havelSerializeValue(HavelState* H, int idx, std::string* out, int de
             size_t len = havel_arraylen(H, idx);
             for (size_t i = 0; i < len && i < 32; i++) {
                 if (i) *out += ", ";
-                havel_getindex(H, idx, (int)i + 1);  // 1-based indexing
+                havel_getindex(H, idx, (int)i);  // C API is 0-based
                 havelSerializeValue(H, -1, out, depth + 1);
                 havel_pop(H, 1);
             }
@@ -857,9 +862,8 @@ bool HavelHost::evalString(const std::string& source, std::string* result,
         havel_settop(m_H, 0);
         return false;
     }
-    havel_restore_chunk(m_H, pin);
-    // loadstring executed the chunk; the top of the stack holds its value
     if (result) serializeValue(-1, result);
     havel_pop(m_H, 1);
+    havel_restore_chunk(m_H, pin);
     return true;
 }

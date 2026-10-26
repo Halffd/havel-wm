@@ -113,10 +113,14 @@ bool FileManager::createDirectory(const std::string& path) {
 }
 
 bool FileManager::deleteDirectory(const std::string& path) {
-    // Recursively delete contents
+    // Recursively delete contents. Entries are classified with lstat:
+    // a symlink is unlinked itself, never followed, so a link planted in
+    // the tree cannot redirect the recursion at files outside the tree.
     std::vector<FileInfo> files = listDirectory(path);
     for (const auto& file : files) {
-        if (file.isDirectory) {
+        struct stat lst;
+        bool isLink = lstat(file.path.c_str(), &lst) == 0 && S_ISLNK(lst.st_mode);
+        if (!isLink && file.isDirectory) {
             deleteDirectory(file.path);
         } else {
             deleteFile(file.path);

@@ -122,7 +122,14 @@ public:
     // -------------------------------------------------------------------------
     
     void onMouseMotion(int x, int y);
+    // Broadcast (no consumption). Releases use this so every plugin sees
+    // the button go up even when another consumed the press.
     void onMouseButton(uint32_t button, bool pressed, int x, int y);
+    // Press dispatch with consumption: first plugin that returns true stops
+    // the event (the C layer then skips the seat notify). Iteration order
+    // is load order - the decoration plugin registers before the overlay
+    // UIs so client-side title-bar clicks keep working.
+    bool dispatchMouseButton(uint32_t button, bool pressed, int x, int y);
 
     // Plugin commands: route a named command to one plugin's onCommand.
     // Returns false when the plugin is unknown or did not handle it.

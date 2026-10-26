@@ -104,12 +104,28 @@ public:
 
         // Collect each output as its render pass runs; the panel is drawn
         // once per monitor (a single panel at scene (10,10) showed up on
-        // the first monitor only).
+        // the first monitor only). Entries whose output stops rendering
+        // (unplugged) are pruned - there is no OutputRemoved dispatch to
+        // plugins, so an append-only cache would draw a panel on a
+        // monitor that no longer exists.
+        uint64_t seenMs = getMonotonicTimeMs();
         {
             CompositorAPI::OutputTarget out = m_api->currentOutputTarget();
             if (out.w > 0 && out.h > 0) {
                 m_outputs.resize(std::max(m_outputs.size(), (size_t)out.index + 1));
                 m_outputs[out.index] = out;
+                m_outputSeenMs.resize(m_outputs.size(), 0);
+                m_outputSeenMs[out.index] = seenMs;
+            }
+        }
+        // The cache is INDEXED by output index, so a stale entry is
+        // tombstoned (zero box) rather than erased: erasing would shift
+        // every later output's slot and misalign future writes. The
+        // draw loop skips zero-size boxes.
+        for (size_t i = 0; i < m_outputs.size() && i < m_outputSeenMs.size(); i++) {
+            if (m_outputs[i].w > 0 && seenMs - m_outputSeenMs[i] > 2000) {
+                m_outputs[i] = CompositorAPI::OutputTarget{};  // tombstone
+                m_outputSeenMs[i] = 0;
             }
         }
 
@@ -195,6 +211,10 @@ public:
 
 private:
     std::vector<CompositorAPI::OutputTarget> m_outputs;
+    // Last wall-clock time each m_outputs slot was refreshed by its
+    // output's render pass (prunes unplugged outputs; parallel to
+    // m_outputs, indexed by output index).
+    std::vector<uint64_t> m_outputSeenMs;
     CompositorAPI* m_api = nullptr;
     bool m_enabled;
     bool m_showGraph;

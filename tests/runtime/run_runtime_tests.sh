@@ -696,7 +696,7 @@ ZIPC
 # workspace 0 - phase 5 spawns an interactive terminal that would
 # otherwise cover the sample regions (get_windows returns a bare array;
 # the spawned terminal lives on the workspace the key phase switched to)
-python3 - "$SOCK" <<'FPARK' >/dev/null 2>&1
+PARKED=$(python3 - "$SOCK" <<'FPARK' 2>/dev/null
 import socket, json, sys
 s = socket.socket(socket.AF_UNIX); s.settimeout(10)
 s.connect(sys.argv[1])
@@ -708,16 +708,25 @@ s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_windows","params":{}
 r = json.loads(s.recv(65536))
 wins = r.get("result", [])
 if isinstance(wins, dict): wins = wins.get("windows", [])
+parked = 0
 for w in wins:
     wid = w.get("id")
     if wid is None: continue
     rpc("set_floating", {"id": wid, "floating": True})
     rpc("move", {"id": wid, "x": 900, "y": 380})
     rpc("resize", {"id": wid, "w": 300, "h": 200})
-print(len(wins))
+    parked += 1
+print(parked if len(wins) == parked else -1)
 FPARK
+)
 sleep 0.5
-report 0 "test clients parked, workspace 0"
+if [ "${PARKED:--1}" -lt 0 ]; then
+    report 1 "test clients parked, workspace 0 (parked=${PARKED:-err})"
+elif [ "${PARKED:-0}" -eq 0 ]; then
+    skip "test clients parked, workspace 0 (no clients alive to park)"
+else
+    report 0 "test clients parked, workspace 0 (parked=${PARKED:-err})"
+fi
 
 if python3 - "$SOCK" "$ZWPIMG" <<'ZWSET' 2>/dev/null
 import socket, json, sys
@@ -1279,6 +1288,8 @@ MVS
     # Own app-id: an earlier phase's foot would match a generic search and
     # the arrange would land on the wrong workspace.
     (WAYLAND_DISPLAY=wayland-0 timeout 60 foot -a harness_gaps -e sh -c 'sleep 55' > /dev/null 2>&1 &)
+    GAP60CAP="$(mktemp /tmp/havel-gap60-XXXXXX.png)"
+    GAP10CAP="$(mktemp /tmp/havel-gap10-XXXXXX.png)"
     sleep 2
     setfloat_harness() {
         python3 - "$SOCK" "$1" <<'SFLG' 2>/dev/null
@@ -1303,12 +1314,13 @@ SFLG
     setfloat_harness false
     hrun 'gaps(60)' >/dev/null
     sleep 1
-    WAYLAND_DISPLAY=wayland-0 grim /tmp/opencode/gaps60.png 2>/dev/null
+    WAYLAND_DISPLAY=wayland-0 grim "$GAP60CAP" 2>/dev/null
     hrun 'gaps(10)' >/dev/null
     sleep 1
-    WAYLAND_DISPLAY=wayland-0 grim /tmp/opencode/gaps10.png 2>/dev/null
-    GAPX=$(python3 - <<'GAPX' 2>/dev/null
+    WAYLAND_DISPLAY=wayland-0 grim "$GAP10CAP" 2>/dev/null
+    GAPX=$(python3 - "$GAP60CAP" "$GAP10CAP" <<'GAPX' 2>/dev/null
 from PIL import Image
+import sys
 def edge(p):
     im = Image.open(p).convert('RGB'); px = im.load()
     for x in range(0, 400):
@@ -1316,14 +1328,13 @@ def edge(p):
         if abs(c[0]-25) > 4 or abs(c[1]-25) > 4 or abs(c[2]-38) > 4:
             return x
     return -1
-a = edge('/tmp/opencode/gaps60.png'); b = edge('/tmp/opencode/gaps10.png')
-print(a, b)
+print(edge(sys.argv[1]), edge(sys.argv[2]))
 GAPX
 )
     G60=$(echo "$GAPX" | awk '{print $1}'); G10=$(echo "$GAPX" | awk '{print $2}')
     report $([ "${G60:-0}" -ge 50 ] && [ "${G60:-0}" -le 80 ] && [ "${G10:-0}" -le 30 ] && echo 0 || echo 1) \
         "gaps move the tiled edge (g60=${G60:-err} g10=${G10:-err})"
-    rm -f /tmp/opencode/gaps60.png /tmp/opencode/gaps10.png
+    rm -f "$GAP60CAP" "$GAP10CAP"
 
     # -- floating_rule: a foot with the ruled app-id must spawn floating
     hrun 'floating_rule("harness_float")' >/dev/null

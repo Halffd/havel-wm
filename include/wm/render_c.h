@@ -27,6 +27,10 @@ wlr_scene_rect_t* havel_scene_rect(wlr_scene_tree_t* parent, int x, int y,
 
 // CPU pixel buffer (ARGB8888 little-endian, pixels copied) drawn at
 // (x, y) stretched to (width, height); pw/ph are the source dimensions.
+wlr_scene_buffer_t* havel_scene_pixels(wlr_scene_tree_t* parent,
+                                       const uint32_t* pixels, int pw, int ph,
+                                       int x, int y, int width, int height);
+
 // Text rasterization (CPU, ARGB8888) for C-side overlays. 0 = not
 // renderable (no font yet). Free with havel_text_pixels_free.
 int havel_text_rasterize(const char* text, int px, const float color[4],
@@ -36,10 +40,6 @@ void havel_text_pixels_free(uint32_t* pixels);
 // Convenience: rasterize and attach in one step (dest size = raster size).
 wlr_scene_buffer_t* havel_scene_text(wlr_scene_tree_t* parent, const char* text,
                                      int x, int y, int px, const float color[4]);
-
-wlr_scene_buffer_t* havel_scene_pixels(wlr_scene_tree_t* parent,
-                                        const uint32_t* pixels, int pw, int ph,
-                                        int x, int y, int width, int height);
 
 #ifdef __cplusplus
 }

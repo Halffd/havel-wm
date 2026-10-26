@@ -192,18 +192,37 @@ public:
         box.h = out.h;
         box.underCursor = out.underCursor;
 
-        // Decide whether the magnifier should be visible at all, and drop
-        // the persistent tree when not (an old tree would stay frozen on
-        // screen - nothing redraws while hidden).
+        // Decide whether the magnifier should be visible on THIS output.
+        // Multi-monitor: renderOverlay runs once per output pass; the
+        // passes the magnifier does not belong to must simply SKIP - not
+        // tear the persistent tree down. The old destroy-on-every-!
+        // want pass rebuilt the tree (and forced a fresh capture) once
+        // per frame on every non-cursor output, forever.
         bool want = false;
         int idx = out.index;
         if (m_api->zoomMode() != 0 && out.underCursor && m_api->zoomActive(idx)) {
             want = m_anim[idx].mag >= 1.05f;  // not visually zoomed yet => off
         }
         if (!want) {
-            if (m_tree) renderer->destroyPersistentTree(&m_tree);
-            m_lastGeomKey = 0;
-            return;
+            // Only drop the tree when the magnifier truly deactivates -
+            // i.e. no output wants it anymore (zoom mode off, zoom
+            // inactive or the animation fell back under the visibility
+            // threshold on the cursor's own output). Passing over
+            // another monitor's frame must keep the tree.
+            bool anyWant = false;
+            for (const auto& [i, box2] : m_boxes) {
+                if (m_api->zoomMode() != 0 && box2.underCursor &&
+                    m_api->zoomActive(i) && m_anim[i].mag >= 1.05f) {
+                    anyWant = true;
+                    break;
+                }
+            }
+            if (!anyWant) {
+                if (m_tree) renderer->destroyPersistentTree(&m_tree);
+                m_lastGeomKey = 0;
+                return;
+            }
+            return;  // other output's pass: leave the tree alone
         }
 
         // Draw into a PERSISTENT tree rebuilt only on change. The earlier
@@ -345,6 +364,8 @@ private:
         mix(capSeq);
         mix((uint64_t)box.w);
         mix((uint64_t)box.h);
+        mix((uint64_t)box.x);
+        mix((uint64_t)box.y);
         return k;
     }
 

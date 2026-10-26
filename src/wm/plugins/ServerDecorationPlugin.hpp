@@ -26,9 +26,6 @@ struct DecorationTheme {
     static constexpr int SHADOW_BLUR = 16;
     static constexpr float SHADOW_ALPHA = 0.4f;
 
-    // Focus transition duration (ms)
-    static constexpr int FOCUS_TRANSITION_MS = 200;
-
     // Colours (RGBA 0..1)
     static inline constexpr std::array<float, 4> FOCUSED_BG   = {0.2f, 0.3f, 0.4f, 1.0f};
     static inline constexpr std::array<float, 4> UNFOCUSED_BG = {0.15f, 0.15f, 0.2f, 1.0f};
@@ -51,10 +48,6 @@ struct WindowDecoration {
     // For maximize restore
     int view_start_x = 0, view_start_y = 0;
     int view_start_w = 0, view_start_h = 0;
-    // Focus transition progress (0=unfocused, 1=focused) for smooth
-    // colour interpolation; the animator drives this.
-    float focusBlend = 0.0f;
-
 };
 
 /**
@@ -98,7 +91,7 @@ public:
     void onViewDestroy(const ViewEvent& event) override;
     void renderOverlay(void* renderer) override;
     void onMouseMotion(int x, int y) override;
-    void onMouseButton(uint32_t button, bool pressed, int x, int y) override;
+    bool onMouseButton(uint32_t button, bool pressed, int x, int y) override;
 
 private:
     CompositorAPI* m_api = nullptr;
@@ -119,7 +112,6 @@ private:
     uint64_t m_decoSig = ~0ull;
 
     uint64_t decorationSignature() const;
-    void updateDecoration(void* view, const WindowDecoration& deco);
     void renderTitleBar(OverlayRenderer* renderer, const WindowDecoration& deco);
     void renderShadow(OverlayRenderer* renderer, const WindowDecoration& deco);
     void renderRoundedCorners(OverlayRenderer* renderer, const WindowDecoration& deco);

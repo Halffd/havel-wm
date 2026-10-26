@@ -6,10 +6,9 @@
 // keyboard input is intercepted before keybindings and plugins see it,
 // the pointer is prevented from reaching clients, and a full-screen
 // overlay renders on every output.
-//
-// Authentication uses PAM (the "swaylock" service, which ships on every
-// distro that ships swaylock — same config, same unix_chkpwd helper).
-//
+// Authentication uses PAM (service chain: "swaylock", falling back to
+// "login" on systems without /etc/pam.d/swaylock). If no PAM service can
+// start at all, lock() refuses to engage rather than brick the session.
 // Wayland integration: rendered through the OverlayRenderer (font module
 // for text, scene buffers for pixels) — the same path every other
 // overlay uses. Each output gets its own pass with its own box.
@@ -51,6 +50,11 @@ public:
 private:
     // Attempt PAM authentication with the current password buffer.
     bool authenticate();
+
+    // Zero the typed-password buffer (volatile stores so the compiler
+    // cannot elide the scrub), then clear it. Used on every path that
+    // discards password material.
+    void scrubPassword();
 
     bool m_locked = false;
     std::string m_password;    // current typed password (not displayed)
