@@ -50,6 +50,16 @@ Server::Server() {
     actions.restore = [this](uint64_t id) {
         if (Window* w = m_coreWindowManager.getWindow(id)) m_coreWindowManager.toggleMaximize(w);
     };
+    // closeWindow's m_onClose callback sends the actual WM_DELETE/wl close
+    // through the view's native handle; nothing ever registered it, so IPC
+    // close only untracked the window (harness proved it: an X client
+    // survived IPC close). Wire it here next to the other actions.
+    m_coreWindowManager.setOnClose([this](Window* window) {
+        if (!window) return;
+        if (View* view = window->view()) {
+            havel_wlr_close_view(view->nativeHandle());
+        }
+    });
     actions.close = [this](uint64_t id) { m_coreWindowManager.closeWindow(id); };
     actions.move = [this](uint64_t id, int x, int y) {
         if (Window* w = m_coreWindowManager.getWindow(id)) m_coreWindowManager.moveWindow(w, x, y);

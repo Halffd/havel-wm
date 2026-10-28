@@ -48,7 +48,11 @@ cleanup() {
 trap cleanup EXIT
 
 wait_socket() {
-    for _ in $(seq 1 45); do
+    # 9s was too tight even before: under this box's I/O load spikes a
+    # fresh compositor boot (117MB binary, split-DWARF) has taken 45s at
+    # load ~10 and ~25s at load ~5. 90s keeps the check real (connect
+    # against a live listener) while tolerating every start observed.
+    for _ in $(seq 1 450); do
         if python3 -c "
 import socket,sys
 try:
@@ -1349,6 +1353,68 @@ GAPX
     hrun 'border_size(4)' >/dev/null
     report $(wait_for_log "border_size -> 4" 5 && echo 0 || echo 1) "border_size applied"
     hrun 'border_size(1)' >/dev/null
+fi
+
+
+# ---------------------------------------------------------------- phase 17: xwayland
+# Closes checklist gap 6.6: an actual X client exercising the xwayland
+# surface lifecycle (new surface -> associate -> C++ view -> get_windows)
+# and the WM_DELETE close path. xred.c maps a solid-red window and
+# loops on XNextEvent, so it only exits on a WM protocol error.
+XRED="$BUILD_DIR/tests/xred"
+if pgrep -x Xwayland >/dev/null 2>&1; then
+    if [ ! -x "$XRED" ]; then
+        mkdir -p "$BUILD_DIR/tests"
+        cc -o "$XRED" tests/runtime/xred.c -lX11 || true
+    fi
+    if [ -x "$XRED" ]; then
+        # Spawn under the compositor's xwayland DISPLAY (:0 per boot log).
+        (DISPLAY=:0 "$XRED" > /dev/null 2>&1 &)
+        sleep 2
+        # One probe returns both the match count and the window id.
+        XPROBE=$(python3 - "$SOCK" <<'XW_PY' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_windows","params":{}})+"\n").encode())
+r = json.loads(s.recv(65536)); s.close()
+wins = r.get("result", [])
+if isinstance(wins, dict): wins = wins.get("windows", [])
+match = [w for w in wins
+         if "xred-xwayland-test" in str(w.get("title","")) + str(w.get("app_id",""))]
+print("%d %s" % (len(match), match[0].get("id", match[0].get("window_id", "")) if match else ""))
+XW_PY
+)
+        XWINS=$(echo "$XPROBE" | awk '{print $1}')
+        XRED_ID=$(echo "$XPROBE" | awk '{print $2}')
+        report $([ "${XWINS:-0}" -ge 1 ] && echo 0 || echo 1) \
+            "xwayland client mapped (get_windows xred count=${XWINS:-err})"
+
+        if [ -n "$XRED_ID" ] && [ "$XRED_ID" != "" ]; then
+            # WM_DELETE via IPC close: xred only exits on the WM protocol.
+            python3 - "$SOCK" "$XRED_ID" <<'XCLOSE_PY' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"close",
+                       "params":{"id": int(sys.argv[2])}})+"\n").encode())
+s.recv(65536); s.close()
+XCLOSE_PY
+            sleep 2
+            XRED_ALIVE=$(pgrep -x xred | wc -l)
+            report $([ "$XRED_ALIVE" -eq 0 ] && echo 0 || echo 1) \
+                "xwayland close terminates client (alive=${XRED_ALIVE})"
+            report $(wait_for_log "\[XWayland\] DESTROY" 10 && echo 0 || echo 1) \
+                "xwayland destroy path fired"
+        else
+            skip "xwayland close (window id not found)"
+        fi
+        pkill -x xred 2>/dev/null
+    else
+        skip "xwayland phase (xred build failed - libX11 dev missing?)"
+    fi
+else
+    skip "xwayland phase (no Xwayland server)"
 fi
 
 # ---------------------------------------------------------------- teardown
