@@ -36,12 +36,12 @@ evdev/pc105/us.
 | # | Item | Code path | How to verify | Status |
 |---|------|-----------|---------------|--------|
 | 2.1 | `override_redirect` windows ignored (no view, no scene node) | `wlr_bridge.c:1397` early return in `server_new_xwayland_surface` | spawn a menu/tooltip X client (override-redirect); no view appears in `get_windows` | UNVERIFIED — needs X client |
-| 2.2 | View struct created, kind-tagged `HAVEL_VIEW_XWAYLAND` (0x58574C56), zero-initialized | `wlr_bridge.c:1403-1404` | log `[XWayland] View setup complete`; `get_windows` lists it | VERIFIABLE with any X client |
-| 2.3 | Scene tree created immediately (wl_surface may not exist yet) | `wlr_bridge.c:1419-1424` | associate handler binds the scene surface when ready | covered by 2.5 |
+| 2.2 | View struct created, kind-tagged `HAVEL_VIEW_XWAYLAND` (0x58574C56), zero-initialized | `wlr_bridge.c:1403-1404` | log `[XWayland] View setup complete`; `get_windows` lists it | **VERIFIED 2026-10-27 headless (harness phase 17): xred maps, `get_windows xred count=1`** |
+| 2.3 | Scene tree created immediately (wl_surface may not exist yet) | `wlr_bridge.c:1419-1424` | associate handler binds the scene surface when ready | **VERIFIED 2026-10-27: `surface associated: binding scene surface` in harness run** |
 | 2.4 | **Associate ordering hazard**: wl_surface is NOT valid at new-surface time; scene surface created only on the `associate` event, guarded by `scene_surface_created` (double-create guard); dissociate resets the flag so re-associate rebinds | `wlr_bridge.c:429-437` (comment), `1336-1359` (associate), `1361-1369` (dissociate) | an X client that rebinds its surface; log shows `surface associated: binding scene surface` again | VERIFIED by design (comment records the SIGSEGV that motivated it); runtime rebind UNVERIFIED |
-| 2.5 | No `events.map` for xwayland: C++ `onViewMapped` fires from associate (spawn offset, focus, thumbnail) | `wlr_bridge.c:1349-1357` | first frame shows the window; `[Server] onViewMapped` in log | covered by 2.2 |
-| 2.6 | Destroy: cpp_view cleared FIRST, listeners removed, C++ notified (it frees the View), scene-graph view freed C-side, struct freed exactly once | `wlr_bridge.c:1303-1333` | close an X client; log `DESTROY`; no ASAN report (debug builds run ASAN) | covered by 2.2 teardown |
-| 2.7 | C++ View for xwayland surfaces: `createXwaylandView` — floating by default, active workspace, registered with window manager as app "xwayland" | `src/wm/core/Server.cpp:240-258` | `get_windows` shows `"xwayland"` app id, floating | covered by 2.2 |
+| 2.5 | No `events.map` for xwayland: C++ `onViewMapped` fires from associate (spawn offset, focus, thumbnail) | `wlr_bridge.c:1349-1357` | first frame shows the window; `[Server] onViewMapped` in log | **VERIFIED 2026-10-27 (harness: window visible in get_windows right after associate)** |
+| 2.6 | Destroy: cpp_view cleared FIRST, listeners removed, C++ notified (it frees the View), scene-graph view freed C-side, struct freed exactly once | `wlr_bridge.c:1303-1333` | close an X client; log `DESTROY`; no ASAN report (debug builds run ASAN) | **VERIFIED 2026-10-27 headless (harness: `xwayland destroy path fired` PASS after WM_DELETE close)** |
+| 2.7 | C++ View for xwayland surfaces — floating by default, active workspace, registered with window manager | routes through `createXdgView` with the X class as appId (`wlr_bridge.c` new_surface); the dedicated `createXwaylandView` was dead code and is deleted | `get_windows` shows the window, floating | **VERIFIED 2026-10-27 (harness: window listed and closable by id)** |
 
 ## 3. Positioning and stacking (cascade)
 
@@ -60,7 +60,7 @@ evdev/pc105/us.
 | 4.1 | Click-to-focus on X surfaces: hit test falls through to the xwayland branch, `wlr_xwayland_surface_activate`, raise, keyboard enter | `wlr_bridge.c:2892-2900` | click an X window; it takes keyboard | needs real pointer / inject via warp_cursor+click_pointer IPC |
 | 4.2 | Keyboard focus delivered to X via `wlr_xwayland_set_seat` — **FIXED this session**: the seat is now wired at the first backend input device and again at the first virtual-keyboard arrival (the path that fires under headless; the backend exposes zero input devices there), idempotent via `server->xwayland_seat_set` | boot log: `[XWayland] seat wired for X key events (virtual keyboard)` — observed in headless smoke | type into a focused X client on DRM — delivery to a real client still needs a live X app | **wired + smoke-verified headless; client-level delivery UNVERIFIED (no X clients installed)** |
 | 4.3 | Screen lock gates input for X clients too (the C-side lock gates run before any seat notify) | `wlr_bridge.c:2780-2785` (button), `2903-2906` (axis), `2705-2711` (motion) — fixed in 90c20bf | lock screen; X client receives nothing | fixed this session; headless-verified logic, X-client runtime UNVERIFIED |
-| 4.4 | `close_view` on an X window sends `wlr_xwayland_surface_close` (WM_DELETE) | `wlr_bridge.c:621-625` (kind-tagged dispatch) | IPC `close` on an X window; client exits cleanly (not killed) | UNVERIFIED — needs X client |
+| 4.4 | `close_view` on an X window sends `wlr_xwayland_surface_close` (WM_DELETE) | `wlr_bridge.c:621-625` (kind-tagged dispatch) → `CoreWindowManager::closeWindow` m_onClose → `havel_wlr_close_view` (the callback was never registered before — IPC close only untracked the window; wired in Server's actions setup) | IPC `close` on an X window; client exits cleanly (not killed) | **VERIFIED 2026-10-27 headless (harness: `xwayland close terminates client (alive=0)` PASS)** |
 | 4.5 | App-id matching / window rules see X windows' class as app id | `wlr_bridge.c:1448-1449` (`xsurface->class` passed as appId into `createXdgView`) | `floating_rule("some-x-class")` matches an X client | covered by 2.2 (`get_windows` app field) |
 
 ## 5. State operations (kind-tagged dispatch — all XDG/XWayland pairs)
@@ -90,7 +90,7 @@ is never miscast (the old unconditional cast crashed on XWayland).
 | 6.3 | XWayland DnD (`src/wm/core/XWaylandDnD.cpp`) is a WIP stub — **excluded from the build** (CMakeLists.txt:179-181) and `handleXWaylandDnDEvent` has no caller; Xdnd messages cannot reach it | CMakeLists.txt:179 comment "XWaylandDnD - WIP, needs wlroots integration" — still open |
 | 6.4 | ~~`createXwaylandView` dead code~~ **FIXED (this session)**: deleted from Server.cpp and Server.hpp; a comment at the former declaration site records that XWayland surfaces route through `createXdgView` with the X class as appId. | git grep createXwaylandView → only the explanatory comment |
 | 6.5 | Scene-graph xwayland views (`scene_view_create_xwayland`) hardcode float geometry 640x480 at (150,150) — cosmetic; the real layout comes from the wlr scene tree | wlr_bridge.c:3986-3989 |
-| 6.6 | No test in the harness covers XWayland — all items above marked VERIFIED are code-reading verified; the harness runs zero X clients | tests/runtime/run_runtime_tests.sh (no xwayland phase) |
+| 6.6 | ~~No harness coverage for XWayland~~ **FIXED (this session)**: harness phase 17 compiles `xred.c` on the fly, spawns it under the compositor's xwayland, and asserts the full lifecycle — map (get_windows), WM_DELETE close (client exits), destroy log. All three PASS headless; the phase immediately caught a real bug (the unregistered close callback). | tests/runtime/run_runtime_tests.sh phase 17; harness now 74 passed / 0 failed / 0 skipped |
 
 ## 7. Environment for verification
 
@@ -118,14 +118,15 @@ tr '\0' '\n' < /proc/$(pgrep -x havel-wm)/environ | grep DISPLAY   # 1.2
 
 ## Status summary
 
-- 3 items VERIFIED by this session's changes (3.3 configure size fix,
-  4.3 lock gates, 5.9 reparent) — compile + harness-verified, X-client
-  runtime pending
-- 2 design-verified (associate ordering 2.4, eager server 1.1)
-- Of the 6 gaps found by this checklist, 3 are now FIXED (6.1 seat
-  wiring — headless-smoked, 6.2 five missing listeners, 6.4 dead
-  createXwaylandView); 6.3 (DnD stub) and 6.6 (no harness phase)
-  remain open; 6.5 is cosmetic
-- Runtime harness after the fixes: 71 passed, 0 failed, 0 skipped
-- Client-level items remain honestly UNVERIFIED: no X test clients in
-  this environment (xeyes/xclock/xterm absent)
+- VERIFIED live (headless harness/smoke): server lifecycle 1.1/1.2/1.5,
+  surface lifecycle 2.2/2.3/2.5/2.6/2.7, title/class propagation (6.2
+  listeners logged at runtime), seat wiring (6.1, boot log), close
+  path 4.4 (after wiring the never-registered m_onClose), and harness
+  coverage itself (6.6)
+- Session fixes: 3.3 configure size, 4.3 lock gates, 5.9 reparent,
+  6.1 seat, 6.2 five listeners, 6.4 dead code, 6.6 harness phase,
+  plus the close-callback bug the new phase caught
+- Still open: 6.3 (XWaylandDnD stub, excluded from build), 2.1/2.4
+  runtime rebind (needs override-redirect + surface-rebinding X
+  clients), 4.1/4.2 client-level input on DRM, 6.5 (cosmetic)
+- Runtime harness: 74 passed, 0 failed, 0 skipped
