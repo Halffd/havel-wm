@@ -10,9 +10,12 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cerrno>
+#include <csignal>
 #include <ctime>
 #include <pwd.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 namespace havel {
 
@@ -153,6 +156,118 @@ void ScreenLock::scrubPassword() {
 }
 
 // ---------------------------------------------------------------------------
+// Async authentication (fork + pipe, polled from the render loop)
+// ---------------------------------------------------------------------------
+// A wrong password costs real time: PAM modules delay and unix_chkpwd
+// forks. Running pam_authenticate inline froze the whole compositor for
+// seconds per attempt (no frames, no input) — observed live. The worker
+// child runs the full PAM chain and writes one verdict byte to a pipe;
+// pollAuth() (called from render, ~60 Hz) collects it without blocking.
+
+void ScreenLock::startAuth() {
+    if (m_authBusy) return;
+
+    if (pipe(m_authPipe) != 0) {
+        LOG_ERROR("[ScreenLock] pipe() failed, falling back to sync auth");
+        m_authPipe[0] = m_authPipe[1] = -1;
+        if (authenticate()) {
+            unlock();
+        } else if (m_locked) {
+            m_failedAttempts++;
+            m_status = "Wrong password";
+            scrubPassword();
+        }
+        return;
+    }
+
+    // Copy the password for the child BEFORE fork: the child reads it
+    // from this same buffer, and the parent scrubs its copy right after
+    // fork so the material lives in exactly one process at a time.
+    std::string childPassword = m_password;
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        LOG_ERROR("[ScreenLock] fork() failed, falling back to sync auth");
+        close(m_authPipe[0]); close(m_authPipe[1]);
+        m_authPipe[0] = m_authPipe[1] = -1;
+        if (authenticate()) {
+            unlock();
+        } else if (m_locked) {
+            m_failedAttempts++;
+            m_status = "Wrong password";
+            scrubPassword();
+        }
+        return;
+    }
+
+    if (pid == 0) {
+        // ---- child: run PAM, write verdict, _exit ----
+        close(m_authPipe[0]);
+        // Restore default dispositions the compositor may have changed;
+        // PAM helpers (unix_chkpwd) and signals must behave normally.
+        signal(SIGPIPE, SIG_DFL);
+        bool ok = false;
+        {
+            // Swap the buffer so authenticate() sees the copied password.
+            std::string saved;
+            saved.swap(m_password);
+            m_password = childPassword;
+            // scrubPassword() in the child's failure paths only touches
+            // the child's copy — exactly what we want.
+            ok = authenticate();
+            // authenticate() scrubbed m_password on every exit path.
+        }
+        char verdict = ok ? 1 : 0;
+        ssize_t w = write(m_authPipe[1], &verdict, 1);
+        (void)w;
+        close(m_authPipe[1]);
+        _exit(ok ? 0 : 1);
+    }
+
+    // ---- parent ----
+    close(m_authPipe[1]);
+    m_authPipe[1] = -1;
+    scrubPassword();          // parent copy gone; child owns it now
+    m_authBusy = true;
+    m_status = "Checking...";
+    LOG_INFO("[ScreenLock] auth worker forked (pid %d)", (int)pid);
+}
+
+void ScreenLock::pollAuth() {
+    if (!m_authBusy || m_authPipe[0] < 0) return;
+
+    char verdict = -1;
+    ssize_t n = read(m_authPipe[0], &verdict, 1);
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return;  // still running
+        LOG_ERROR("[ScreenLock] auth pipe read error");
+        verdict = 0;
+    } else if (n == 0) {
+        // EOF without a verdict byte: child crashed. Treat as failure
+        // but distinguish it from a wrong password.
+        LOG_ERROR("[ScreenLock] auth worker died without a verdict");
+        verdict = 0;
+        m_status = "auth worker crashed";
+    }
+
+    // Verdict landed: reap the child and close the pipe.
+    int wstatus = 0;
+    while (waitpid(-1, &wstatus, WNOHANG) > 0) {}
+    close(m_authPipe[0]);
+    m_authPipe[0] = -1;
+    m_authBusy = false;
+
+    if (verdict == 1) {
+        unlock();
+    } else if (m_locked) {
+        m_failedAttempts++;
+        if (m_status != "auth worker crashed") m_status = "Wrong password";
+        LOG_INFO("[ScreenLock] auth failed (async)");
+    }
+}
+
+
+// ---------------------------------------------------------------------------
 // Lock / unlock / key handling
 // ---------------------------------------------------------------------------
 
@@ -202,15 +317,8 @@ bool ScreenLock::handleKey(uint32_t keysym, bool pressed, const std::string& utf
     // Return / Enter: submit for authentication
     if (keysym == 0xFF0D /* Return */ || keysym == 0xFF8D /* KP_Enter */) {
         if (m_password.empty()) return true;  // nothing to auth
-        if (authenticate()) {
-            unlock();
-        } else if (m_locked) {
-            // A dead PAM backend inside authenticate() may have already
-            // unlocked; only count as a wrong password if still locked.
-            m_failedAttempts++;
-            m_status = "Wrong password";
-            scrubPassword();
-        }
+        if (m_authBusy) return true;          // a check is already running
+        startAuth();
         return true;
     }
 
@@ -244,6 +352,9 @@ bool ScreenLock::handleKey(uint32_t keysym, bool pressed, const std::string& utf
 
 void ScreenLock::render(OverlayRenderer* renderer, int ox, int oy, int w, int h) {
     if (!renderer || !m_locked) return;
+
+    // Collect the auth verdict from a running worker (no-op when idle).
+    pollAuth();
 
     // Full-screen dark background
     renderer->drawRect((float)ox, (float)oy, (float)w, (float)h,

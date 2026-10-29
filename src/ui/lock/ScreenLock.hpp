@@ -49,7 +49,15 @@ public:
 
 private:
     // Attempt PAM authentication with the current password buffer.
+    // Synchronous path (fork fails) and the child-side worker.
     bool authenticate();
+
+    // Async auth: fork a worker (swaylock-style) so a wrong-password PAM
+    // delay cannot freeze the compositor's frame loop. The child runs the
+    // full PAM chain with the typed password and writes one verdict byte
+    // to a pipe; the render loop polls the read end (pollAuth()).
+    void startAuth();
+    void pollAuth();
 
     // Zero the typed-password buffer (volatile stores so the compiler
     // cannot elide the scrub), then clear it. Used on every path that
@@ -61,6 +69,12 @@ private:
     std::string m_status;      // "Wrong password" / "Locked" / ...
     int m_failedAttempts = 0;
     int m_dotCount = 0;        // rendered dots (managed for smooth updates)
+
+    // Async auth state. m_authBusy while a worker runs; keys are still
+    // consumed but Enter is ignored until the verdict lands.
+    bool m_authBusy = false;
+    int m_authPipe[2] = {-1, -1};   // [0]=parent read, [1]=child write
+
 };
 
 } // namespace havel
