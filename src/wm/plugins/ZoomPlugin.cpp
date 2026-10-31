@@ -159,6 +159,16 @@ public:
         if (dtMs > 100.0f) dtMs = 100.0f;
 
         int mode = m_api->zoomMode();
+        // Mode switch resets the Server-side targets (zoomSetMode clears
+        // the map) - drop the animation state too, or the stale applied
+        // value eases toward the NEW mode's target from the OLD mode's
+        // trajectory (observed: lens->fullscreen left a.level at 1.87
+        // easing to 2.0 while a stale decay ran, and the fullscreen
+        // capture caught the crossing).
+        if (mode != m_lastTickMode) {
+            m_anim.clear();
+            m_lastTickMode = mode;
+        }
         float k = m_smoothingMs <= 0.0f ? 1.0f
                                         : 1.0f - std::exp(-dtMs / m_smoothingMs);
 
@@ -333,6 +343,7 @@ private:
     uint32_t m_modeMods = (1u << 6) | (1u << 2);
     uint32_t m_modeKeysym = XKB_KEY_m;
     float m_smoothingMs = 300.0f;
+    int m_lastTickMode = -1;  // detect mode switches, reset animation
 
     std::map<int, Anim> m_anim;
     std::map<int, OutBox> m_boxes;
