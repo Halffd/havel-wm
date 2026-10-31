@@ -26,6 +26,8 @@ public:
     virtual View* getFocusedView() = 0;
     virtual void focusView(View* view) = 0;
     virtual void closeView(View* view) = 0;
+    // Title-bar drags: move (mode 0) / resize (mode 1), compositor-driven.
+    virtual void beginViewDrag(View* view, int mode) = 0;
     virtual void minimizeView(View* view) = 0;
     virtual void toggleMaximizeView(View* view) = 0;
     

@@ -4167,6 +4167,33 @@ void havel_wlr_set_view_size(void* c_view, int w, int h) {
     }
 }
 
+// Begin a compositor-driven interactive drag on a view (title-bar move
+// or edge resize initiated by the decoration plugin's click handling).
+// mode: 0 = move, 1 = resize. Uses the same grab state as Meta+click.
+void havel_wlr_begin_view_drag(void* c_view, int mode) {
+    if (!c_view || !g_running_server) return;
+    enum havel_view_kind kind = *(enum havel_view_kind*)c_view;
+    struct wlr_scene_tree *tree = NULL;
+    if (kind == HAVEL_VIEW_XDG) {
+        tree = ((struct havel_xdg_view*)c_view)->scene_tree;
+    } else if (kind == HAVEL_VIEW_XWAYLAND) {
+        tree = ((struct havel_xwayland_view*)c_view)->scene_tree;
+    }
+    if (!tree) return;
+    struct havel_wlr_server *server = g_running_server;
+    if (!server->cursor) return;
+    server->grab.view = (kind == HAVEL_VIEW_XDG)
+        ? (void*)((struct havel_xdg_view*)c_view)
+        : (void*)((struct havel_xwayland_view*)c_view);
+    server->grab.mode = (mode == 1) ? INTERACTIVE_RESIZE : INTERACTIVE_MOVE;
+    server->grab.start_x = server->cursor->x;
+    server->grab.start_y = server->cursor->y;
+    server->grab.view_start_x = tree->node.x;
+    server->grab.view_start_y = tree->node.y;
+    LOG_INFO("[Cursor] Interactive %s started (decoration request)",
+             server->grab.mode == INTERACTIVE_MOVE ? "move" : "resize");
+}
+
 void havel_wlr_close_view(void* c_view) {
     if (!c_view) return;
     

@@ -60,11 +60,13 @@ void ServerDecorationPlugin::onMouseMotion(int mx, int my) {
 }
 
 bool ServerDecorationPlugin::onMouseButton(uint32_t button, bool pressed, int mx, int my) {
-    if (!pressed || button != 0x110) return false;  // Only handle left button press
+    if (!pressed) return false;
 
     onMouseMotion(mx, my);  // Update hover state
 
-    if (m_hoveredView && m_hoveredButton != DecoButton::None) {
+    // Button clicks (left press on Close/Maximize/Minimize): consume so
+    // the click never reaches the client underneath.
+    if (button == 0x110 && m_hoveredView && m_hoveredButton != DecoButton::None) {
         switch (m_hoveredButton) {
             case DecoButton::Close:
                 handleCloseClick(m_hoveredView);
@@ -77,6 +79,31 @@ bool ServerDecorationPlugin::onMouseButton(uint32_t button, bool pressed, int mx
                 return true;
             default:
                 break;
+        }
+    }
+
+    // Title-bar drags: left-drag moves, right-drag resizes. Starts the
+    // compositor grab through the same path as Meta+click (user report:
+    // 'windows wont move when i drag their titlebars and move or drag
+    // right click'). Consumed: the press must not reach the client.
+    bool inTitleBar = false;
+    if (m_hoveredView) {
+        auto it = m_decorations.find(m_hoveredView);
+        if (it != m_decorations.end()) {
+            const WindowDecoration& deco = it->second;
+            inTitleBar = (my >= deco.y - (int)DecorationTheme::TITLE_BAR_HEIGHT &&
+                          my <= deco.y &&
+                          mx >= deco.x && mx <= deco.x + deco.width);
+        }
+    }
+    if (inTitleBar) {
+        if (button == 0x110) {
+            m_api->beginViewDrag(static_cast<View*>(m_hoveredView), 0);
+            return true;
+        }
+        if (button == 0x111) {
+            m_api->beginViewDrag(static_cast<View*>(m_hoveredView), 1);
+            return true;
         }
     }
     return false;

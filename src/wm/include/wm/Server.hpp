@@ -492,6 +492,11 @@ private:
     void spawnBrowser();
     void spawnFileManager();
     void closeFocusedWindow();
+    // Interactive drags started by the decoration plugin (title-bar
+    // left-drag = move, right-drag = resize). Routes into the C grab.
+public:
+    void beginViewDrag(View* view, int mode);
+private:
     void toggleMaximize();
     void toggleFloating();
     void minimizeWindow();

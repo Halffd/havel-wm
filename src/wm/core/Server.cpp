@@ -871,6 +871,11 @@ void Server::spawnFileManager() {
     }
 }
 
+void Server::beginViewDrag(View* view, int mode) {
+    if (!view || !view->nativeHandle()) return;
+    havel_wlr_begin_view_drag(view->nativeHandle(), mode);
+}
+
 void Server::closeFocusedWindow() {
     auto* ws = activeWorkspace();
     if (ws && ws->activeView()) {

@@ -476,6 +476,11 @@ bool PluginManager::captureViewPixels(View* view,
     return true;
 }
 
+void PluginManager::beginViewDrag(View* view, int mode) {
+    if (!m_server || !view) return;
+    static_cast<Server*>(m_server)->beginViewDrag(view, mode);
+}
+
 void PluginManager::closeView(View* view) {
     if (!m_server || !view) return;
     // Route the close request through the C bridge — same path as

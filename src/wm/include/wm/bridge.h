@@ -186,6 +186,8 @@ void havel_wlr_set_view_size(void* c_view, int w, int h);
 void havel_wlr_close_view(void* c_view);
 void havel_wlr_set_view_fullscreen(void* c_view, bool fullscreen);
 void havel_wlr_minimize_view(void* c_view);
+// Begin a compositor-driven drag on a view (0 = move, 1 = resize).
+void havel_wlr_begin_view_drag(void* c_view, int mode);
 void havel_wlr_focus_view(void* c_view);
 void havel_wlr_raise_view(void* c_view);
 void havel_wlr_close_view(void* c_view);
