@@ -5,11 +5,14 @@
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/plugins/PluginConfig.hpp>
 #include <wm/render/OverlayRenderer.hpp>
+#include <wm/render/AppIconLoader.hpp>
 #include <wm/bridge.h>
 #include <input/TextInputManager.hpp>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
 #include <chrono>
+#include <set>
+#include <unordered_map>
 #include <functional>
 #include <cstring>
 #include <vector>
@@ -35,6 +38,11 @@ struct DesktopEntry {
     std::string categories;
     bool noDisplay = false;
     bool terminal = false;   // Terminal=true: launch inside a terminal
+    // Resolved icon pixels (AppIconLoader handle; 0 = none). Filled once
+    // when the entry first draws - icon lookup is disk I/O, so it must
+    // not run per frame.
+    uint32_t iconHandle = 0;
+    int iconW = 0, iconH = 0;
 };
 
 /**
@@ -511,6 +519,13 @@ private:
     // nowhere.)
     Rect m_lastDrawBox{0, 0, 0, 0};
 
+    // Icon pixel cache: entry.id -> decoded ARGB pixels (resolved once
+    // per entry; m_iconResolved guards repeated disk lookups for entries
+    // with no icon on disk).
+    std::set<std::string> m_iconResolved;
+    std::unordered_map<std::string, std::vector<uint32_t>> m_iconPixels;
+    std::unordered_map<std::string, int> m_iconSize;
+
     // Row under the cursor in the result list, -1 when outside it.
     // Coordinates are the same screen space renderOverlay drew in.
     int itemAt(int x, int y) {
@@ -627,8 +642,49 @@ private:
                                                   : Color(0.0f, 0.0f, 0.0f, 0.3f);
             renderer->drawRect((float)(launcherX + 10), (float)itemY, (float)(launcherWidth - 20), (float)(itemHeight - 2), itemBg);
 
-            // Draw app name
-            renderer->drawText(entry.name.c_str(), (float)(launcherX + 20), (float)(itemY + 25), 16.0f, isSelected ? Color(1.0f, 1.0f, 1.0f, 1.0f) : Color(0.8f, 0.8f, 0.8f, 1.0f));
+            // Draw app icon (24x24, vertically centered in the row).
+            // Icon lookup is disk I/O: resolve once per entry, cache the
+            // pixels in the plugin - the persistent tree keeps the drawn
+            // buffer, and per-frame lookups would hammer the disk.
+            const int iconSize = 24;
+            int iconX = launcherX + 20;
+            int iconY = itemY + (itemHeight - 2 - iconSize) / 2;
+            if (m_iconPixels.find(entry.id) == m_iconPixels.end()) {
+                m_iconResolved.insert(entry.id);
+                auto* loader = havel::AppIconLoader::getInstance();
+                std::string key = !entry.icon.empty() ? entry.icon : entry.exec;
+                // basename of exec (strip args and path)
+                auto sp = key.find(' ');
+                if (sp != std::string::npos) key = key.substr(0, sp);
+                auto slash = key.rfind('/');
+                if (slash != std::string::npos) key = key.substr(slash + 1);
+                uint32_t h = loader->loadIcon(!entry.icon.empty() ? entry.icon : key);
+                if (h) {
+                    const uint32_t* px = loader->getIconPixels(h);
+                    int s = loader->getIconSize();
+                    if (px && s > 0) {
+                        m_iconPixels[entry.id] = std::vector<uint32_t>(px, px + (size_t)s * s);
+                        m_iconSize[entry.id] = s;
+                    }
+                }
+            }
+            bool hasIcon = false;
+            auto ipx = m_iconPixels.find(entry.id);
+            if (ipx != m_iconPixels.end() && !ipx->second.empty()) {
+                hasIcon = true;
+                int s = m_iconSize[entry.id];
+                renderer->drawPixels(ipx->second.data(), s, s,
+                                     (float)iconX, (float)iconY,
+                                     (float)iconSize, (float)iconSize);
+            }
+
+            // App name: vertically centered on the row. The old +25 pushed
+            // 16px glyphs into the bottom of the 38px row - descenders
+            // clipped and the text hugged the row bottom (user report).
+            float textH = 16.0f;
+            float ty = (float)itemY + ((itemHeight - 2) - textH) / 2.0f;
+            int textX = launcherX + 20 + (hasIcon ? iconSize + 8 : 0);
+            renderer->drawText(entry.name.c_str(), (float)textX, ty, textH, isSelected ? Color(1.0f, 1.0f, 1.0f, 1.0f) : Color(0.8f, 0.8f, 0.8f, 1.0f));
         }
         
         // Draw instruction text
