@@ -2903,27 +2903,33 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
         return;
     }
 
-    wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
-
-    // Overlay consumption protocol: plugin overlays (panel, Alt-Tab,
-    // launcher) that handle the click stop it here - the old broadcast
-    // reached the window underneath and focused/raised it.
+    // Hit test FIRST: Meta+drag and click-to-focus must work even when an
+    // overlay plugin later claims the click. The old order ran the plugin
+    // consumption check before the grab setup, which let a plugin swallow
+    // title-bar clicks and killed window dragging entirely (observed live).
+    bool consumed_by_overlay = false;
     if (event->state == WL_POINTER_BUTTON_STATE_PRESSED &&
         server->cpp_server &&
         havel_cpp_on_pointer_button_consumed(server->cpp_server, event->button,
                                              server->cursor->x, server->cursor->y)) {
-        return;
+        consumed_by_overlay = true;
+    }
+
+    if (!consumed_by_overlay) {
+        wlr_seat_pointer_notify_button(server->seat, event->time_msec, event->button, event->state);
     }
 
     // Process desktop events
-    havel_cpp_process_desktop_mouse(server->cpp_server, event->button,
-                                     event->state == WL_POINTER_BUTTON_STATE_PRESSED,
-                                     (int)server->cursor->x, (int)server->cursor->y);
+    if (!consumed_by_overlay) {
+        havel_cpp_process_desktop_mouse(server->cpp_server, event->button,
+                                        event->state == WL_POINTER_BUTTON_STATE_PRESSED,
+                                        (int)server->cursor->x, (int)server->cursor->y);
+    }
 
     if (event->state != WL_POINTER_BUTTON_STATE_PRESSED) {
         // Button released - end interactive move/resize
         if (server->grab.mode != INTERACTIVE_NONE) {
-            LOG_INFO("[Cursor] Interactive %s ended", 
+            LOG_INFO("[Cursor] Interactive %s ended",
                      server->grab.mode == INTERACTIVE_MOVE ? "move" : "resize");
             server->grab.view = NULL;
             server->grab.mode = INTERACTIVE_NONE;
@@ -2939,10 +2945,12 @@ static void server_cursor_button(struct wl_listener *listener, void *data) {
     struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(server->seat);
     uint32_t mods = keyboard ? keyboard->modifiers.depressed : 0;
     bool meta_pressed = (mods & (1 << 6)) != 0;  // Mod4 = Meta/Windows key
-    
+
     // Hit test for surface under cursor
     double sx = 0, sy = 0;
-    struct wlr_surface *surface = seat_surface_at(server, server->cursor->x, server->cursor->y, &sx, &sy);
+    struct wlr_surface *surface = consumed_by_overlay
+        ? NULL
+        : seat_surface_at(server, server->cursor->x, server->cursor->y, &sx, &sy);
 
     if (surface) {
         // Get the view from the surface
@@ -4082,12 +4090,15 @@ SceneView* scene_view_create_xwayland(SceneWorkspace* ws, struct wlr_xwayland_su
     strncpy(view->app_id, class_name, sizeof(view->app_id) - 1);
     strncpy(view->title, title, sizeof(view->title) - 1);
     
-    // Default floating geometry
-    view->float_x = 150;
-    view->float_y = 150;
-    view->float_width = 640;
-    view->float_height = 480;
-    
+    // Floating geometry from the client's actual window, falling back to
+    // the X defaults when the client leaves placement to the server. The
+    // old hardcoded 640x480@(150,150) made the scene-graph view disagree
+    // with the real window until the first configure landed.
+    view->float_x = xwayland_surface->x > 0 ? xwayland_surface->x : 150;
+    view->float_y = xwayland_surface->y > 0 ? xwayland_surface->y : 150;
+    view->float_width = xwayland_surface->width > 0 ? xwayland_surface->width : 640;
+    view->float_height = xwayland_surface->height > 0 ? xwayland_surface->height : 480;
+
     return view;
 }
 
