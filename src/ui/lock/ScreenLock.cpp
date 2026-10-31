@@ -16,6 +16,7 @@
 #include <pwd.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 namespace havel {
 
@@ -227,6 +228,11 @@ void ScreenLock::startAuth() {
     // ---- parent ----
     close(m_authPipe[1]);
     m_authPipe[1] = -1;
+    // Non-blocking read end: pollAuth() runs on the frame thread every
+    // render pass - a blocking read here would freeze the compositor for
+    // the whole PAM delay (the exact freeze the worker avoids).
+    int fl = fcntl(m_authPipe[0], F_GETFL, 0);
+    fcntl(m_authPipe[0], F_SETFL, fl | O_NONBLOCK);
     scrubPassword();          // parent copy gone; child owns it now
     m_authBusy = true;
     m_status = "Checking...";

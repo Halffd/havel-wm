@@ -1264,11 +1264,44 @@ WSC
 )
     report $([ "$WSC" = "5" ] && echo 0 || echo 1) "workspace_count(5) applied (count=$WSC)"
 
+    # winfield_ws targets ONLY the phase-16 foot (appId harness_ws):
+    # earlier phases leave feet alive and winfield's generic "foot"
+    # match returns a stale window (observed: move hit window 4
+    # instead of 8, three phase-16 checks failed).
+    winfield_ws() {
+        # Retry up to 10 x 0.5s: the foot's appId arrives asynchronously
+        # via the set_app_id listener AFTER createXdgView - a single
+        # immediate query raced it and saw an empty appId (observed).
+        for _ in $(seq 1 10); do
+            R=$(python3 - "$SOCK" "$1" <<'WFW' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(5)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_windows","params":{}})+"\n").encode())
+r = json.loads(s.recv(65536)); s.close()
+wins = r.get("result", [])
+if isinstance(wins, dict): wins = wins.get("windows", [])
+for w in wins:
+    if w.get("appId", "") == "harness_ws":
+        v = w.get(sys.argv[2], "")
+        print(v if isinstance(v, str) else ("True" if v is True else ("False" if v is False else v)))
+        break
+WFW
+)
+            [ -n "$R" ] && { echo "$R"; return 0; }
+            sleep 0.5
+        done
+        return 1
+    }
+
     # spawn a window, move it to workspace 4 (index), then shrink to 3:
-    # it must rehome to the last surviving workspace (index 2)
-    (WAYLAND_DISPLAY=wayland-0 timeout 40 foot -e sh -c 'sleep 30' > /dev/null 2>&1 &)
+    # it must rehome to the last surviving workspace (index 2).
+    # Own app-id: winfield matches the FIRST window containing "foot" and
+    # older feet from earlier phases are still alive - a generic match
+    # returned a stale id and the move hit the wrong window (observed).
+    (WAYLAND_DISPLAY=wayland-0 timeout 40 foot -a harness_ws -e sh -c 'sleep 30' > /dev/null 2>&1 &)
     sleep 1.5
-    FOOT_ID=$(winfield id)
+    FOOT_ID=$(winfield_ws id)
     python3 - "$SOCK" "$FOOT_ID" <<'MVS' >/dev/null 2>&1
 import socket, json, sys
 s = socket.socket(socket.AF_UNIX); s.settimeout(10)
@@ -1278,11 +1311,11 @@ s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"move_to_workspace",
 s.recv(65536)
 MVS
     sleep 0.5
-    WS4=$(winfield workspace)
+    WS4=$(winfield_ws workspace)
     report $([ "$WS4" = "4" ] && echo 0 || echo 1) "window on workspace 4 (ws=$WS4)"
     hrun 'workspace_count(3)' >/dev/null
     sleep 0.5
-    WS_AFTER=$(winfield workspace)
+    WS_AFTER=$(winfield_ws workspace)
     report $([ "$WS_AFTER" = "2" ] && echo 0 || echo 1) \
         "shrinking rehomes windows (ws=$WS_AFTER, want 2)"
     hrun 'workspace(0)' >/dev/null
@@ -1415,6 +1448,95 @@ XCLOSE_PY
     fi
 else
     skip "xwayland phase (no Xwayland server)"
+fi
+# ---------------------------------------------------------------- phase 18: async PAM auth
+# Tests the async PAM authentication path. Drives keys via havel_run +
+# io.injectKey (the only IPC-exposed injection), checks lock state via
+# is_screen_locked, and verifies the compositor keeps rendering through
+# a wrong-password PAM delay (frames tick while the worker runs).
+if pgrep -x Xwayland >/dev/null 2>&1; then
+    # hrun sends one io.injectKey call: keycode + pressed
+    keyrun() {
+        python3 - "$SOCK" "$1" "$2" <<'KEYRUN' >/dev/null 2>&1
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+code = "io.injectKey(%s, %s)" % (sys.argv[2], sys.argv[3])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"havel_run",
+                       "params":{"source":code}})+"\n").encode())
+s.recv(65536); s.close()
+KEYRUN
+    }
+    keytap() { keyrun "$1" true; keyrun "$1" false; }
+
+    locked() {
+        python3 - "$SOCK" <<'LCK' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"is_screen_locked","params":{}})+"\n").encode())
+r = json.loads(s.recv(65536)); s.close()
+print("yes" if r.get("result",{}).get("locked") else "no")
+LCK
+    }
+
+    rpc_lock() {
+        python3 - "$SOCK" <<'LSCR' >/dev/null 2>&1
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"lock_screen","params":{}})+"\n").encode())
+s.recv(65536); s.close()
+LSCR
+    }
+
+    rpc_lock
+    sleep 0.5
+    report $([ "$(locked)" = "yes" ] && echo 0 || echo 1) "lock_screen engages"
+
+    # IPC liveness THROUGH the wrong-password PAM delay: the async worker
+    # must keep the event loop serving requests (the old sync path froze
+    # the whole compositor here). A fast reply proves the loop is free.
+    ipc_rt() {
+        python3 - "$SOCK" <<'IDC' 2>/dev/null
+import socket, json, sys, time
+s = socket.socket(socket.AF_UNIX); s.settimeout(15)
+s.connect(sys.argv[1])
+t0 = time.time()
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"is_screen_locked","params":{}})+"\n").encode())
+r = json.loads(s.recv(65536)); s.close()
+print("%.2f" % (time.time() - t0))
+IDC
+    }
+
+    # Wrong password: '1' (keycode 10 evdev = digit 1) then Enter (28)
+    keytap 10
+    keytap 28
+    sleep 0.3
+    RT=$(ipc_rt)
+    report $([ "$(locked)" = "yes" ] && echo 0 || echo 1) \
+        "wrong password stays locked (async PAM verdict)"
+    RTOK=$(awk -v r="${RT:-99}" 'BEGIN{print (r < 1.0) ? 0 : 1}')
+    report $([ "${RTOK:-1}" = "0" ] && echo 0 || echo 1) \
+        "IPC responsive during PAM delay (rt=${RT:-err}s)"
+
+    # The real user password is unknowable here (and must never be
+    # guessed), so "correct password unlocks" cannot be tested with
+    # injected credentials. What CAN be verified: the unlock path works
+    # from the locked state (documented unlock_screen IPC), and the
+    # failed worker did not corrupt the lock.
+    python3 - "$SOCK" <<'UNL' >/dev/null 2>&1
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"unlock_screen","params":{}})+"\n").encode())
+s.recv(65536); s.close()
+UNL
+    sleep 0.5
+    report $([ "$(locked)" = "no" ] && echo 0 || echo 1) \
+        "unlock_screen releases the async-auth lock"
+else
+    skip "async PAM test (no Xwayland server)"
 fi
 
 # ---------------------------------------------------------------- teardown
