@@ -1655,14 +1655,17 @@ void Server::setViewPosition(View* view, int x, int y, bool animate) {
 }
 
 void Server::setViewOpacity(View* view, float alpha) {
-    // wlroots 0.20 scene doesn't have per-node opacity
-    // This would require scene graph extension
-    // Log the request for debugging
-    if (view && alpha != 1.0f) {
-        LOG_DEBUG("[Server] setViewOpacity requested: %.2f (not supported in wlroots 0.20)", alpha);
+    if (!view || !view->nativeHandle()) return;
+    // wlroots 0.20 exposes per-BUFFER opacity (wlr_scene_buffer_set_
+    // opacity); the C side applies it to every buffer under the view's
+    // scene tree and re-applies on later commits. Floor 0.05 so the
+    // window can never become fully invisible/uninputtable by accident.
+    if (alpha < 0.05f) alpha = 0.05f;
+    if (alpha > 1.0f) alpha = 1.0f;
+    if (Window* w = m_coreWindowManager.getWindow(view)) {
+        w->setOpacity(alpha);
     }
-    (void)view;
-    (void)alpha;
+    havel_wlr_set_view_opacity(view->nativeHandle(), alpha);
 }
 
 void Server::setViewGeometry(View* view, int x, int y, int w, int h) {
@@ -3005,6 +3008,11 @@ std::string Server::ipcSetWindowOpacity(const std::string& args) {
         return m_ipcServer->createErrorResponse(-5, "Window not found");
     }
     window->setOpacity(opacity);
+    // Push to the compositor: the model field alone never reached the
+    // screen (setViewOpacity routes into the C scene-buffer opacity).
+    if (View* view = window->view()) {
+        setViewOpacity(view, opacity);
+    }
     return m_ipcServer->createSuccessResponse("Window opacity set");
 }
 

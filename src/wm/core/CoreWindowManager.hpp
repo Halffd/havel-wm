@@ -113,6 +113,7 @@ public:
         bool maximized;
         bool fullscreen;
         bool focused;
+        float opacity = 1.0f;
     };
     
     std::string getIPCWindowList() const;

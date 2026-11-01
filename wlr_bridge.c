@@ -410,6 +410,7 @@ struct havel_xdg_view {
     struct wl_listener request_minimize; // Minimize request
     struct wl_listener request_maximize; // Maximize request
     struct wl_listener request_fullscreen; // Fullscreen request
+    float opacity;                          // per-view opacity (1.0 = opaque)
 };
 
 struct havel_xwayland_view {
@@ -453,11 +454,13 @@ struct havel_xwayland_view {
     struct wl_listener request_fullscreen; // xsurface->events.request_fullscreen
     struct wl_listener request_maximize;   // xsurface->events.request_maximize
     struct wl_listener request_activate;   // xsurface->events.request_activate
+    float opacity;                          // per-view opacity (1.0 = opaque)
 };
 
 // Forward function declarations
 static void xdg_view_set_position(struct havel_xdg_view *view, int x, int y);
 static void xwayland_view_set_position(struct havel_xwayland_view *view, int x, int y);
+static void view_apply_opacity(struct wlr_scene_tree *tree, float opacity);
 
 // ============================================================================
 // Callback Implementations (C++ → C)
@@ -1182,6 +1185,7 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
 
     struct havel_xdg_view *view = calloc(1, sizeof(*view));
     view->kind = HAVEL_VIEW_XDG;
+    view->opacity = 1.0f;
     view->server = server;
     view->xdg_surface = xdg_surface;
     xdg_surface->data = view;
@@ -1426,6 +1430,7 @@ static void xwayland_view_handle_associate(struct wl_listener *listener, void *d
     if (view->scene_tree && view->xsurface && view->xsurface->surface) {
         wlr_scene_surface_create(view->scene_tree, view->xsurface->surface);
         view->scene_surface_created = true;
+        if (view->opacity != 1.0f) view_apply_opacity(view->scene_tree, view->opacity);
 
         // There is no xwayland events.map: surfaces are always mapped
         // while they exist; the C++ layer is told now (spawn offset,
@@ -1484,6 +1489,7 @@ static void server_new_xwayland_surface(struct wl_listener *listener, void *data
     view->kind = HAVEL_VIEW_XWAYLAND;
     view->server = server;
     view->xsurface = xsurface;
+    view->opacity = 1.0f;
     xsurface->data = view;
     // NO workspace_id in C - C++ owns this
     
@@ -4165,6 +4171,47 @@ void havel_wlr_set_view_size(void* c_view, int w, int h) {
     if (g_view_set_size) {
         g_view_set_size(c_view, w, h);
     }
+}
+
+// Per-view opacity: wlroots 0.20 exposes per-BUFFER opacity only
+// (wlr_scene_buffer_set_opacity) - no tree-level alpha. Client windows
+// render through wlr_scene_buffer nodes under the view's scene tree,
+// so apply to every buffer in the subtree (subsurfaces/popups follow
+// the same alpha). New buffers from later commits get the stored value
+// re-applied by the commit hooks.
+static void opacity_set_iter(struct wlr_scene_buffer *buf, int sx, int sy, void *data) {
+    (void)sx; (void)sy;
+    wlr_scene_buffer_set_opacity(buf, *(float *)data);
+}
+
+static void view_apply_opacity(struct wlr_scene_tree *tree, float opacity) {
+    if (!tree) return;
+    wlr_scene_node_for_each_buffer(&tree->node, opacity_set_iter, &opacity);
+}
+
+void havel_wlr_set_view_opacity(void* c_view, float alpha) {
+    if (!c_view || alpha < 0.05f) alpha = 0.05f;  // floor: never invisible
+    if (alpha > 1.0f) alpha = 1.0f;
+    if (!g_running_server) return;
+
+    enum havel_view_kind kind = *(enum havel_view_kind*)c_view;
+    struct wlr_scene_tree *tree = NULL;
+    struct wlr_xdg_surface *xdg_surface = NULL;
+    struct wlr_xwayland_surface *xsurface = NULL;
+    if (kind == HAVEL_VIEW_XDG) {
+        struct havel_xdg_view *v = (struct havel_xdg_view*)c_view;
+        tree = v->scene_tree;
+        xdg_surface = v->xdg_surface;
+        v->opacity = alpha;
+    } else if (kind == HAVEL_VIEW_XWAYLAND) {
+        struct havel_xwayland_view *v = (struct havel_xwayland_view*)c_view;
+        tree = v->scene_tree;
+        xsurface = v->xsurface;
+        v->opacity = alpha;
+    }
+    if (!tree) return;
+    view_apply_opacity(tree, alpha);
+    (void)xdg_surface; (void)xsurface;
 }
 
 // Begin a compositor-driven interactive drag on a view (title-bar move

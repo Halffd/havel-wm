@@ -172,6 +172,7 @@ public:
     View* getFocusedView() override;
     void focusView(View* view) override;
     void closeView(View* view) override;
+    float getViewOpacity(View* view) const override;
     void beginViewDrag(View* view, int mode) override;
     bool captureViewPixels(View* view, std::vector<uint32_t>& pixels,
                            int* w, int* h) override;

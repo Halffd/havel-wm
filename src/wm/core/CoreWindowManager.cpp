@@ -480,6 +480,7 @@ CoreWindowManager::IPCWindowInfo CoreWindowManager::getWindowInfo(uint64_t id) c
     info.maximized = window->isMaximized();
     info.fullscreen = window->isFullscreen();
     info.focused = (window == m_focusedWindow);
+    info.opacity = window->opacity();
     
     return info;
 }

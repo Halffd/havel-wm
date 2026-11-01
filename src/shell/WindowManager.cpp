@@ -40,6 +40,7 @@ WindowInfo WindowManager::buildInfo(const Window& window) const {
     if (window.isFullscreen()) flags = flags | WindowFlags::Fullscreen;
     if (window.isMaximized()) flags = flags | WindowFlags::Maximized;
     info.flags = flags;
+    info.opacity = window.opacity();
     return info;
 }
 

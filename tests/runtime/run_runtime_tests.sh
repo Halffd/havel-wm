@@ -1386,6 +1386,58 @@ GAPX
     hrun 'border_size(4)' >/dev/null
     report $(wait_for_log "border_size -> 4" 5 && echo 0 || echo 1) "border_size applied"
     hrun 'border_size(1)' >/dev/null
+
+    # -- opacity: IPC set_window_opacity reaches the screen (the model
+    #    field alone never did - the C scene-buffer alpha was unwired).
+    WSID=$(winfield_ws id)
+    OP1=$(python3 - "$SOCK" "$WSID" <<'OPQ1' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_windows","params":{}})+"\n").encode())
+r = json.loads(s.recv(65536)); s.close()
+wins = r.get("result", [])
+if isinstance(wins, dict): wins = wins.get("windows", [])
+for w in wins:
+    if w.get("id") == int(sys.argv[2]):
+        print(w.get("opacity", "none")); break
+OPQ1
+)
+    python3 - "$SOCK" "$WSID" <<'OPSET' >/dev/null 2>&1
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"set_window_opacity",
+                       "params":{"id": int(sys.argv[2]), "opacity": 0.5}})+"\n").encode())
+s.recv(65536); s.close()
+OPSET
+    sleep 0.5
+    OP2=$(python3 - "$SOCK" "$WSID" <<'OPQ2' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_windows","params":{}})+"\n").encode())
+r = json.loads(s.recv(65536)); s.close()
+wins = r.get("result", [])
+if isinstance(wins, dict): wins = wins.get("windows", [])
+for w in wins:
+    if w.get("id") == int(sys.argv[2]):
+        print(w.get("opacity", "none")); break
+OPQ2
+)
+    OP1OK=$(awk -v v="${OP1:-none}" 'BEGIN{print (v+0 == 1.0) ? 0 : 1}')
+    report $([ "${OP1OK:-1}" = "0" ] && echo 0 || echo 1) "opacity reads 1.0 before change (got $OP1)"
+    OP2OK=$(awk -v v="${OP2:-none}" 'BEGIN{print (v+0 == 0.5) ? 0 : 1}')
+    report $([ "${OP2OK:-1}" = "0" ] && echo 0 || echo 1) "set_window_opacity applied (got $OP2)"
+    # restore
+    python3 - "$SOCK" "$WSID" <<'OPRST' >/dev/null 2>&1
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"set_window_opacity",
+                       "params":{"id": int(sys.argv[2]), "opacity": 1.0}})+"\n").encode())
+s.recv(65536); s.close()
+OPRST
 fi
 
 

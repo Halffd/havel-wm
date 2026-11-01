@@ -188,6 +188,9 @@ void havel_wlr_set_view_fullscreen(void* c_view, bool fullscreen);
 void havel_wlr_minimize_view(void* c_view);
 // Begin a compositor-driven drag on a view (0 = move, 1 = resize).
 void havel_wlr_begin_view_drag(void* c_view, int mode);
+// Per-view opacity (0.05..1.0; applied to every buffer in the view's
+// scene tree, re-applied to buffers created by later commits).
+void havel_wlr_set_view_opacity(void* c_view, float alpha);
 void havel_wlr_focus_view(void* c_view);
 void havel_wlr_raise_view(void* c_view);
 void havel_wlr_close_view(void* c_view);

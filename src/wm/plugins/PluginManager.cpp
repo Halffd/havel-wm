@@ -481,6 +481,7 @@ void PluginManager::beginViewDrag(View* view, int mode) {
     static_cast<Server*>(m_server)->beginViewDrag(view, mode);
 }
 
+
 void PluginManager::closeView(View* view) {
     if (!m_server || !view) return;
     // Route the close request through the C bridge — same path as
@@ -622,6 +623,11 @@ void PluginManager::setViewOpacity(View* view, float alpha) {
     if (!m_server || !view) return;
     auto* server = static_cast<Server*>(m_server);
     server->setViewOpacity(view, alpha);
+}
+
+float PluginManager::getViewOpacity(View* view) const {
+    if (!m_server || !view) return 1.0f;
+    return view->opacity();
 }
 
 void PluginManager::setViewGeometry(View* view, int x, int y, int w, int h) {

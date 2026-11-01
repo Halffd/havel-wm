@@ -478,7 +478,8 @@ std::string IPCServer::handleGetWindows() {
             {"floating", hasFlag(w.flags, WindowFlags::Floating)},
             {"minimized", hasFlag(w.flags, WindowFlags::Minimized)},
             {"maximized", hasFlag(w.flags, WindowFlags::Maximized)},
-            {"fullscreen", hasFlag(w.flags, WindowFlags::Fullscreen)}
+            {"fullscreen", hasFlag(w.flags, WindowFlags::Fullscreen)},
+            {"opacity", w.opacity}
         };
         arr.push_back(win);
     }

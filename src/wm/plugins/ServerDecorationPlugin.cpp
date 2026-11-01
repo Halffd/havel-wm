@@ -105,6 +105,19 @@ bool ServerDecorationPlugin::onMouseButton(uint32_t button, bool pressed, int mx
             m_api->beginViewDrag(static_cast<View*>(m_hoveredView), 1);
             return true;
         }
+        // Wheel over the title bar adjusts window opacity (0.05/step;
+        // up = more opaque, down = more transparent). The axis path
+        // delivers scroll as wheel buttons 4/5 (X11 convention).
+        if (button == 4 || button == 5) {
+            float step = (button == 4) ? 0.05f : -0.05f;
+            auto* view = static_cast<View*>(m_hoveredView);
+            float cur = m_api->getViewOpacity(view);
+            float next = cur + step;
+            if (next < 0.05f) next = 0.05f;
+            if (next > 1.0f) next = 1.0f;
+            if (next != cur) m_api->setViewOpacity(view, next);
+            return true;
+        }
     }
     return false;
 }

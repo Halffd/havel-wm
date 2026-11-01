@@ -37,6 +37,7 @@ struct WindowInfo {
     std::string title;            // Window title
     uint32_t workspace = 0;       // Workspace ID
     WindowFlags flags = WindowFlags::None;
+    float opacity = 1.0f;         // per-window opacity (0.05..1.0)
     
     // For IPC serialization
     uint32_t toFlags() const { return static_cast<uint32_t>(flags); }
