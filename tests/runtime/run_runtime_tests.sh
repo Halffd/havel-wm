@@ -50,9 +50,10 @@ trap cleanup EXIT
 wait_socket() {
     # 9s was too tight even before: under this box's I/O load spikes a
     # fresh compositor boot (117MB binary, split-DWARF) has taken 45s at
-    # load ~10 and ~25s at load ~5. 90s keeps the check real (connect
-    # against a live listener) while tolerating every start observed.
-    for _ in $(seq 1 450); do
+    # load ~10 and ~25s at load ~5. Load 20+ (external build storms)
+    # stretched boots past 90s, so: 600 x 0.2s = 120s. The check stays
+    # real (connect against a live listener).
+    for _ in $(seq 1 600); do
         if python3 -c "
 import socket,sys
 try:

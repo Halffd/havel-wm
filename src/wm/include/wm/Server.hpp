@@ -396,7 +396,13 @@ private:
     OverlayRenderer* m_overlayRenderer = nullptr;  // For plugin overlay rendering
 
     void* m_nativeHandle = nullptr;
-    bool m_softwareCursorForced = false;
+    // Software cursors forced ON by default: bochs-drm/virtio GPUs have
+    // no usable hardware cursor plane, and wlroots' direct scanout
+    // disengages while software cursors are locked - which is what the
+    // custom render loop needs. With scanout allowed, client buffers get
+    // scanned out raw and stop updating (frozen dolphin, black alacritty
+    // - observed on DRM). IPC set_cursor_mode can still release it.
+    bool m_softwareCursorForced = true;
     class ScreenLock* m_screenLock = nullptr;
 
     // Window placement mode (config: "cascade", "center", "pointer")
