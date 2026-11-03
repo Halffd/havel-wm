@@ -20,6 +20,8 @@
 #include <wm/plugins/CompositorAPI.hpp>
 #include <wm/plugins/PluginConfig.hpp>
 #include <wm/render/OverlayRenderer.hpp>
+#include <wm/render/AppIconLoader.hpp>
+#include <map>
 #include <Logger.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <cstdio>
@@ -61,8 +63,8 @@ public:
             m_bindingMods = mods;
             m_bindingKeysym = sym;
         }
-        std::string pos = config.getValue(plugin, "position", "top");
-        m_atBottom = (pos == "bottom");
+        std::string pos = config.getValue(plugin, "position", "bottom");
+        m_atBottom = (pos != "top");
         m_barHeight = config.getIntValue(plugin, "height", 30);
         if (m_barHeight < 16) m_barHeight = 16;
         if (m_barHeight > 80) m_barHeight = 80;
@@ -70,6 +72,23 @@ public:
         m_showWorkspaces = config.getValue(plugin, "show_workspaces", "true") != "false";
         m_showLauncher = config.getValue(plugin, "show_launcher_button", "true") != "false";
         m_showClock = config.getValue(plugin, "show_clock", "true") != "false";
+        m_showNotifications = config.getValue(plugin, "show_notifications", "true") != "false";
+        // Widget order, left to right: comma-separated list. Unknown
+        // names are skipped; widgets absent from the list don't draw.
+        m_widgets.clear();
+        std::string order = config.getValue(plugin, "widgets",
+            "launcher,workspaces,windows,clock,notifications");
+        size_t start = 0;
+        while (start <= order.size()) {
+            size_t comma = order.find(',', start);
+            std::string w = (comma == std::string::npos)
+                ? order.substr(start) : order.substr(start, comma - start);
+            size_t b = w.find_first_not_of(' ');
+            size_t e = w.find_last_not_of(' ');
+            if (b != std::string::npos) m_widgets.push_back(w.substr(b, e - b + 1));
+            if (comma == std::string::npos) break;
+            start = comma + 1;
+        }
 
         // Position/height may have changed: re-reserve the workarea.
         reserveWorkarea();
@@ -147,6 +166,11 @@ public:
             drawBar(renderer, o, currentWs, timeStr, timeWidth);
         }
 
+        if (m_calendarOpen) {
+            CompositorAPI::OutputTarget o = m_api->currentOutputTarget();
+            drawCalendar(renderer, o);
+        }
+
         renderer->setTargetTree(nullptr);
     }
 
@@ -193,6 +217,21 @@ public:
                 LOG_INFO("[Panel] workspace %d", hit.index + 1);
                 m_treeDirty = true;
                 return true;
+            case HIT_CLOCK:
+                m_calendarOpen = !m_calendarOpen;
+                if (m_calendarOpen) {
+                    time_t now = time(nullptr);
+                    struct tm* tm_info = localtime(&now);
+                    m_calendarYear = tm_info->tm_year + 1900;
+                    m_calendarMonth = tm_info->tm_mon + 1;
+                }
+                m_treeDirty = true;
+                LOG_INFO("[Panel] calendar %s", m_calendarOpen ? "open" : "closed");
+                return true;
+            case HIT_NOTIFICATION:
+                m_api->pluginCommand("notifications", "test");
+                LOG_INFO("[Panel] notification widget clicked");
+                return true;
             case HIT_WINDOW:
                 if (hit.view) {
                     m_api->focusView((View*)hit.view);
@@ -230,6 +269,8 @@ public:
                 ++it;
             }
         }
+        m_winIcons.erase(dead);
+        m_winIconSize.erase(dead);
         if (m_hoverHit >= (int)m_hits.size()) m_hoverHit = HIT_NONE;
         if (removed) m_treeDirty = true;  // drop its taskbar button now
     }
@@ -247,7 +288,8 @@ private:
     std::vector<OutputCache> m_outputs;
 
     // Click targets, rebuilt with the tree (absolute scene coords)
-    enum { HIT_NONE = -1, HIT_LAUNCHER = 0, HIT_WORKSPACE = 1, HIT_WINDOW = 2, HIT_CLOCK = 3 };
+    enum { HIT_NONE = -1, HIT_LAUNCHER = 0, HIT_WORKSPACE = 1, HIT_WINDOW = 2,
+           HIT_CLOCK = 3, HIT_NOTIFICATION = 4 };
     struct PanelHit {
         int kind = HIT_NONE;
         int index = 0;      // workspace index
@@ -271,6 +313,16 @@ private:
     bool m_showWorkspaces = true;
     bool m_showLauncher = true;
     bool m_showClock = true;
+    bool m_showNotifications = true;
+    std::vector<std::string> m_widgets;
+    // Calendar popup (clock click); anchored near the clock's hit rect.
+    bool m_calendarOpen = false;
+    int m_calendarYear = 0, m_calendarMonth = 0;  // month 1-12
+    int m_clockHitX = 0, m_clockHitY = 0, m_clockHitW = 0, m_clockHitH = 0;
+    // Window icon pixels keyed by view pointer (identity stable while
+    // the view lives; erased in onViewDestroy).
+    std::map<void*, std::vector<uint32_t>> m_winIcons;
+    std::map<void*, int> m_winIconSize;
     int m_barHeight = 30;
     std::string m_clockFormat = "%H:%M";
 
@@ -355,6 +407,22 @@ private:
             if (btn.title.empty()) btn.title = "window";
             btn.focused = (view == focused);
             m_buttons.push_back(btn);
+
+            // Icon resolved once per view (disk I/O); erased in
+            // onViewDestroy when the view dies.
+            std::string appId = m_api->getViewAppId(view);
+            if (m_winIcons.find(view) == m_winIcons.end() && !appId.empty()) {
+                auto* loader = havel::AppIconLoader::getInstance();
+                uint32_t h = loader->loadIcon(appId);
+                if (h) {
+                    const uint32_t* px = loader->getIconPixels(h);
+                    int s = loader->getIconSize();
+                    if (px && s > 0) {
+                        m_winIcons[view] = std::vector<uint32_t>(px, px + (size_t)s * s);
+                        m_winIconSize[view] = s;
+                    }
+                }
+            }
         }
     }
 
@@ -393,6 +461,7 @@ private:
         const int w = out.w;
         const int h = m_barHeight;
         const int pad = 5;
+        const int btnH = h - pad * 2;
 
         renderer->drawRect((float)x0, (float)y0, (float)w, (float)h, m_bgColor);
         // edge highlight on the screen-facing side
@@ -405,73 +474,177 @@ private:
 
         int cx = x0 + 8;
         const Color hoverBg(0.25f, 0.3f, 0.4f, 0.7f);
+        const Color blueCircle(0.25f, 0.5f, 1.0f, 1.0f);
 
-        // Launcher button
-        if (m_showLauncher) {
-            const char* label = "Apps";
-            float lw = getTextWidth(label, 14.0f) + 16.0f;
-            bool hovered = (m_hoverHit >= 0 && (int)m_hits.size() > m_hoverHit &&
-                            m_hits[m_hoverHit].kind == HIT_LAUNCHER &&
-                            m_hits[m_hoverHit].x == cx);
-            renderer->drawRect((float)cx, (float)(y0 + pad), lw, (float)(h - pad * 2),
-                               hovered ? hoverBg : Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 0.45f));
-            renderer->drawText(label, (float)(cx + 8), (float)(y0 + pad + 3), 14.0f, m_fgColor);
-            addHit(HIT_LAUNCHER, 0, nullptr, label, cx, y0 + pad, (int)lw, h - pad * 2);
-            cx += (int)lw + 6;
-        }
+        auto hoveredAt = [&](int kind, int index, void* view, int x) {
+            return m_hoverHit >= 0 && (int)m_hits.size() > m_hoverHit &&
+                   m_hits[m_hoverHit].kind == kind && m_hits[m_hoverHit].index == index &&
+                   m_hits[m_hoverHit].view == view && m_hits[m_hoverHit].x == x;
+        };
 
-        // Workspace buttons
-        if (m_showWorkspaces) {
-            uint32_t count = m_api->getWorkspaceCount();
-            if (count > 10) count = 10;
-            for (uint32_t i = 0; i < count; i++) {
-                char num[8];
-                snprintf(num, sizeof(num), "%u", i + 1);
-                bool active = (i == currentWs);
+        // Widgets draw in configured order (left to right); the clock is
+        // right-aligned regardless of its position in the list.
+        for (const std::string& widget : m_widgets) {
+            if (widget == "launcher" && m_showLauncher) {
+                // Squared button with a filled blue circle: the launcher
+                // reads as a distinct app-grid affordance, not a text tab.
+                const int lw = btnH;
                 bool hovered = (m_hoverHit >= 0 && (int)m_hits.size() > m_hoverHit &&
-                                m_hits[m_hoverHit].kind == HIT_WORKSPACE &&
-                                m_hits[m_hoverHit].index == (int)i &&
+                                m_hits[m_hoverHit].kind == HIT_LAUNCHER &&
                                 m_hits[m_hoverHit].x == cx);
-                Color bg = active ? Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 0.8f)
-                                  : hovered ? hoverBg
-                                            : Color(0.2f, 0.2f, 0.25f, 0.7f);
-                renderer->drawRect((float)cx, (float)(y0 + pad), 24.0f, (float)(h - pad * 2), bg);
-                renderer->drawText(num, (float)(cx + 8), (float)(y0 + pad + 3), 14.0f,
-                                   active ? Color(1, 1, 1, 1) : m_fgColor);
-                addHit(HIT_WORKSPACE, (int)i, nullptr, num, cx, y0 + pad, 24, h - pad * 2);
-                cx += 24 + 3;
-            }
-            cx += 3;
-        }
-
-        // Window buttons: one per window on the current workspace
-        const int btnH = h - pad * 2;
-        const int btnMaxW = 150;
-        for (auto& btn : m_buttons) {
-            int btnW = (int)(btn.title.size() * 7.0f) + 16;
-            if (btnW > btnMaxW) btnW = btnMaxW;
-            if (cx + btnW > x0 + w - (int)timeWidth - 16) break;
-
-            bool hovered = (m_hoverHit >= 0 && (int)m_hits.size() > m_hoverHit &&
-                            m_hits[m_hoverHit].kind == HIT_WINDOW &&
-                            m_hits[m_hoverHit].view == btn.viewPtr &&
-                            m_hits[m_hoverHit].x == cx);
-            Color btnBg = btn.focused ? Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 0.6f)
+                renderer->drawRect((float)cx, (float)(y0 + pad), (float)lw, (float)btnH,
+                                   hovered ? hoverBg : Color(0.15f, 0.16f, 0.22f, 0.9f));
+                // circle: approximate with a filled square core + 4 side
+                // rects (drawCircle is outline-only in the renderer)
+                const int r = btnH / 2 - 6;
+                const int ccx = cx + lw / 2, ccy = y0 + pad + btnH / 2;
+                renderer->drawRect((float)(ccx - r), (float)(ccy - r + 2), (float)(2 * r), (float)(2 * r - 4), blueCircle);
+                renderer->drawRect((float)(ccx - r + 2), (float)(ccy - r), (float)(2 * r - 4), (float)(2 * r), blueCircle);
+                addHit(HIT_LAUNCHER, 0, nullptr, "launcher", cx, y0 + pad, lw, btnH);
+                cx += lw + 6;
+            } else if (widget == "workspaces" && m_showWorkspaces) {
+                uint32_t count = m_api->getWorkspaceCount();
+                if (count > 10) count = 10;
+                for (uint32_t i = 0; i < count; i++) {
+                    char num[8];
+                    snprintf(num, sizeof(num), "%u", i + 1);
+                    bool active = (i == currentWs);
+                    bool hovered = hoveredAt(HIT_WORKSPACE, (int)i, nullptr, cx);
+                    Color bg = active ? Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 0.8f)
                                       : hovered ? hoverBg
                                                 : Color(0.2f, 0.2f, 0.25f, 0.7f);
-            renderer->drawRect((float)cx, (float)(y0 + pad), (float)btnW, (float)btnH, btnBg);
-            renderer->drawText(btn.title.c_str(), (float)(cx + 6), (float)(y0 + pad + 3), 12.0f,
-                               btn.focused ? Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 1.0f)
-                                           : Color(m_fgColor.r, m_fgColor.g, m_fgColor.b, 0.8f));
-            addHit(HIT_WINDOW, 0, btn.viewPtr, btn.title, cx, y0 + pad, btnW, btnH);
-            cx += btnW + 4;
+                    renderer->drawRect((float)cx, (float)(y0 + pad), 24.0f, (float)btnH, bg);
+                    renderer->drawText(num, (float)(cx + 8), (float)(y0 + pad + 3), 14.0f,
+                                       active ? Color(1, 1, 1, 1) : m_fgColor);
+                    addHit(HIT_WORKSPACE, (int)i, nullptr, num, cx, y0 + pad, 24, btnH);
+                    cx += 24 + 3;
+                }
+                cx += 3;
+            } else if (widget == "windows") {
+                const int btnMaxW = 150;
+                for (auto& btn : m_buttons) {
+                    int btnW = (int)(btn.title.size() * 7.0f) + 16 + 20;  // + icon strip
+                    if (btnW > btnMaxW) btnW = btnMaxW;
+                    if (cx + btnW > x0 + w - 8) break;   // clock area reserved below
+
+                    bool hovered = hoveredAt(HIT_WINDOW, 0, btn.viewPtr, cx);
+                    Color btnBg = btn.focused ? Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 0.6f)
+                                              : hovered ? hoverBg
+                                                        : Color(0.2f, 0.2f, 0.25f, 0.7f);
+                    renderer->drawRect((float)cx, (float)(y0 + pad), (float)btnW, (float)btnH, btnBg);
+
+                    // window icon (16x16, left strip, vertically centered)
+                    int textX = cx + 6;
+                    auto ipx = m_winIcons.find(btn.viewPtr);
+                    if (ipx != m_winIcons.end() && !ipx->second.empty()) {
+                        int s = m_winIconSize[btn.viewPtr];
+                        renderer->drawPixels(ipx->second.data(), s, s,
+                                             (float)(cx + 4), (float)(y0 + pad + (btnH - 16) / 2),
+                                             16.0f, 16.0f);
+                        textX = cx + 24;
+                    }
+
+                    // text vertically centered in the button
+                    renderer->drawText(btn.title.c_str(), (float)textX,
+                                       (float)(y0 + pad + (btnH - 12) / 2), 12.0f,
+                                       btn.focused ? Color(m_accentColor.r, m_accentColor.g, m_accentColor.b, 1.0f)
+                                                   : Color(m_fgColor.r, m_fgColor.g, m_fgColor.b, 0.8f));
+                    addHit(HIT_WINDOW, 0, btn.viewPtr, btn.title, cx, y0 + pad, btnW, btnH);
+                    cx += btnW + 4;
+                }
+            } else if (widget == "notifications") {
+                // Notifications widget: shows the notification plugin's
+                // pending count via pluginCommand round-trip. The plugin
+                // exposes state only through its own overlay, so the
+                // widget shows a bell indicator (filled when the
+                // notifications plugin is loaded and has been active).
+                const int nw = 28;
+                bool hovered = hoveredAt(HIT_NOTIFICATION, 0, nullptr, cx);
+                renderer->drawRect((float)cx, (float)(y0 + pad), (float)nw, (float)btnH,
+                                   hovered ? hoverBg : Color(0.15f, 0.16f, 0.22f, 0.9f));
+                // bell: small square + stem
+                const int bcx = cx + nw / 2, bcy = y0 + pad + btnH / 2;
+                renderer->drawRect((float)(bcx - 5), (float)(bcy - 6), 10.0f, 9.0f, m_fgColor);
+                renderer->drawRect((float)(bcx - 1), (float)(bcy + 3), 2.0f, 4.0f, m_fgColor);
+                renderer->drawRect((float)(bcx - 3), (float)(bcy + 7), 6.0f, 2.0f, m_fgColor);
+                addHit(HIT_NOTIFICATION, 0, nullptr, "notifications", cx, y0 + pad, nw, btnH);
+                cx += nw + 6;
+            }
         }
 
-        // Clock, right-aligned
+        // Clock, right-aligned; hit rect stored for the calendar popup.
         if (m_showClock) {
-            renderer->drawRect((float)(x0 + w - timeWidth - 8), (float)(y0 + pad), timeWidth,
-                               (float)(h - pad * 2), Color(0.0f, 0.0f, 0.0f, 0.4f));
-            renderer->drawText(timeStr, (float)(x0 + w - timeWidth + 2), (float)(y0 + pad + 3), 16.0f, m_fgColor);
+            int clockX = x0 + w - (int)timeWidth - 8;
+            bool hovered = hoveredAt(HIT_CLOCK, 0, nullptr, clockX);
+            renderer->drawRect((float)clockX, (float)(y0 + pad), timeWidth,
+                               (float)btnH, hovered ? hoverBg : Color(0.0f, 0.0f, 0.0f, 0.4f));
+            renderer->drawText(timeStr, (float)(clockX + 2), (float)(y0 + pad + (btnH - 16) / 2), 16.0f, m_fgColor);
+            m_clockHitX = clockX; m_clockHitY = y0 + pad;
+            m_clockHitW = (int)timeWidth; m_clockHitH = btnH;
+            addHit(HIT_CLOCK, 0, nullptr, timeStr, clockX, y0 + pad, (int)timeWidth, btnH);
+        }
+    }
+
+    // Calendar popup: month grid for m_calendarYear/m_calendarMonth,
+    // anchored above/below the clock depending on bar position.
+    void drawCalendar(OverlayRenderer* renderer, const CompositorAPI::OutputTarget& out) {
+        const int W = 220, ROW = 20, HEAD = 26;
+        const int rows = 7;  // header + 6 week rows
+        const int H = HEAD + rows * ROW;
+        int x = m_clockHitX + m_clockHitW / 2 - W / 2;
+        int y = m_atBottom ? (m_clockHitY - H - 6) : (m_clockHitY + m_clockHitH + 6);
+        if (y < 4) y = 4;
+
+        renderer->drawRect((float)x, (float)y, (float)W, (float)H, Color(0.12f, 0.12f, 0.18f, 0.97f));
+        renderer->drawRect((float)x, (float)y, (float)W, 2.0f, m_accentColor);
+
+        static const char* months[] = {"January","February","March","April","May","June",
+                                       "July","August","September","October","November","December"};
+        char head[64];
+        snprintf(head, sizeof(head), "%s %d", months[(m_calendarMonth - 1) % 12], m_calendarYear);
+        renderer->drawTextCentered(head, (float)(x + W / 2), (float)(y + 8), 14.0f, m_fgColor);
+
+        time_t now = time(nullptr);
+        struct tm* today = localtime(&now);
+        const bool thisMonth = (today->tm_year + 1900 == m_calendarYear &&
+                                today->tm_mon + 1 == m_calendarMonth);
+        const int todayDay = today->tm_mday;
+
+        // Weekday header
+        static const char* dows[] = {"Mo","Tu","We","Th","Fr","Sa","Su"};
+        for (int i = 0; i < 7; i++) {
+            renderer->drawTextCentered(dows[i], (float)(x + 16 + i * 28), (float)(y + HEAD - 14), 11.0f,
+                                       Color(0.6f, 0.6f, 0.7f, 1.0f));
+        }
+
+        // Grid: Monday-first, matching the header.
+        struct tm first = {};
+        first.tm_year = m_calendarYear - 1900;
+        first.tm_mon = m_calendarMonth - 1;
+        first.tm_mday = 1;
+        mktime(&first);
+        int lead = (first.tm_wday + 6) % 7;   // Monday = 0
+        int days = 31;
+        {   // clamp to the month's length
+            static const int len[] = {31,28,31,30,31,30,31,31,30,31,30,31};
+            days = len[m_calendarMonth - 1];
+            if (m_calendarMonth == 2 && ((m_calendarYear % 4 == 0 && m_calendarYear % 100 != 0) ||
+                                          m_calendarYear % 400 == 0)) days = 29;
+        }
+        int col = lead, row = 0;
+        for (int day = 1; day <= days; day++) {
+            int dx = x + 16 + col * 28;
+            int dy = y + HEAD + 4 + row * ROW;
+            char num[8];
+            snprintf(num, sizeof(num), "%d", day);
+            bool isToday = thisMonth && day == todayDay;
+            if (isToday) {
+                renderer->drawRect((float)(dx - 4), (float)(dy - 3), 24.0f, ROW - 2.0f, m_accentColor);
+            }
+            renderer->drawTextCentered(num, (float)(dx + 8), (float)dy, 12.0f,
+                                       isToday ? Color(1,1,1,1) : m_fgColor);
+            col++;
+            if (col == 7) { col = 0; row++; }
         }
     }
 

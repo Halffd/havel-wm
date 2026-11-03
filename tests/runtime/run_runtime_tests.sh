@@ -663,6 +663,7 @@ else
 fi
 rm -f "$WPIMG"
 
+echo "--- phase 9: zoom"
 # ---------------------------------------------------------------- phase 9: zoom
 # Fullscreen zoom is the C-side scale + cursor-centred offset; lens/strip/
 # custom are magnifier overlays fed by an in-process scene capture. Both
@@ -949,11 +950,11 @@ im = Image.open(sys.argv[1]).convert('RGB'); px = im.load(); w, h = im.size
 def count(x0, x1, y0, y1, pred):
     return sum(1 for y in range(y0, y1, 2) for x in range(x0, x1, 2) if pred(px[x, y]))
 # top strip of the panel; bar = 0.85 black over bg (0.1,0.1,0.15) -> ~(4,4,6)
-panel_bg = count(0, w, 0, 28, lambda c: c[0] < 15 and c[1] < 15 and c[2] < 25)
+panel_bg = count(0, w, h - 28, h, lambda c: c[0] < 15 and c[1] < 15 and c[2] < 25)
 # launcher button: accent-tinted block at the far left
-accent = count(2, 120, 4, 26, lambda c: c[2] > 120 and c[2] > c[0] + 40 and c[1] > 60)
+accent = count(2, 120, h - 26, h - 4, lambda c: c[2] > 120 and c[2] > c[0] + 40 and c[1] > 60)
 # bright text pixels in the top strip (Apps, workspace numbers, clock)
-text = count(0, w, 4, 26, lambda c: c[0] > 180 and c[1] > 180 and c[2] > 180)
+text = count(0, w, h - 26, h - 4, lambda c: c[0] > 180 and c[1] > 180 and c[2] > 180)
 print("%d %d %d" % (panel_bg, accent, text))
 PSTATS_PY
 )
@@ -1047,9 +1048,10 @@ PDEEP=$(python3 - "$PANEL_CAP2" <<'PDEEP_PY'
 import sys
 from PIL import Image
 im = Image.open(sys.argv[1]).convert('RGB'); px = im.load(); w, h = im.size
-# bar bg (0.85 black over bg) sampled below the old 30px height, in the
-# workarea-free zone the taller panel now owns
-return_val = sum(1 for y in range(34, 42, 2) for x in range(300, 900, 8)
+# bar bg (0.85 black over bg) sampled in the zone the taller panel now
+# owns: the bar is at the BOTTOM, so the extra 14px sits just above the
+# screen bottom edge (h-44 .. h-30)
+return_val = sum(1 for y in range(h - 44, h - 30, 2) for x in range(300, 900, 8)
                  if px[x, y][0] < 15 and px[x, y][1] < 15 and px[x, y][2] < 25)
 print(return_val)
 PDEEP_PY
