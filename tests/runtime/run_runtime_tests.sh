@@ -81,11 +81,12 @@ start_wm() {
     rm -f "$SOCK"
     # timeout must outlast the whole harness (boot + client + pixels +
     # ipc + keys + parity + alttab + wallpaper phases); 90s expired
-    # mid-run once, 240s expired mid-run after phase 7 landed (the
-    # wallpaper phase then talked to a dead compositor and skipped) -
-    # under load this box needs generous headroom
+    # mid-run once, then 240s, then 420s (during an external build the
+    # run stretched past it: the main WM was SIGTERMed mid-phase, and
+    # every later phase talked to a dead compositor). 5400s is a safety
+    # net only - the trap kills the WM at harness exit either way.
     WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 \
-        timeout 420 "$BUILD_DIR/bin/havel-wm" > "$LOG" 2>&1 &
+        timeout 5400 "$BUILD_DIR/bin/havel-wm" > "$LOG" 2>&1 &
     WM_PID=$!
     wait_socket || { echo "compositor socket never came up"; return 1; }
 }
@@ -330,7 +331,7 @@ PARITY_IPC1="/run/user/$(id -u)/havel-wm-parity1.sock"
 rm -f "$PARITY_IPC1"
 HOME="$PARITY_HOME" HAVEL_IPC_SOCKET="$PARITY_IPC1" \
     WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 \
-    timeout 150 "$BUILD_DIR/bin/havel-wm" > /tmp/havel-parity-wm.log 2>&1 &
+    timeout 900 "$BUILD_DIR/bin/havel-wm" > /tmp/havel-parity-wm.log 2>&1 &
 PARITY_PID=$!
 OLD_LOG="$LOG"; LOG=/tmp/havel-parity-wm.log
 # The main harness WM still holds wayland-0; the parity instance
@@ -338,7 +339,7 @@ OLD_LOG="$LOG"; LOG=/tmp/havel-parity-wm.log
 # "Compositor running on <sock>" line (config.hv loaded by then). Wait
 # for it, then read the actual socket name from the log - never assume.
 PARITY_SOCK=""
-for _ in $(seq 750); do
+for _ in $(seq 2000); do
     if grep -q "Compositor running on" /tmp/havel-parity-wm.log 2>/dev/null; then
         PARITY_SOCK=$(grep -o "Compositor running on wayland-[0-9]*" /tmp/havel-parity-wm.log | head -1 | grep -o "wayland-[0-9]*")
         break
@@ -370,11 +371,11 @@ EOF
     rm -f "$PARITY_IPC"
     HOME="$PARITY_HOME" HAVEL_IPC_SOCKET="$PARITY_IPC" \
         WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 \
-        timeout 150 "$BUILD_DIR/bin/havel-wm" > /tmp/havel-parity-wm2.log 2>&1 &
+        timeout 900 "$BUILD_DIR/bin/havel-wm" > /tmp/havel-parity-wm2.log 2>&1 &
     PARITY_PID=$!
     LOG=/tmp/havel-parity-wm2.log
     P2_SOCK=""
-    for _ in $(seq 750); do
+    for _ in $(seq 2000); do
         if grep -q "Compositor running on" /tmp/havel-parity-wm2.log 2>/dev/null; then
             P2_SOCK=$(grep -o "Compositor running on wayland-[0-9]*" /tmp/havel-parity-wm2.log | head -1 | grep -o "wayland-[0-9]*")
             break
@@ -486,14 +487,38 @@ else
         fi
     fi
 
-    # Hold Alt, tap Tab, wait for the capture, release Alt - all on ONE
-    # virtual keyboard: modifier state is per keyboard, so a second
-    # injector would tap Tab without the Alt modifier.
-    WAYLAND_DISPLAY=wayland-0 timeout 30 "$INJ" +56 15 w2500 -56 > /dev/null 2>&1 &
+    # Hold Alt, tap Tab, capture while it is held, release Alt - all on
+    # ONE virtual keyboard: modifier state is per keyboard, so a second
+    # injector would tap Tab without the Alt modifier. The injector holds
+    # Alt for 5s; the capture polls and keeps the best overlay frame: a
+    # fixed 1.0s sleep caught partial fade-ins on a loaded box (panel
+    # counted ~1.2k there vs ~90k when drawn, observed repeatedly).
+    WAYLAND_DISPLAY=wayland-0 timeout 40 "$INJ" +56 15 w5000 -56 > /dev/null 2>&1 &
     INJ_PID=$!
-    sleep 1.0
     GRID_UP="$(mktemp /tmp/havel-grid-up-XXXXXX.png)"
-    WAYLAND_DISPLAY=wayland-0 grim "$GRID_UP" 2>/dev/null
+    GRID_TMP="$(mktemp /tmp/havel-grid-poll-XXXXXX.png)"
+    GRID_BEST=0
+    for _ in $(seq 1 14); do
+        WAYLAND_DISPLAY=wayland-0 grim "$GRID_TMP" 2>/dev/null || { sleep 0.3; continue; }
+        PP=$(python3 - "$GRID_TMP" <<'PPPY' 2>/dev/null || echo 0
+import sys
+from PIL import Image
+from collections import Counter
+im = Image.open(sys.argv[1]).convert('RGB')
+px = im.load(); w, h = im.size
+c = Counter(px[x, y] for x in range(0, w, 2) for y in range(0, h, 2))
+print(sum(n for k, n in c.items()
+          if abs(k[0] - 33) <= 6 and abs(k[1] - 33) <= 6 and abs(k[2] - 43) <= 6))
+PPPY
+)
+        if [ "${PP:-0}" -gt "$GRID_BEST" ]; then
+            GRID_BEST="${PP:-0}"
+            cp "$GRID_TMP" "$GRID_UP" 2>/dev/null
+        fi
+        [ "$GRID_BEST" -ge 20000 ] && break
+        sleep 0.3
+    done
+    rm -f "$GRID_TMP"
     wait "$INJ_PID" 2>/dev/null
     # The overlay must clear once the modifier lifts. Poll instead of a
     # single fixed delay: the scene redraw after the node destroy lands
@@ -1081,11 +1106,11 @@ EOF
     rm -f "$RL_IPC"
     HOME="$RL_HOME" HAVEL_IPC_SOCKET="$RL_IPC" \
         WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_HEADLESS_OUTPUTS=1 \
-        timeout 150 "$BUILD_DIR/bin/havel-wm" > /tmp/havel-reload-wm.log 2>&1 &
+        timeout 900 "$BUILD_DIR/bin/havel-wm" > /tmp/havel-reload-wm.log 2>&1 &
     RL_PID=$!
     OLD_LOG="$LOG"; LOG=/tmp/havel-reload-wm.log
     RL_WAYLAND=""
-    for _ in $(seq 750); do
+    for _ in $(seq 2000); do
         if grep -q "Compositor running on" /tmp/havel-reload-wm.log 2>/dev/null; then
             RL_WAYLAND=$(grep -o "Compositor running on wayland-[0-9]*" /tmp/havel-reload-wm.log | head -1 | grep -o "wayland-[0-9]*")
             break
