@@ -241,6 +241,21 @@ target_include_directories(test-keybinding PRIVATE
 )
 target_link_libraries(test-keybinding PRIVATE xkbcommon)
 
+# App icon loader test: theme-dir resolution (hicolor size dirs), size
+# normalization to the 32x32 display size, placeholder packing.
+add_executable(test-app-icons tests/test_app_icon_loader.cpp
+    src/wm/render/AppIconLoader.cpp
+)
+target_include_directories(test-app-icons PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+    ${PNG_INCLUDE_DIRS}
+)
+target_link_libraries(test-app-icons PRIVATE ${PNG_LIBRARIES})
+target_sources(test-app-icons PRIVATE src/utils/Logger.c)
+
 # Shell/panel sources (Phase 1 - window manager integration)
 set(SHELL_SOURCES
     src/shell/WindowManager.cpp

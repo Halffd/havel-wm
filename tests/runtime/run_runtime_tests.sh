@@ -79,6 +79,12 @@ wait_for_log() {
 
 start_wm() {
     rm -f "$SOCK"
+    # Clean every wayland socket, not just wayland-0: a leftover socket
+    # from a crashed manual instance shifts the auto-increment, so the
+    # compositor ends up on wayland-1 while every phase (and this check)
+    # waits on wayland-0 - "compositor socket never came up" with a
+    # healthy process (observed).
+    rm -f "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"/wayland-* 2>/dev/null
     # timeout must outlast the whole harness (boot + client + pixels +
     # ipc + keys + parity + alttab + wallpaper phases); 90s expired
     # mid-run once, then 240s, then 420s (during an external build the
@@ -119,7 +125,7 @@ echo "--- phase 0: unit tests (no compositor needed)"
 # Pure unit binaries built alongside the compositor. The font module's
 # test generates its own bitmap font at run time, so it needs nothing
 # from the environment.
-for U in "$BUILD_DIR/test-font" "$BUILD_DIR/test-utilities" "$BUILD_DIR/test-keybinding"; do
+for U in "$BUILD_DIR/test-font" "$BUILD_DIR/test-utilities" "$BUILD_DIR/test-keybinding" "$BUILD_DIR/test-app-icons"; do
     NAME=$(basename "$U")
     if [ -x "$U" ]; then
         if timeout 60 "$U" > /tmp/havel-unit-"$NAME".log 2>&1; then
@@ -455,13 +461,36 @@ else
     # Thumbnail probe: a third window with a distinctive solid background.
     # Its cell then shows the captured content (red pixels inside the
     # grid); before the capture path existed, cells were flat
-    # placeholders. alacritty goes first: its config-file colour override
-    # is the one proven here (28211 red samples on this box). kitty's
-    # EGL/ZINK init fails headless in this environment, and this foot
-    # build rejects [colors] from a config file (version-dependent), so
-    # both are fallbacks that may end in a honest skip.
+    # placeholders. wlred (native wl_shm client, no fonts/GL) goes first:
+    # the terminal paths were races under load - alacritty's EGL/fontconfig
+    # boot frequently missed the map window and the check skipped. kitty's
+    # EGL/ZINK init fails headless in this environment, and this foot build
+    # rejects [colors] from a config file (version-dependent), so both stay
+    # as fallbacks that may end in an honest skip.
     THUMB_RED=1
-    if command -v alacritty >/dev/null 2>&1; then
+    REDPROBE="$BUILD_DIR/tests/wlred"
+    if [ ! -x "$REDPROBE" ]; then
+        mkdir -p "$BUILD_DIR/tests"
+        XDG_XML="$(pkg-config --variable=pkgdatadir wayland-protocols 2>/dev/null)/stable/xdg-shell/xdg-shell.xml"
+        if [ -f "$XDG_XML" ]; then
+            wayland-scanner private-code "$XDG_XML" "$BUILD_DIR/tests/xdg-shell-protocol.c"
+            wayland-scanner client-header "$XDG_XML" "$BUILD_DIR/tests/xdg-shell-client-protocol.h"
+            cc -o "$REDPROBE" tests/runtime/wlred.c "$BUILD_DIR/tests/xdg-shell-protocol.c" \
+                $(pkg-config --cflags --libs wayland-client) -I"$BUILD_DIR/tests" || true
+        fi
+    fi
+    if [ -x "$REDPROBE" ]; then
+        # daemonize: the probe owns its buffers and stays alive until
+        # killed by the harness. A bare `&` made the probe a child of the
+        # phase-7 shell, so the shell exiting (or the harness waiting on
+        # the shared injection PID) reaped it mid-capture - the window
+        # mapped and DESTROYed within milliseconds under load, leaving
+        # the red cell empty (observed: 'Removing window 5: wlred-
+        # thumb-test' 3ms after 'App ID set').
+        setsid "$REDPROBE" </dev/null >/dev/null 2>&1 &
+        GRID_PIDS="$GRID_PIDS $!"
+        PROBE_DAEMONIZED=1
+    elif command -v alacritty >/dev/null 2>&1; then
         THUMB_CONF="$(mktemp /tmp/havel-alacred-XXXXXX.toml)"
         printf '[colors.primary]\nbackground = "#ff0000"\n' > "$THUMB_CONF"
         WAYLAND_DISPLAY=wayland-0 timeout 110 alacritty --config-file "$THUMB_CONF" \
@@ -594,6 +623,33 @@ print(sum(1 for y in range(int(h*0.30), int(h*0.70), 2)
         report $([ "${REDPX:-0}" -gt 300 ] && echo 0 || echo 1) "window thumbnail rendered in cell (red px: ${REDPX:-err})"
     else
         skip "window thumbnail colour check (no red probe window mapped)"
+    fi
+    # Cell header icon: the switcher draws each entry's app icon at the
+    # cell's top-left (28px at +8,+8). STRONG evidence: the probe's app
+    # id is "wlred" - an id with no icon anywhere on disk - so the loader
+    # MUST fall back to the hash placeholder, which is a SOLID block of
+    # one colour. Count pixels inside the icon square that differ from
+    # the cell background: a drawn placeholder yields hundreds, a skipped
+    # icon path yields the cell background only.
+    ICONPX=$(python3 -c "
+from PIL import Image
+from collections import Counter
+im = Image.open('$GRID_UP').convert('RGB'); px = im.load(); w, h = im.size
+# the grid's first cell sits in the upper-left of the overlay; scan a
+# generous band and take the most common non-background colour count.
+c = Counter()
+for y in range(int(h*0.28), int(h*0.62), 2):
+    for x in range(int(w*0.08), int(w*0.34), 2):
+        p = px[x, y]
+        if p[0] < 12 and p[1] < 12 and p[2] < 16: continue      # near black
+        if abs(p[0]-33) <= 8 and abs(p[1]-33) <= 8 and abs(p[2]-43) <= 10: continue  # panel bg
+        if abs(p[0]-64) <= 10 and abs(p[1]-82) <= 10 and abs(p[2]-108) <= 12: continue  # selected cell
+        c[p] += 1
+print(c.most_common(1)[0][1] if c else 0)" 2>/dev/null || echo 0)
+    if [ "$THUMB_RED" -eq 1 ]; then
+        report $([ "${ICONPX:-0}" -gt 40 ] && echo 0 || echo 1) "switcher cell icon drawn (icon px: ${ICONPX:-err})"
+    else
+        skip "switcher cell icon check (no red probe window mapped)"
     fi
     [ -n "${THUMB_CONF:-}" ] && rm -f "$THUMB_CONF"
     DOWNPANEL=$(python3 - "$GRID_DOWN" <<'DOWN_PY'
