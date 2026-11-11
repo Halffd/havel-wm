@@ -102,6 +102,12 @@ bool havel_cpp_zoom_take_request(struct havel_cpp_server* server, int output_ind
 void havel_cpp_zoom_feed(struct havel_cpp_server* server, int output_index,
                           const uint32_t* pixels, int w, int h, float src_x, float src_y);
 
+// Portal screen-capture frame (ext-image-copy-capture, consumed by
+// havel-portal over Wayland). Ownership of the pixel block transfers to
+// the callee: it is freed after the registered consumer returns. Pass
+// NULL pixels for "no frame available" consumers.
+void havel_cpp_portal_frame(struct havel_cpp_server* server, uint32_t* pixels, int w, int h);
+
 // Declarative monitor rule lookup (config.hv monitor_rule statements).
 bool havel_cpp_monitor_rule_lookup(struct havel_cpp_server* server, const char* name,
                                     int* x, int* y);

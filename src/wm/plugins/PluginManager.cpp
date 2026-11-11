@@ -16,6 +16,25 @@ PluginManager::~PluginManager() {
     shutdown();
 }
 
+// Portal capture frame hand-off (C bridge -> plugin). One slot: a capture
+// session delivers a streaming sequence, and the consumer wants the
+// newest frame, not a backlog. Overwrite the previous slot and free it -
+// an unread frame must not accumulate into a leak.
+void PluginManager::portalFrame(uint32_t* pixels, int w, int h) {
+    if (!pixels || w <= 0 || h <= 0) {
+        free(pixels);
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_captureMutex);
+        m_capturePixels.assign(pixels, pixels + (size_t)w * h);
+        m_captureW = w;
+        m_captureH = h;
+        m_captureSeq++;
+    }
+    free(pixels);
+}
+
 // ============================================================================
 // Initialization
 // ============================================================================

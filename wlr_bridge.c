@@ -68,6 +68,8 @@ static uint64_t get_monotonic_time_ms(void) {
 #include <wlr/types/wlr_tablet_v2.h>
 #include <wlr/types/wlr_fractional_scale_v1.h>
 #include <wlr/types/wlr_export_dmabuf_v1.h>
+#include <wlr/types/wlr_ext_image_capture_source_v1.h>
+#include <wlr/types/wlr_ext_image_copy_capture_v1.h>
 #include <pixman.h>
 #include <wlr/types/wlr_color_management_v1.h>
 #include <wlr/types/wlr_ext_foreign_toplevel_list_v1.h>
@@ -263,6 +265,12 @@ struct havel_wlr_server {
     struct wl_listener session_active;
     struct wl_listener new_input;
     struct wl_listener new_virtual_keyboard;
+    struct wl_listener new_capture_session;  // ext-image-copy-capture
+
+    // ext-image-copy-capture v1 (panel/portal capture path; replaces the
+    // deprecated wlr-screencopy-v1 for output capture).
+    struct wlr_ext_output_image_capture_source_manager_v1 *ext_output_capture_source_manager;
+    struct wlr_ext_image_copy_capture_manager_v1 *ext_image_copy_capture_manager;
 
     struct wl_listener cursor_motion;
     struct wl_listener cursor_motion_absolute;
@@ -1762,6 +1770,102 @@ static void server_new_layer_surface(struct wl_listener *listener, void *data) {
 }
 
 // ============================================================================
+// ext-image-copy-capture v1 (portal / panel screen capture)
+// ============================================================================
+// A capture session delivers a wlr_buffer per presented frame. The
+// portal helper (havel-portal) drives this over Wayland; the pixels are
+// read out of the buffer with the CPU data-pointer accessor (the same
+// path the zoom magnifier uses), copied into a malloc'd block, and
+// handed to the registered capture callback.
+struct havel_capture_session {
+    struct havel_wlr_server *server;  // for the C++ frame sink
+    struct wlr_ext_image_copy_capture_session_v1 *session;
+    struct wlr_ext_image_capture_source_v1 *source;  // frame signal owner
+    struct wl_listener frame;
+    struct wl_listener destroy;
+};
+
+static void capture_session_handle_destroy(struct wl_listener *listener, void *data);
+
+static void capture_session_handle_frame(struct wl_listener *listener, void *data) {
+    (void)data;  // source frame event: the damage region, unused here
+    struct havel_capture_session *cs = wl_container_of(listener, cs, frame);
+    struct wlr_ext_image_copy_capture_session_v1 *session = cs->session;
+    if (!session || !session->frame || !session->frame->buffer) {
+        // Session started but no frame captured yet (or already drained):
+        // nothing to forward.
+        return;
+    }
+    struct wlr_ext_image_copy_capture_frame_v1 *frame = session->frame;
+    struct wlr_buffer *buf = frame->buffer;
+    void *pixels = NULL;
+    uint32_t format = 0;
+    size_t stride = 0;
+    if (wlr_buffer_begin_data_ptr_access(buf, WLR_BUFFER_DATA_PTR_ACCESS_READ,
+                                         &pixels, &format, &stride)) {
+        if ((format == DRM_FORMAT_ARGB8888 || format == DRM_FORMAT_XRGB8888) &&
+            pixels && buf->width > 0 && buf->height > 0 &&
+            stride >= (size_t)buf->width * 4) {
+            uint32_t *out = malloc((size_t)buf->width * buf->height * 4);
+            if (out) {
+                for (int y = 0; y < buf->height; y++) {
+                    memcpy(out + (size_t)y * buf->width,
+                           (uint8_t *)pixels + (size_t)y * stride,
+                           (size_t)buf->width * 4);
+                }
+                havel_cpp_portal_frame(cs->server->cpp_server, out, buf->width, buf->height);
+            }
+        }
+        wlr_buffer_end_data_ptr_access(buf);
+    }
+    // Report the frame as delivered; the capture protocol destroys the
+    // frame object on ready.
+    struct timespec ts = {0};
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    wlr_ext_image_copy_capture_frame_v1_ready(frame, WL_OUTPUT_TRANSFORM_NORMAL, &ts);
+}
+
+static void server_new_capture_session(struct wl_listener *listener, void *data) {
+    struct havel_wlr_server *server =
+        wl_container_of(listener, server, new_capture_session);
+    struct wlr_ext_image_copy_capture_session_v1 *session = data;
+    LOG_INFO("[ScreenCapture] New capture session (source=%p)", (void *)session->source);
+
+    struct havel_capture_session *cs = calloc(1, sizeof(*cs));
+    if (!cs) return;
+    cs->server = server;
+    cs->session = session;
+    // Frames arrive on the SOURCE (the session references a source; the
+    // source's events.frame fires when a new frame is available). The
+    // session carries the pending frame object in session->frame.
+    cs->source = session->source;
+    cs->frame.notify = capture_session_handle_frame;
+    wl_signal_add(&session->source->events.frame, &cs->frame);
+
+    // A capture needs a FRESH output frame; with a static desktop there
+    // is no damage and the source never emits one, so the client's first
+    // capture would wait forever (observed: the first capture after a
+    // quiet boot timed out, later ones succeeded on the damage the
+    // earlier attempts caused). Nudge every output to render.
+    struct havel_output *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        if (output->output) wlr_output_schedule_frame(output->output);
+    }
+    // The session's lifetime is owned by the client: free the wrapper
+    // when the protocol object goes away.
+    cs->destroy.notify = capture_session_handle_destroy;
+    wl_signal_add(&session->events.destroy, &cs->destroy);
+}
+
+static void capture_session_handle_destroy(struct wl_listener *listener, void *data) {
+    (void)data;
+    struct havel_capture_session *cs = wl_container_of(listener, cs, destroy);
+    wl_list_remove(&cs->frame.link);
+    wl_list_remove(&cs->destroy.link);
+    free(cs);
+}
+
+// ============================================================================
 // Pointer Constraint Handlers (for games)
 // ============================================================================
 
@@ -3249,6 +3353,28 @@ havel_wlr_server_t* havel_wlr_create(void) {
         LOG_INFO("[ScreenCapture] wlr-screencopy-v1 protocol created");
     } else {
         LOG_WARN("[ScreenCapture] Failed to create wlr-screencopy-v1 protocol");
+    }
+
+    // ext-image-copy-capture v1: the modern screen capture path, and the
+    // protocol portal backends actually use (xdg-desktop-portal-wlr).
+    // wlroots 0.20 deprecates wlr-screencopy-v1, so both are created -
+    // screencopy for grim, ext-image-copy-capture for the portal.
+    server->ext_output_capture_source_manager =
+        wlr_ext_output_image_capture_source_manager_v1_create(server->display, 1);
+    if (server->ext_output_capture_source_manager) {
+        LOG_INFO("[ScreenCapture] ext_output_image_capture_source_manager_v1 created");
+    } else {
+        LOG_WARN("[ScreenCapture] ext_output_image_capture_source_manager_v1 failed");
+    }
+    server->ext_image_copy_capture_manager =
+        wlr_ext_image_copy_capture_manager_v1_create(server->display, 1);
+    if (server->ext_image_copy_capture_manager) {
+        server->new_capture_session.notify = server_new_capture_session;
+        wl_signal_add(&server->ext_image_copy_capture_manager->events.new_session,
+                      &server->new_capture_session);
+        LOG_INFO("[ScreenCapture] ext_image_copy_capture_manager_v1 created");
+    } else {
+        LOG_WARN("[ScreenCapture] ext_image_copy_capture_manager_v1 failed");
     }
 
     // Background color is now handled by wallpaper plugin via output_frame handler

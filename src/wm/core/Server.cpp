@@ -2034,6 +2034,7 @@ bool Server::startIPCServer(const std::string& socketPath) {
         {"workspace",              nullptr, &IPCServer::handleWorkspace},
         {"spawn",                  nullptr, &IPCServer::handleSpawn},
         {"screenshot",             nullptr, &IPCServer::handleScreenshot},
+        {"portal_screenshot",      nullptr, &IPCServer::handlePortalScreenshot},
         {"screenshot_window",      nullptr, &IPCServer::handleScreenshotWindow},
         {"screenshot_region",      nullptr, &IPCServer::handleScreenshotRegion},
         {"audio_record",           nullptr, &IPCServer::handleAudioRecord},

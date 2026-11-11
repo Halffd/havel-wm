@@ -107,6 +107,9 @@ public:
     
     // Screenshot & Recording
     std::string handleScreenshot(const std::string& args);
+    // Screenshot via org.freedesktop.portal.Desktop (havel-portal backend,
+    // ext-image-copy-capture): proves the portal round trip end to end.
+    std::string handlePortalScreenshot(const std::string& args);
     std::string handleScreenshotWindow(const std::string& args);
     std::string handleScreenshotRegion(const std::string& args);
     std::string handleAudioRecord(const std::string& args);

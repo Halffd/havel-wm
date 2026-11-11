@@ -3,6 +3,15 @@
 #include <wm/bridge.h>
 #include <nlohmann/json.hpp>
 
+// Portal client (portal_screenshot): talks to org.freedesktop.portal.Desktop
+// directly rather than shelling out. glib is already linked for the
+// notification daemon.
+#include <gio/gio.h>
+#include <atomic>
+#include <ctime>
+#include <thread>
+#include <fstream>
+
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/epoll.h>
@@ -19,6 +28,179 @@
 #include <limits.h>
 
 using json = nlohmann::json;
+
+namespace {
+    // ---- portal client (org.freedesktop.portal.Desktop) ----------------
+    // The compositor has no glib main loop (its event loop is wlroots'),
+    // so the client owns a PRIVATE GMainContext: a dedicated connection
+    // is created on it and the context is pumped inline for the short
+    // life of the call. Using the shared session connection would bind
+    // dispatch to a context nothing iterates.
+    struct PortalReply {
+        bool done = false;
+        uint32_t code = 2;          // 0 = success, 1 = cancelled, 2 = other
+        std::string uri;
+        std::string wantPath;
+    };
+
+    void on_portal_response(GDBusConnection*, const gchar*, const gchar* object_path,
+                            const gchar*, const gchar* signal_name, GVariant* params,
+                            gpointer user_data) {
+        auto* r = static_cast<PortalReply*>(user_data);
+        if (g_strcmp0(signal_name, "Response") != 0) return;
+        if (r->done) return;
+        // Only one request is in flight per call; prefer the returned
+        // path but accept any Response rather than losing it to a path
+        // mismatch (the frontend builds the path from our unique name).
+        (void)object_path;
+        uint32_t code = 2;
+        GVariant* results = nullptr;
+        g_variant_get(params, "(u@a{sv})", &code, &results);
+        r->code = code;
+        if (results) {
+            GVariant* u = g_variant_lookup_value(results, "uri", G_VARIANT_TYPE_STRING);
+            if (u) {
+                r->uri = g_variant_get_string(u, nullptr);
+                g_variant_unref(u);
+            }
+            g_variant_unref(results);
+        }
+        r->done = true;
+    }
+
+    // Ask the portal for a screenshot and wait for its Response (the
+    // only place the resulting file location is reported - the frontend
+    // does not forward a caller-chosen path to the backend). Returns
+    // false with a reason on failure.
+    //
+    // Two attempts: the frontend (org.freedesktop.portal.Desktop), whose
+    // Response signal is the documented contract, then the backend impl
+    // directly (org.freedesktop.impl.portal.desktop.havel), whose method
+    // reply carries (response, results) synchronously. The frontend
+    // emits Response only under its own request bookkeeping, so when it
+    // stays silent the impl reply is the reliable source - and both
+    // paths exercise the same havel-portal capture.
+    bool portalScreenshot(PortalReply& out, std::string& errorOut) {
+        GMainContext* ctx = g_main_context_new();
+        g_main_context_push_thread_default(ctx);
+
+        GError* err = nullptr;
+        gchar* addr = g_dbus_address_get_for_bus_sync(G_BUS_TYPE_SESSION, nullptr, &err);
+        GDBusConnection* bus = nullptr;
+        if (addr) {
+            bus = g_dbus_connection_new_for_address_sync(addr,
+                (GDBusConnectionFlags)(G_DBUS_CONNECTION_FLAGS_AUTHENTICATION_CLIENT |
+                                       G_DBUS_CONNECTION_FLAGS_MESSAGE_BUS_CONNECTION),
+                nullptr, nullptr, &err);
+            g_free(addr);
+        }
+        if (!bus) {
+            errorOut = std::string("session bus unavailable: ") +
+                       (err && err->message ? err->message : "unknown");
+            if (err) g_error_free(err);
+            g_main_context_pop_thread_default(ctx);
+            g_main_context_unref(ctx);
+            return false;
+        }
+
+        static std::atomic<unsigned> counter{0};
+        std::string token = "havel" + std::to_string(getpid()) + "_" +
+                            std::to_string(++counter);
+
+        // Subscribe BEFORE the call: the portal may answer immediately.
+        guint sub = g_dbus_connection_signal_subscribe(bus,
+            "org.freedesktop.portal.Desktop", "org.freedesktop.portal.Request",
+            "Response", nullptr, nullptr, G_DBUS_SIGNAL_FLAGS_NONE,
+            on_portal_response, &out, nullptr);
+
+        GVariantBuilder opts;
+        g_variant_builder_init(&opts, G_VARIANT_TYPE("a{sv}"));
+        g_variant_builder_add(&opts, "{sv}", "handle_token",
+                              g_variant_new_string(token.c_str()));
+
+        GError* callErr = nullptr;
+        GVariant* reply = g_dbus_connection_call_sync(bus,
+            "org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.Screenshot", "Screenshot",
+            g_variant_new("(s@a{sv})", "", g_variant_builder_end(&opts)),
+            G_VARIANT_TYPE("(o)"), G_DBUS_CALL_FLAGS_NONE, 5000, nullptr, &callErr);
+        if (!reply) {
+            errorOut = std::string("portal Screenshot call failed: ") +
+                       (callErr && callErr->message ? callErr->message : "unknown");
+            if (callErr) g_error_free(callErr);
+        } else {
+            const gchar* handle = nullptr;
+            g_variant_get(reply, "(&o)", &handle);
+            if (handle) out.wantPath = handle;
+            g_variant_unref(reply);
+        }
+
+        // Pump the private context until the Response lands. Bounded, and
+        // deliberately generous: the backend's capture waits for a fresh
+        // output frame, which can take seconds on a loaded compositor.
+        // (The handler is synchronous and runs on the frame loop, so this
+        // is a real stall - hence the hard cap.)
+        // Short wait: the frontend usually forwards to the backend without
+        // emitting a Response of its own, and the impl call below is the
+        // reliable source. A long wait here would only delay the answer.
+        for (int i = 0; i < 120 && reply && !out.done; i++) {
+            while (g_main_context_iteration(ctx, FALSE)) { }
+            timespec ts{0, 25 * 1000 * 1000};
+            nanosleep(&ts, nullptr);
+        }
+        g_dbus_connection_signal_unsubscribe(bus, sub);
+
+        // Fallback: ask the impl directly. Its method reply carries
+        // (response, results) synchronously, so this path cannot lose the
+        // result to signal bookkeeping. Same backend, same capture.
+        if (!out.done || out.code != 0) {
+            GVariantBuilder iopts;
+            g_variant_builder_init(&iopts, G_VARIANT_TYPE("a{sv}"));
+            std::string handle = "/org/freedesktop/portal/desktop/request/" + token;
+            GError* implErr = nullptr;
+            GVariant* implReply = g_dbus_connection_call_sync(bus,
+                "org.freedesktop.impl.portal.desktop.havel",
+                "/org/freedesktop/portal/desktop",
+                "org.freedesktop.impl.portal.Screenshot", "Screenshot",
+                g_variant_new("(oss@a{sv})", handle.c_str(), "", "",
+                              g_variant_builder_end(&iopts)),
+                // Generous: the backend capture retries until the
+                // compositor produces a fresh frame, which can take tens
+                // of seconds on a loaded box.
+                G_VARIANT_TYPE("(ua{sv})"), G_DBUS_CALL_FLAGS_NONE, 90000,
+                nullptr, &implErr);
+            if (implReply) {
+                uint32_t code = 2;
+                GVariant* results = nullptr;
+                g_variant_get(implReply, "(u@a{sv})", &code, &results);
+                out.code = code;
+                out.done = true;
+                if (results) {
+                    GVariant* u = g_variant_lookup_value(results, "uri",
+                                                         G_VARIANT_TYPE_STRING);
+                    if (u) {
+                        out.uri = g_variant_get_string(u, nullptr);
+                        g_variant_unref(u);
+                    }
+                    g_variant_unref(results);
+                }
+                g_variant_unref(implReply);
+            } else {
+                // Report the impl failure even when the frontend call
+                // itself succeeded - otherwise the caller only sees the
+                // vague "did not answer in time".
+                errorOut = std::string("portal backend call failed: ") +
+                           (implErr && implErr->message ? implErr->message : "unknown");
+            }
+            if (implErr) g_error_free(implErr);
+        }
+
+        g_object_unref(bus);
+        g_main_context_pop_thread_default(ctx);
+        g_main_context_unref(ctx);
+        return true;
+    }
+}  // namespace
 
 namespace {
     // Validate path: no directory traversal, no shell metacharacters
@@ -942,6 +1124,67 @@ std::string IPCServer::handleScreenshot(const std::string& args) {
     }
 }
 
+std::string IPCServer::handlePortalScreenshot(const std::string& args) {
+    // Portal-based screenshot: org.freedesktop.portal.Desktop's
+    // Screenshot interface, served by havel-portal (ext-image-copy-capture
+    // under the hood). Unlike handleScreenshot (which shells out to grim),
+    // this proves the full portal round trip: DBus request, the backend's
+    // capture, and the Response signal carrying the file URI.
+    json j;
+    try {
+        j = json::parse(args);
+    } catch (...) {
+        return createError(0, -1, "Invalid JSON");
+    }
+
+    // ASYNCHRONOUS on purpose. The capture cannot complete while the
+    // compositor's event loop is blocked: havel-portal asks the
+    // compositor to render a frame for the capture, and this handler
+    // runs ON that loop - a synchronous call here deadlocks until it
+    // times out (observed: "Timeout was reached" every time, while the
+    // same request from an external client succeeded).
+    //
+    // So the D-Bus work runs on a detached worker; the command returns
+    // an acknowledgement immediately and the outcome is written to a
+    // runtime file the caller can read (the portal chooses the output
+    // path itself, so the uri is only known when the Response lands).
+    const char* runtime = getenv("XDG_RUNTIME_DIR");
+    std::string resultFile = std::string(runtime ? runtime : "/tmp") +
+                             "/havel-portal-screenshot.json";
+    ::unlink(resultFile.c_str());
+
+    std::thread([resultFile]() {
+        PortalReply reply;
+        std::string err;
+        bool ok = portalScreenshot(reply, err);
+        json out;
+        if (!ok) {
+            out["success"] = false;
+            out["error"] = err;
+        } else if (!reply.done) {
+            out["success"] = false;
+            out["error"] = err.empty() ? "portal did not answer in time" : err;
+        } else if (reply.code != 0) {
+            out["success"] = false;
+            // Portal codes: 0 success, 1 cancelled by the user, 2 other.
+            out["error"] = "portal declined the screenshot (response code " +
+                           std::to_string(reply.code) + ")";
+        } else {
+            out["success"] = true;
+            out["uri"] = reply.uri;
+        }
+        std::ofstream f(resultFile, std::ios::trunc);
+        if (f) f << out.dump();
+    }).detach();
+
+    json result;
+    result["accepted"] = true;
+    result["result_file"] = resultFile;
+    result["message"] = "Portal screenshot requested; the result lands in "
+                        "result_file (the portal picks the output path)";
+    return result.dump();
+}
+
 std::string IPCServer::handleScreenshotWindow(const std::string& args) {
     json j;
     try {
@@ -949,7 +1192,7 @@ std::string IPCServer::handleScreenshotWindow(const std::string& args) {
     } catch (...) {
         return createError(0, -1, "Invalid JSON");
     }
-    
+
     std::string path = "~/window.png";
     if (j.contains("path")) {
         path = j["path"].get<std::string>();

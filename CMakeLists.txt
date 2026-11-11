@@ -590,6 +590,12 @@ if(PANEL_ENABLED)
     # Build and install lock screen
     add_subdirectory(src/shell/lockscreen)
 
+    # xdg-desktop-portal backend (standalone process; see its own
+    # CMakeLists for why it must not live inside the compositor).
+    if(WAYLAND_PROTOCOLS_DIR)
+        add_subdirectory(tools/portal)
+    endif()
+
     # Font module test: bitmap (generated BDF) + vector (installed TTF)
     # faces through the one FreeType path, plus honest-failure checks.
     add_executable(test-font tests/test_font.cpp src/ui/font/Font.cpp)

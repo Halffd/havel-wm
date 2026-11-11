@@ -8,6 +8,7 @@
 #include <string>
 #include <unordered_map>
 #include <functional>
+#include <mutex>
 
 namespace havel {
 
@@ -166,6 +167,28 @@ public:
     PluginSettings& getPluginSettings(const std::string& name);
 
     // -------------------------------------------------------------------------
+    // Portal screen capture (C bridge -> plugin consumer)
+    // -------------------------------------------------------------------------
+    // A capture session (ext-image-copy-capture) produced a full-output
+    // frame. Ownership of the pixel block transfers here; it is copied
+    // into the waiting slot or dropped. Plugin-facing read:
+    // startOutputCapture / takeOutputCapture below.
+    void portalFrame(uint32_t* pixels, int w, int h);
+
+    // Latest captured output frame (ARGB8888, the capture buffer's row
+    // order). seq increments per frame so a consumer can tell "new
+    // frame" from "still waiting".
+    bool takeOutputCapture(std::vector<uint32_t>& pixels, int* w, int* h) {
+        std::lock_guard<std::mutex> lock(m_captureMutex);
+        if (m_captureW <= 0 || m_captureH <= 0) return false;
+        pixels = m_capturePixels;
+        if (w) *w = m_captureW;
+        if (h) *h = m_captureH;
+        return true;
+    }
+    uint64_t captureSeq() const { return m_captureSeq; }
+
+    // -------------------------------------------------------------------------
     // CompositorAPI Implementation
     // -------------------------------------------------------------------------
     
@@ -283,6 +306,14 @@ private:
     // Configuration
     PluginConfig m_config;
     std::string m_configPath;
+
+    // Latest output-capture frame (ext-image-copy-capture path, used by
+    // the portal backend). One slot: streaming frames overwrite, an
+    // unread frame is dropped rather than queued.
+    std::mutex m_captureMutex;
+    std::vector<uint32_t> m_capturePixels;
+    int m_captureW = 0, m_captureH = 0;
+    uint64_t m_captureSeq = 0;
 };
 
 } // namespace havel

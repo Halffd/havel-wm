@@ -251,6 +251,18 @@ void havel_cpp_zoom_feed(struct havel_cpp_server* server, int output_index,
     server->server->zoomFeedCapture(output_index, pixels, w, h, src_x, src_y);
 }
 
+// Portal capture frame: the C layer reads an ext-image-copy-capture frame
+// and hands the pixel block here. Ownership transfers; the plugin manager
+// forwards to the registered consumer, then the block is freed. Without a
+// consumer the block is released immediately - a capture session with no
+// waiting reader must not accumulate.
+void havel_cpp_portal_frame(struct havel_cpp_server* server, uint32_t* pixels, int w, int h) {
+    if (server && server->server) {
+        server->server->pluginManager().portalFrame(pixels, w, h);
+    }
+    free(pixels);
+}
+
 void havel_cpp_dispatch_output_frame(struct havel_cpp_server* server, void* output, void* sceneOutput, int width, int height, int refresh) {
     if (!server || !output) return;
 
