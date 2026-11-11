@@ -1675,6 +1675,85 @@ else
     skip "async PAM test (no Xwayland server)"
 fi
 
+# ---------------------------------------------------------------- phase 19: portal screenshot
+# The xdg-desktop-portal backend (havel-portal) captures through
+# ext-image-copy-capture-v1. It runs as its own process - the compositor
+# must not own the portal DBus name - so this phase starts it against the
+# harness compositor, asks the compositor's IPC for a portal screenshot,
+# and checks the capture landed: the command is asynchronous (the capture
+# needs the compositor's event loop free), so the outcome is polled from
+# the result file it names.
+echo "--- phase 19: portal screenshot"
+PORTAL_BIN="$BUILD_DIR/bin/havel-portal"
+if [ ! -x "$PORTAL_BIN" ]; then
+    skip "portal backend not built (cmake --build build --target havel-portal)"
+elif [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+    skip "portal phase (no session bus)"
+else
+    PORTAL_RESULT="${XDG_RUNTIME_DIR:-/tmp}/havel-portal-screenshot.json"
+    rm -f "$PORTAL_RESULT"
+    WAYLAND_DISPLAY=wayland-0 timeout 300 "$PORTAL_BIN" > /tmp/havel-portal-harness.log 2>&1 &
+    PORTAL_PID=$!
+    # Wait for the backend to own its bus name before asking.
+    PORTAL_UP=1
+    for _ in $(seq 1 60); do
+        if dbus-send --session --dest=org.freedesktop.DBus --type=method_call \
+             --print-reply /org/freedesktop/DBus org.freedesktop.DBus.GetNameOwner \
+             string:org.freedesktop.impl.portal.desktop.havel >/dev/null 2>&1; then
+            PORTAL_UP=0; break
+        fi
+        sleep 0.5
+    done
+    report "$PORTAL_UP" "portal backend owns its bus name"
+
+    if [ "$PORTAL_UP" -eq 0 ]; then
+        ACK=$(python3 - "$SOCK" <<'PACK' 2>/dev/null
+import socket, json, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
+s.connect(sys.argv[1])
+s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"portal_screenshot","params":{}})+"\n").encode())
+print(s.recv(65536).decode())
+PACK
+)
+        report $(echo "$ACK" | grep -q '"accepted": *true' && echo 0 || echo 1) \
+            "portal_screenshot accepted (async)"
+
+        PRES=1
+        for _ in $(seq 1 60); do   # up to 60s: the capture waits for a frame
+            if [ -s "$PORTAL_RESULT" ]; then PRES=0; break; fi
+            sleep 1
+        done
+        report "$PRES" "portal capture reported a result"
+        if [ "$PRES" -eq 0 ]; then
+            URI=$(python3 -c "
+import json,sys
+try:
+    d = json.load(open('$PORTAL_RESULT'))
+    print(d.get('uri','') if d.get('success') else '')
+except Exception:
+    print('')" 2>/dev/null)
+            report $([ -n "$URI" ] && echo 0 || echo 1) "portal capture succeeded ($(head -c 60 "$PORTAL_RESULT" 2>/dev/null))"
+            PPIX=$(python3 - "$URI" <<'PCHK' 2>/dev/null || echo 0
+import sys, urllib.parse
+from PIL import Image
+p = urllib.parse.unquote(urllib.parse.urlparse(sys.argv[1]).path)
+im = Image.open(p).convert('RGB'); px = im.load(); w, h = im.size
+# A real desktop capture, not an empty/black PNG: count non-black pixels.
+print(sum(1 for y in range(0, h, 8) for x in range(0, w, 8) if px[x, y] != (0, 0, 0)))
+PCHK
+)
+            report $([ "${PPIX:-0}" -gt 100 ] && echo 0 || echo 1) \
+                "portal capture has content (non-black px: ${PPIX:-err})"
+        else
+            skip "portal capture content check (no result)"
+        fi
+    else
+        skip "portal capture (backend never claimed its name)"
+    fi
+    kill "$PORTAL_PID" 2>/dev/null
+    [ -n "${PORTAL_PID:-}" ] && wait "$PORTAL_PID" 2>/dev/null
+fi
+
 # ---------------------------------------------------------------- teardown
 kill "$FOOT_PID" 2>/dev/null; FOOT_PID=""
 report $([ "$(crashes)" -eq 0 ] && echo 0 || echo 1) "zero crashes across all phases"

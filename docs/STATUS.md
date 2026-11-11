@@ -35,8 +35,12 @@ All 10 planned phases have been implemented:
 - 15/15 plugins fully implemented (100%)
 - Real application launching with desktop file scanning
 - PNG icon loading with theme support
-- PipeWire screen sharing integration
-- xdg-desktop-portal for browser screen sharing
+- PipeWire screen sharing integration (2026-03 claim; the PipeWire
+  screencopy stack was removed 2026-09 - see the header. What exists now
+  is wlr-screencopy-v1 for grim/wf-recorder and a real
+  xdg-desktop-portal **Screenshot** backend: see docs/PORTALS.md)
+- xdg-desktop-portal for browser screen sharing (Screenshot only - the
+  ScreenCast interface is deliberately not claimed; docs/PORTALS.md)
 - Visual overlays (Alt-Tab, Overview) fully rendered
 - Shader effects with intensity control
 - Full IME support via text-input-v3
