@@ -518,16 +518,23 @@ else
 
     # Hold Alt, tap Tab, capture while it is held, release Alt - all on
     # ONE virtual keyboard: modifier state is per keyboard, so a second
-    # injector would tap Tab without the Alt modifier. The injector holds
-    # Alt for 5s; the capture polls and keeps the best overlay frame: a
-    # fixed 1.0s sleep caught partial fade-ins on a loaded box (panel
-    # counted ~1.2k there vs ~90k when drawn, observed repeatedly).
-    WAYLAND_DISPLAY=wayland-0 timeout 40 "$INJ" +56 15 w5000 -56 > /dev/null 2>&1 &
+    # injector would tap Tab without the Alt modifier. The capture polls
+    # and keeps the best overlay frame: a fixed 1.0s sleep caught partial
+    # fade-ins on a loaded box (panel counted ~1.2k there vs ~90k when
+    # drawn, observed repeatedly).
+    #
+    # The hold is sized to the harness's own slow steps, not to the
+    # overlay: on a loaded box the injector's setup takes seconds and each
+    # grim+probe round trip ~1-2s, so a 5s hold expired before any capture
+    # saw the overlay (measured: the drawn overlay first appeared on the
+    # 5th capture, ~4s in). 12s covers that with margin while keeping the
+    # post-poll wait (the release that proves the grid clears) bounded.
+    WAYLAND_DISPLAY=wayland-0 timeout 40 "$INJ" +56 15 w12000 -56 > /dev/null 2>&1 &
     INJ_PID=$!
     GRID_UP="$(mktemp /tmp/havel-grid-up-XXXXXX.png)"
     GRID_TMP="$(mktemp /tmp/havel-grid-poll-XXXXXX.png)"
     GRID_BEST=0
-    for _ in $(seq 1 14); do
+    for _ in $(seq 1 30); do
         WAYLAND_DISPLAY=wayland-0 grim "$GRID_TMP" 2>/dev/null || { sleep 0.3; continue; }
         PP=$(python3 - "$GRID_TMP" <<'PPPY' 2>/dev/null || echo 0
 import sys
@@ -1536,10 +1543,22 @@ if pgrep -x Xwayland >/dev/null 2>&1; then
         mkdir -p "$BUILD_DIR/tests"
         cc -o "$XRED" tests/runtime/xred.c -lX11 || true
     fi
-    if [ -x "$XRED" ]; then
-        # Spawn under the compositor's xwayland DISPLAY (:0 per boot log).
-        (DISPLAY=:0 "$XRED" > /dev/null 2>&1 &)
-        sleep 2
+    # Read the display the compositor actually allocated. Assuming :0 is
+    # wrong as soon as another X server holds that socket (this box
+    # carries X0/X1/X2 from other sessions, so the harness Xwayland came
+    # up on :1) - the probe then dialled the wrong server and found no
+    # window. Same rule as the wayland socket elsewhere in this harness:
+    # read the allocated name from the log, never assume it.
+    XW_DISPLAY=$(grep -o "Starting Xwayland on :[0-9]*" "$LOG" | head -1 | grep -o ":[0-9]*$")
+    if [ -z "$XW_DISPLAY" ]; then
+        skip "xwayland phase (compositor announced no display)"
+    elif [ -x "$XRED" ]; then
+        (DISPLAY="$XW_DISPLAY" "$XRED" > /dev/null 2>&1 &)
+        # Bounded wait for the X client to map: 2s was a race under load.
+        for _ in $(seq 1 50); do
+            grep -qa "xred-xwayland-test" "$LOG" && break
+            sleep 0.2
+        done
         # One probe returns both the match count and the window id.
         XPROBE=$(python3 - "$SOCK" <<'XW_PY' 2>/dev/null
 import socket, json, sys
