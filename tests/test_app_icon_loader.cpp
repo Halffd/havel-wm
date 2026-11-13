@@ -112,6 +112,16 @@ static void checkRealIcon(const char* appId, const std::string& srcPath) {
     CHECK(distinct >= 8, "real icon is not a flat placeholder");
     printf("  %s <- %s: %d distinct colours\n", appId, srcPath.c_str(), distinct);
 
+    // The pixel-identity check needs a PNG source we can decode the same
+    // way; for an SVG the loader rasterizes, so there is nothing to
+    // compare against byte-wise. The assertions above (normalized size,
+    // not a flat placeholder) still carry that case.
+    const bool isPng = srcPath.size() > 4 &&
+                       srcPath.compare(srcPath.size() - 4, 4, ".png") == 0;
+    if (!isPng) {
+        printf("  (SVG source: rasterized, no PNG byte comparison)\n");
+        return;
+    }
     std::vector<uint32_t> raw;
     int rw = 0, rh = 0;
     if (havel::loadPngPixels(srcPath, raw, &rw, &rh)) {
@@ -168,6 +178,19 @@ int main() {
     // ---- theme-dir path: foot/firefox exist only under hicolor -------
     checkRealIcon("foot", expectedHicolorFile("foot"));
     checkRealIcon("firefox", expectedHicolorFile("firefox"));
+
+    // ---- SVG-only icon (alacritty ships just an SVG here) -----------
+    // Same contract as the PNG cases: a real 32x32 icon with content, not
+    // the flat placeholder. Its appId is capitalised ("Alacritty"), which
+    // is the name the compositor reports and the file on disk.
+    {
+        const char* svgPath = "/usr/share/pixmaps/Alacritty.svg";
+        if (!fileExists(svgPath)) {
+            printf("note: %s missing, skipping the SVG half\n", svgPath);
+        } else {
+            checkRealIcon("Alacritty", svgPath);
+        }
+    }
 
     printf("=== app-icons: %d passed, %d failed, %d run ===\n",
            tests_passed, tests_failed, tests_run);

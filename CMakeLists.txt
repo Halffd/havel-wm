@@ -18,6 +18,16 @@ pkg_check_modules(FMT REQUIRED fmt)
 pkg_check_modules(FREETYPE REQUIRED freetype2)
 pkg_check_modules(PAM REQUIRED pam)
 pkg_check_modules(PNG REQUIRED libpng)
+
+# librsvg rasterizes SVG app icons (alacritty ships only an SVG; themes
+# keep their scalable icons under <theme>/scalable/apps). Optional: without
+# it the loader keeps its placeholder fallback for SVG.
+pkg_check_modules(RSVG librsvg-2.0)
+if(RSVG_FOUND)
+    message(STATUS "librsvg found - SVG app icons will be rasterized")
+else()
+    message(STATUS "librsvg not found - SVG app icons fall back to placeholders")
+endif()
 pkg_check_modules(CURL REQUIRED libcurl)
 
 # Find nlohmann/json for JSON parsing
@@ -255,6 +265,13 @@ target_include_directories(test-app-icons PRIVATE
 )
 target_link_libraries(test-app-icons PRIVATE ${PNG_LIBRARIES})
 target_sources(test-app-icons PRIVATE src/utils/Logger.c)
+# The loader's SVG path is compiled in this target too, so it needs the
+# same librsvg define and libraries as the compositor.
+if(RSVG_FOUND)
+    target_compile_definitions(test-app-icons PRIVATE HAVE_LIBRSVG)
+    target_include_directories(test-app-icons SYSTEM PRIVATE ${RSVG_INCLUDE_DIRS})
+    target_link_libraries(test-app-icons PRIVATE ${RSVG_LIBRARIES})
+endif()
 
 # Shell/panel sources (Phase 1 - window manager integration)
 set(SHELL_SOURCES
@@ -372,6 +389,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${PNG_INCLUDE_DIRS}
     ${CURL_INCLUDE_DIRS}
     ${GLIB_INCLUDE_DIRS}
+    ${RSVG_INCLUDE_DIRS}
 )
 
 # Enable unstable wlroots features
@@ -502,6 +520,11 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     ${GLIB_LIBRARIES}
     nlohmann_json::nlohmann_json
 )
+# HAVE_LIBRSVG gates the SVG rasterization branch in AppIconLoader.
+if(RSVG_FOUND)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_LIBRSVG)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${RSVG_LIBRARIES})
+endif()
 
 # Set library directories
 target_link_directories(${PROJECT_NAME} PRIVATE

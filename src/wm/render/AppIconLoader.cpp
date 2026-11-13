@@ -12,6 +12,14 @@
 #include <sys/stat.h>
 #include <png.h>
 
+// SVG icons are common (alacritty ships only an SVG) and every desktop
+// theme keeps a scalable/ directory. Rasterized with librsvg when it is
+// available; without it the loader falls back to a placeholder, as before.
+#ifdef HAVE_LIBRSVG
+#include <librsvg/rsvg.h>
+#include <cairo.h>
+#endif
+
 namespace havel {
 
 AppIconLoader* AppIconLoader::s_instance = nullptr;
@@ -26,6 +34,56 @@ static constexpr int kIconDisplaySize = 32;
 static bool fileExists(const std::string& p) {
     struct stat st;
     return stat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+}
+
+// Rasterize an SVG to premultiplied ARGB8888 (cairo's ARGB32 is exactly
+// this layout on little-endian: [B][G][R][A]). Rendered at 2x the display
+// size so the box filter below has real samples to work with.
+static bool rasterizeSvg(const std::string& path, std::vector<uint32_t>& out,
+                         int* outW, int* outH) {
+#ifdef HAVE_LIBRSVG
+    const int S = kIconDisplaySize * 2;
+    GError* err = nullptr;
+    RsvgHandle* handle = rsvg_handle_new_from_file(path.c_str(), &err);
+    if (!handle) {
+        if (err) g_error_free(err);
+        return false;
+    }
+    cairo_surface_t* surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, S, S);
+    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+        cairo_surface_destroy(surface);
+        g_object_unref(handle);
+        return false;
+    }
+    cairo_t* cr = cairo_create(surface);
+    RsvgRectangle viewport = {0, 0, (double)S, (double)S};
+    gboolean ok = rsvg_handle_render_document(handle, cr, &viewport, &err);
+    cairo_destroy(cr);
+    if (!ok) {
+        if (err) g_error_free(err);
+        cairo_surface_destroy(surface);
+        g_object_unref(handle);
+        return false;
+    }
+    cairo_surface_flush(surface);
+    const unsigned char* data = cairo_image_surface_get_data(surface);
+    const int stride = cairo_image_surface_get_stride(surface);
+    out.resize((size_t)S * S);
+    for (int y = 0; y < S; y++) {
+        memcpy(out.data() + (size_t)y * S, data + (size_t)y * stride, (size_t)S * 4);
+    }
+    cairo_surface_destroy(surface);
+    g_object_unref(handle);
+    *outW = S;
+    *outH = S;
+    return true;
+#else
+    (void)path;
+    (void)out;
+    (void)outW;
+    (void)outH;
+    return false;
+#endif
 }
 
 // Box-filter resample (premultiplied, so transparent pixels do not
@@ -155,9 +213,12 @@ AppIconLoader::IconCacheEntry AppIconLoader::loadIconFromFile(const std::string&
     // real PNGs further down the list and in the theme dirs. Observed:
     // foot/firefox/kitty all got path-hash placeholders while their PNGs
     // sat untouched.
+    // SVG last: a PNG of the same name wins, and a missing .svg is a
+    // miss (see loadIconFromPath) so it cannot shadow the real files.
     std::vector<std::string> iconNames = {
         appId,
         appId + ".png",
+        appId + ".svg",
     };
 
     // Also try with common replacements
@@ -265,6 +326,23 @@ AppIconLoader::IconCacheEntry AppIconLoader::loadIconFromFile(const std::string&
                             loadIconFromPath(base + theme + "/" + sizeDir + stem + ".png");
                         if (entry.handle != 0) return entry;
                     }
+                }
+                // Theme scalable dirs (hicolor/scalable/apps) - the usual
+                // home of SVG-only icons, e.g. foot and most GNOME apps.
+                // Tried after the raster sizes so a PNG still wins.
+                for (const auto& n : flatNames) {
+                    std::string stem = n;
+                    for (const char* ext : {".png", ".svg", ".xpm"}) {
+                        size_t el = strlen(ext);
+                        if (stem.size() > el &&
+                            stem.compare(stem.size() - el, el, ext) == 0) {
+                            stem.erase(stem.size() - el);
+                            break;
+                        }
+                    }
+                    IconCacheEntry entry = loadIconFromPath(
+                        base + theme + "/scalable/apps/" + stem + ".svg");
+                    if (entry.handle != 0) return entry;
                 }
             }
         }
@@ -377,15 +455,24 @@ bool loadPngPixels(const std::string& path,
 
 AppIconLoader::IconCacheEntry AppIconLoader::loadIconFromPath(const std::string& path) {
     IconCacheEntry entry;
-    // SVG would need librsvg; the icon loader uses a placeholder for it.
-    // The existence check is the whole point: without it every .svg
-    // *candidate* - most of which do not exist - resolved to a nonzero
-    // handle, a placeholder keyed by the path, and aborted the search
-    // before it reached the real PNG candidates (observed: every app on
-    // this box got a path-hash placeholder).
+    // SVG: rasterize when librsvg is available, else the historical
+    // placeholder. The existence check is the whole point: without it
+    // every .svg *candidate* - most of which do not exist - resolved to a
+    // nonzero handle and aborted the search before it reached the real
+    // PNG candidates (observed: every app on this box got a path-hash
+    // placeholder). Missing files now fall through as a miss.
     if (path.length() >= 4) {
         std::string ext = path.substr(path.length() - 4);
         if ((ext == ".svg" || ext == ".SVG") && fileExists(path)) {
+            int sw = 0, sh = 0;
+            if (rasterizeSvg(path, entry.pixels, &sw, &sh)) {
+                entry.pixels = fitIconToDisplay(entry.pixels, sw, sh);
+                entry.width = kIconDisplaySize;
+                entry.height = kIconDisplaySize;
+                entry.handle = m_nextHandle++;
+                LOG_DEBUG("[AppIconLoader] Rasterized SVG icon: %s", path.c_str());
+                return entry;
+            }
             return generatePlaceholderIcon(path);
         }
     }

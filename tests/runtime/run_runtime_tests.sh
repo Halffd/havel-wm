@@ -1002,8 +1002,38 @@ r = json.loads(s.recv(65536))
 print("ok" if r.get("result", {}).get("success") else "fail")
 LOPEN
 ) && [ "$plugin_result" = "ok" ]; then
-    sleep 1.0
-    WAYLAND_DISPLAY=wayland-0 grim "$LAUNCHER_CAP" 2>/dev/null
+    # Poll until the entry rows are drawn and keep the strongest frame. A
+    # fixed 1.0s wait captured a partially drawn list on a loaded box (the
+    # "entries listed" text count landed at 153-155 against a 200
+    # threshold, while the same check reads ~450 once the rows are up).
+    LTMP="$(mktemp /tmp/havel-launcher-poll-XXXXXX.png)"
+    LBEST=0
+    for _ in $(seq 1 25); do
+        WAYLAND_DISPLAY=wayland-0 grim "$LTMP" 2>/dev/null || { sleep 0.3; continue; }
+        read -r LP LT <<EOF
+$(python3 - "$LTMP" <<'LPOLL' 2>/dev/null || echo "0 0"
+import sys
+from PIL import Image
+im = Image.open(sys.argv[1]).convert('RGB'); px = im.load(); w, h = im.size
+panel = sum(1 for y in range(h//2 - 190, h//2 + 190, 4)
+            for x in range(w//2 - 290, w//2 + 290, 4)
+            if 32 <= px[x, y][0] <= 44 and 32 <= px[x, y][1] <= 44 and 45 <= px[x, y][2] <= 57)
+text = sum(1 for y in range(h//2 - 100, h//2 + 150, 2)
+           for x in range(w//2 - 280, w//2 + 280, 2)
+           if px[x, y][0] > 180 and px[x, y][1] > 180)
+print(panel, text)
+LPOLL
+)
+EOF
+        if [ $(( ${LP:-0} + ${LT:-0} )) -gt "$LBEST" ]; then
+            LBEST=$(( ${LP:-0} + ${LT:-0} ))
+            cp "$LTMP" "$LAUNCHER_CAP" 2>/dev/null
+        fi
+        # Comfortably clear of both thresholds (panel 500, text 200).
+        if [ "${LP:-0}" -ge 900 ] && [ "${LT:-0}" -ge 300 ]; then break; fi
+        sleep 0.3
+    done
+    rm -f "$LTMP"
     LSTATS=$(python3 - "$LAUNCHER_CAP" <<'LSTATS_PY'
 import sys
 from PIL import Image
