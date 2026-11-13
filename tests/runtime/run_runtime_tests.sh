@@ -51,9 +51,10 @@ wait_socket() {
     # 9s was too tight even before: under this box's I/O load spikes a
     # fresh compositor boot (117MB binary, split-DWARF) has taken 45s at
     # load ~10 and ~25s at load ~5. Load 20+ (external build storms)
-    # stretched boots past 90s, so: 600 x 0.2s = 120s. The check stays
-    # real (connect against a live listener).
-    for _ in $(seq 1 600); do
+    # stretched boots past 90s; a later run at load 27-36 failed the boot
+    # checks outright, so: 1500 x 0.2s = 300s. The check stays real
+    # (connect against a live listener) - a dead compositor still fails.
+    for _ in $(seq 1 1500); do
         if python3 -c "
 import socket,sys
 try:
@@ -64,6 +65,17 @@ except Exception: sys.exit(1)
     done
     return 1
 }
+
+# Note on the IPC timeouts below (settimeout(30) in every inline python
+# probe, and in ipc_probe.py): 10s was enough on an idle box but not on
+# this one. A run that stretched to 70 minutes under load saw the
+# compositor render 600 frames in 44-88s instead of the normal 10
+# (measured from its own FRAME lines), and every IPC call that hit the
+# old 10s limit failed wholesale (IPC probe, settings_set, repl,
+# workspace move, opacity) while the compositor stayed alive and all
+# other checks passed. The loop is never dead in those runs, only slow -
+# so the client waits; a genuinely dead compositor still fails every
+# check.
 
 # Wait until a log line matching PATTERN appears (real readiness/event
 # condition, never a fixed sleep - fixed sleeps raced repeated times on
@@ -128,7 +140,10 @@ echo "--- phase 0: unit tests (no compositor needed)"
 for U in "$BUILD_DIR/test-font" "$BUILD_DIR/test-utilities" "$BUILD_DIR/test-keybinding" "$BUILD_DIR/test-app-icons"; do
     NAME=$(basename "$U")
     if [ -x "$U" ]; then
-        if timeout 60 "$U" > /tmp/havel-unit-"$NAME".log 2>&1; then
+        # 60s was too short on a loaded box: a run that stretched to 100
+        # minutes reported test-app-icons with NO output (killed at the
+        # limit), while the same binary runs in seconds on an idle box.
+        if timeout 300 "$U" > /tmp/havel-unit-"$NAME".log 2>&1; then
             report 0 "$NAME unit suite ($(tail -1 /tmp/havel-unit-"$NAME".log))"
         else
             report 1 "$NAME unit suite ($(tail -1 /tmp/havel-unit-"$NAME".log))"
@@ -143,10 +158,14 @@ done
 echo "--- phase 1: boot"
 start_wm || { echo "FAIL: compositor did not start"; exit 1; }
 
-# boot checks: each polls its real log condition, no idle sleeps
+# boot checks: each polls its real log condition, no idle sleeps. The
+# waits are sized for a starved loop: the loading-screen timer runs on
+# the frame loop, so at load ~44 the "Auto-hide timeout reached" line had
+# still not appeared after 10s while the frame loop itself was demonstrably
+# running ("frame loop started" passed in the same phase).
 BOOT_OK=1
-wait_for_log "Havel Compositor running" 40 && wait_for_log "Auto-hide timeout reached" 10 && \
-    wait_for_log "\[FRAME\] Frame #1" 5 && BOOT_OK=0
+wait_for_log "Havel Compositor running" 120 && wait_for_log "Auto-hide timeout reached" 60 && \
+    wait_for_log "\[FRAME\] Frame #1" 30 && BOOT_OK=0
 report $([ "$(crashes)" -eq 0 ] && [ "$BOOT_OK" -eq 0 ] && echo 0 || echo 1) "clean boot, event loop running"
 report $(grep -q "Auto-hide timeout reached" "$LOG" && echo 0 || echo 1) "loading-screen auto-hide timer fires"
 
@@ -533,25 +552,37 @@ else
     INJ_PID=$!
     GRID_UP="$(mktemp /tmp/havel-grid-up-XXXXXX.png)"
     GRID_TMP="$(mktemp /tmp/havel-grid-poll-XXXXXX.png)"
+    # Settle condition spans BOTH layers the checks measure: the panel is
+    # drawn before the full-screen dim finishes fading, so breaking on the
+    # panel alone captured a frame whose dim count landed a hair under its
+    # threshold (dim=45995 vs 46080, missed by 0.18%, while panel/cells/
+    # selected all passed comfortably - observed). Keep the capture with
+    # the highest combined score and only stop once both are well clear.
     GRID_BEST=0
     for _ in $(seq 1 30); do
         WAYLAND_DISPLAY=wayland-0 grim "$GRID_TMP" 2>/dev/null || { sleep 0.3; continue; }
-        PP=$(python3 - "$GRID_TMP" <<'PPPY' 2>/dev/null || echo 0
+        read -r PP DD <<EOF
+$(python3 - "$GRID_TMP" <<'PPPY' 2>/dev/null || echo "0 0"
 import sys
 from PIL import Image
 from collections import Counter
 im = Image.open(sys.argv[1]).convert('RGB')
 px = im.load(); w, h = im.size
 c = Counter(px[x, y] for x in range(0, w, 2) for y in range(0, h, 2))
-print(sum(n for k, n in c.items()
-          if abs(k[0] - 33) <= 6 and abs(k[1] - 33) <= 6 and abs(k[2] - 43) <= 6))
+def near(t, tol=6):
+    return sum(n for k, n in c.items() if all(abs(k[i] - t[i]) <= tol for i in range(3)))
+print(near((33, 33, 43)), near((7, 7, 11)))
 PPPY
 )
-        if [ "${PP:-0}" -gt "$GRID_BEST" ]; then
-            GRID_BEST="${PP:-0}"
+EOF
+        SCORE=$(( ${PP:-0} + ${DD:-0} ))
+        if [ "$SCORE" -gt "$GRID_BEST" ]; then
+            GRID_BEST="$SCORE"
             cp "$GRID_TMP" "$GRID_UP" 2>/dev/null
         fi
-        [ "$GRID_BEST" -ge 20000 ] && break
+        # Both layers clear of their thresholds (panel 2304, dim 46080):
+        # wait for the animation to finish rather than catching it mid-way.
+        if [ "${PP:-0}" -ge 30000 ] && [ "${DD:-0}" -ge 60000 ]; then break; fi
         sleep 0.3
     done
     rm -f "$GRID_TMP"
@@ -696,7 +727,7 @@ im.save(sys.argv[1])
 WP_PY
 if python3 - "$WPIMG" "$SOCK" <<'WPSET' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[2])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"set_wallpaper",
                        "params":{"path":sys.argv[1]}})+"\n").encode())
@@ -724,7 +755,7 @@ WP_COUNT
     # clear and confirm the pattern is gone
     python3 - "$SOCK" <<'WPCLR' >/dev/null 2>&1
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"set_wallpaper",
                        "params":{"path":""}})+"\n").encode())
@@ -777,7 +808,7 @@ ZWP_PY
 zoom_ipc() {
     python3 - "$SOCK" "$1" <<'ZIPC' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"zoom",
                        "params":json.loads(sys.argv[2])})+"\n").encode())
@@ -792,7 +823,7 @@ ZIPC
 # the spawned terminal lives on the workspace the key phase switched to)
 PARKED=$(python3 - "$SOCK" <<'FPARK' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 def rpc(m, p):
     s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":m,"params":p})+"\n").encode())
@@ -824,7 +855,7 @@ fi
 
 if python3 - "$SOCK" "$ZWPIMG" <<'ZWSET' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"set_wallpaper",
                        "params":{"path":sys.argv[2]}})+"\n").encode())
@@ -865,7 +896,7 @@ ZCTRL_PY
     zoom_ipc '{"action":"toggle","output":0}' >/dev/null
     python3 - "$SOCK" <<'ZWARPa' >/dev/null 2>&1
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"warp_cursor",
                        "params":{"x":600,"y":360}})+"\n").encode())
@@ -926,7 +957,7 @@ ZB_PY
     zoom_ipc '{"action":"reset","output":"all"}' >/dev/null
     python3 - "$SOCK" <<'ZWCLR2' >/dev/null 2>&1
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"set_wallpaper",
                        "params":{"path":""}})+"\n").encode())
@@ -963,7 +994,7 @@ LAUNCHER_CAP="$(mktemp /tmp/havel-launcher-XXXXXX.png)"
 ZCAP_L2="$(mktemp /tmp/havel-launcher2-XXXXXX.png)"
 if plugin_result=$(python3 - "$SOCK" <<'LOPEN' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"plugin_command",
                        "params":{"plugin":"app_launcher","cmd":"open"}})+"\n").encode())
@@ -998,7 +1029,7 @@ LSTATS_PY
     # close via command; verify the overlay is gone
     python3 - "$SOCK" <<'LCLOSE' >/dev/null 2>&1
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"plugin_command",
                        "params":{"plugin":"app_launcher","cmd":"close"}})+"\n").encode())
@@ -1067,7 +1098,7 @@ mkdir -p "$FILEDIR/subdir"
 file_ipc() {
     python3 - "$SOCK" "$1" "$2" <<'FIPC' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":sys.argv[2],
                        "params":json.loads(sys.argv[3])})+"\n").encode())
@@ -1102,7 +1133,7 @@ sleep 0.3
 SSET() {
     python3 - "$SOCK" "$1" "$2" <<'SIPC' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"settings",
                        "params":json.loads(sys.argv[3])})+"\n").encode())
@@ -1118,7 +1149,7 @@ report $(echo "$SGAMMA2" | grep -q '"value": "1.5"' && echo 0 || echo 1) \
     "settings_get returns gamma ($(echo "$SGAMMA2" | head -c 50))"
 GDSP=$(python3 - "$SOCK" <<'GDSP' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_display_settings","params":{}})+"\n").encode())
 print(s.recv(65536).decode())
@@ -1183,7 +1214,7 @@ EOF
     rl_ipc() {
         python3 - "$RL_IPC" "$1" "$2" <<'RIPCS' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":sys.argv[2],
                        "params":json.loads(sys.argv[3])})+"\n").encode())
@@ -1266,7 +1297,7 @@ CLEANKEY
 
     GOUT=$(python3 - "$SOCK" <<'GOUT' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_outputs","params":{}})+"\n").encode())
 print(s.recv(65536).decode())
@@ -1276,7 +1307,7 @@ GOUT
         "get_outputs reports geometry ($(echo "$GOUT" | head -c 70))"
     GKB=$(python3 - "$SOCK" <<'GKB' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_keybindings","params":{}})+"\n").encode())
 print(s.recv(65536).decode())
@@ -1297,7 +1328,7 @@ else
     hrun() {
         python3 - "$SOCK" "$1" <<'HRUN' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"havel_run",
                        "params":{"source":sys.argv[2]}})+"\n").encode())
@@ -1308,7 +1339,7 @@ HRUN
     winfield() {
         python3 - "$SOCK" "$1" "${2:-}" <<'WFIELD' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_windows","params":{}})+"\n").encode())
 r = json.loads(s.recv(65536)); s.close()
@@ -1325,7 +1356,7 @@ WFIELD
     setfloat() {
         python3 - "$SOCK" "$1" <<'SFLT' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_windows","params":{}})+"\n").encode())
 r = json.loads(s.recv(65536)); s.close()
@@ -1344,7 +1375,7 @@ SFLT
     sleep 0.3
     WSC=$(python3 - "$SOCK" <<'WSC' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_workspaces","params":{}})+"\n").encode())
 r = json.loads(s.recv(65536)); s.close()
@@ -1360,10 +1391,14 @@ WSC
     # match returns a stale window (observed: move hit window 4
     # instead of 8, three phase-16 checks failed).
     winfield_ws() {
-        # Retry up to 10 x 0.5s: the foot's appId arrives asynchronously
-        # via the set_app_id listener AFTER createXdgView - a single
-        # immediate query raced it and saw an empty appId (observed).
-        for _ in $(seq 1 10); do
+        # Retry up to 60 x 0.5s (30s): the foot's appId arrives
+        # asynchronously via the set_app_id listener AFTER createXdgView -
+        # a single immediate query raced it and saw an empty appId
+        # (observed). 10 x 0.5s was still too short: at load ~27 the appId
+        # took ~6s, so the lookup returned empty, the move call's
+        # int("") threw (silenced), nothing moved, and the follow-up
+        # read reported workspace 0 (observed).
+        for _ in $(seq 1 60); do
             R=$(python3 - "$SOCK" "$1" <<'WFW' 2>/dev/null
 import socket, json, sys
 s = socket.socket(socket.AF_UNIX); s.settimeout(5)
@@ -1390,17 +1425,29 @@ WFW
     # Own app-id: winfield matches the FIRST window containing "foot" and
     # older feet from earlier phases are still alive - a generic match
     # returned a stale id and the move hit the wrong window (observed).
-    (WAYLAND_DISPLAY=wayland-0 timeout 40 foot -a harness_ws -e sh -c 'sleep 30' > /dev/null 2>&1 &)
+    # Lifetime covers the whole phase: the opacity checks at the end of it
+    # still read this window, and on a loaded box the steps in between
+    # (gaps, floating_rule, default_layout, border_size) take well over the
+    # 30s this window used to live - it died first and those reads came
+    # back empty (observed: "opacity reads 1.0 before change (got )").
+    (WAYLAND_DISPLAY=wayland-0 timeout 240 foot -a harness_ws -e sh -c 'sleep 210' > /dev/null 2>&1 &)
     sleep 1.5
     FOOT_ID=$(winfield_ws id)
-    python3 - "$SOCK" "$FOOT_ID" <<'MVS' >/dev/null 2>&1
+    # Report the move's own reply: swallowing it turned "lookup returned
+    # no id" and "the compositor rejected the move" into the same silent
+    # no-op, and the check below then just read placeholder values back.
+    MVR=$(python3 - "$SOCK" "${FOOT_ID:-}" <<'MVS' 2>&1
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+if not sys.argv[2].strip():
+    print("no window id from winfield_ws (appId not seen in time)"); sys.exit(0)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"move_to_workspace",
                        "params":{"window_id": int(sys.argv[2]), "workspace": 4}})+"\n").encode())
-s.recv(65536)
+print(s.recv(65536).decode()[:120])
 MVS
+)
+    echo "    move_to_workspace -> ${MVR}"
     sleep 0.5
     WS4=$(winfield_ws workspace)
     report $([ "$WS4" = "4" ] && echo 0 || echo 1) "window on workspace 4 (ws=$WS4)"
@@ -1424,7 +1471,7 @@ MVS
 import socket, json, sys
 # ONE connection for the query and the mutation: fresh connections reuse
 # fd numbers and a stale event-loop source race resets the second one.
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 def rpc(m, p):
     s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":m,"params":p})+"\n").encode())
@@ -1483,7 +1530,7 @@ GAPX
     WSID=$(winfield_ws id)
     OP1=$(python3 - "$SOCK" "$WSID" <<'OPQ1' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_windows","params":{}})+"\n").encode())
 r = json.loads(s.recv(65536)); s.close()
@@ -1496,7 +1543,7 @@ OPQ1
 )
     python3 - "$SOCK" "$WSID" <<'OPSET' >/dev/null 2>&1
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"set_window_opacity",
                        "params":{"id": int(sys.argv[2]), "opacity": 0.5}})+"\n").encode())
@@ -1505,7 +1552,7 @@ OPSET
     sleep 0.5
     OP2=$(python3 - "$SOCK" "$WSID" <<'OPQ2' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_windows","params":{}})+"\n").encode())
 r = json.loads(s.recv(65536)); s.close()
@@ -1523,7 +1570,7 @@ OPQ2
     # restore
     python3 - "$SOCK" "$WSID" <<'OPRST' >/dev/null 2>&1
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"set_window_opacity",
                        "params":{"id": int(sys.argv[2]), "opacity": 1.0}})+"\n").encode())
@@ -1562,7 +1609,7 @@ if pgrep -x Xwayland >/dev/null 2>&1; then
         # One probe returns both the match count and the window id.
         XPROBE=$(python3 - "$SOCK" <<'XW_PY' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_windows","params":{}})+"\n").encode())
 r = json.loads(s.recv(65536)); s.close()
@@ -1582,7 +1629,7 @@ XW_PY
             # WM_DELETE via IPC close: xred only exits on the WM protocol.
             python3 - "$SOCK" "$XRED_ID" <<'XCLOSE_PY' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"close",
                        "params":{"id": int(sys.argv[2])}})+"\n").encode())
@@ -1614,7 +1661,7 @@ if pgrep -x Xwayland >/dev/null 2>&1; then
     keyrun() {
         python3 - "$SOCK" "$1" "$2" <<'KEYRUN' >/dev/null 2>&1
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 code = "io.injectKey(%s, %s)" % (sys.argv[2], sys.argv[3])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"havel_run",
@@ -1627,7 +1674,7 @@ KEYRUN
     locked() {
         python3 - "$SOCK" <<'LCK' 2>/dev/null
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"is_screen_locked","params":{}})+"\n").encode())
 r = json.loads(s.recv(65536)); s.close()
@@ -1638,7 +1685,7 @@ LCK
     rpc_lock() {
         python3 - "$SOCK" <<'LSCR' >/dev/null 2>&1
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"lock_screen","params":{}})+"\n").encode())
 s.recv(65536); s.close()
@@ -1682,7 +1729,7 @@ IDC
     # failed worker did not corrupt the lock.
     python3 - "$SOCK" <<'UNL' >/dev/null 2>&1
 import socket, json, sys
-s = socket.socket(socket.AF_UNIX); s.settimeout(10)
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
 s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"unlock_screen","params":{}})+"\n").encode())
 s.recv(65536); s.close()

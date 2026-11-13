@@ -69,11 +69,11 @@ def rpc(sock, method, params, seq):
 def main():
     # Two connections: events land on the subscriber socket only
     cmd_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    cmd_sock.settimeout(5)
+    cmd_sock.settimeout(30)
     cmd_sock.connect(SOCK)
 
     sub_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sub_sock.settimeout(5)
+    sub_sock.settimeout(30)
     sub_sock.connect(SOCK)
     rpc(sub_sock, "subscribe", {"event": "all"}, 100)
 
