@@ -153,7 +153,6 @@ static void session_dmabuf_format(void *data, struct ext_image_copy_capture_sess
 
 static void session_done(void *data, struct ext_image_copy_capture_session_v1 *session) {
     (void)session;
-    fprintf(stderr, "capture: session done (formats final)\n");
     auto *cc = static_cast<capture_client *>(data);
     // Formats + size are final when done arrives; the caller proceeds to
     // create a frame.
@@ -192,7 +191,6 @@ static void frame_presentation_time(void *data, struct ext_image_copy_capture_fr
 
 static void frame_ready(void *data, struct ext_image_copy_capture_frame_v1 *frame) {
     (void)frame;
-    fprintf(stderr, "capture: frame ready\n");
     auto *cc = static_cast<capture_client *>(data);
     cc->ready = true;
 }
@@ -259,8 +257,6 @@ static bool capture_desktop(capture_client *cc, char *err, size_t errsz) {
     for (int i = 0; i < 100 && !cc->have_format && !cc->stopped; i++) {
         wl_display_roundtrip(cc->display);
     }
-    fprintf(stderr, "capture: session %ux%u fmt=0x%x have_format=%d stopped=%d\n",
-            cc->width, cc->height, cc->shm_format, (int)cc->have_format, (int)cc->stopped);
     if (!cc->have_format || cc->width == 0 || cc->height == 0) {
         snprintf(err, errsz, "capture session advertised no format/size");
         return false;
