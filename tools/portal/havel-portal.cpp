@@ -34,6 +34,7 @@
 // Generated protocol glue (see havel-portal build target).
 #include "ext-image-capture-source-v1-client-protocol.h"
 #include "ext-image-copy-capture-v1-client-protocol.h"
+#include "screencast.hpp"
 
 #define PORTAL_BUS_NAME "org.freedesktop.impl.portal.desktop.havel"
 #define PORTAL_OBJECT_PATH "/org/freedesktop/portal/desktop"
@@ -397,6 +398,8 @@ static bool write_png(const char *path, const void *pixels,
 // ---------------------------------------------------------------------------
 // D-Bus: org.freedesktop.portal.Screenshot
 // ---------------------------------------------------------------------------
+// Introspection node, owned for the process lifetime: object
+// registrations reference the interfaces parsed from it.
 static GDBusNodeInfo *portal_node_info = nullptr;
 
 // Backends implement the org.freedesktop.impl.portal.* interfaces: the
@@ -419,13 +422,141 @@ static const gchar portal_introspect_xml[] =
     "      <arg name='results' direction='out' type='a{sv}'/>"
     "    </method>"
     "  </interface>"
+    "  <interface name='org.freedesktop.impl.portal.ScreenCast'>"
+    "    <method name='CreateSession'>"
+    "      <arg name='handle' direction='in' type='o'/>"
+    "      <arg name='session_handle' direction='in' type='o'/>"
+    "      <arg name='app_id' direction='in' type='s'/>"
+    "      <arg name='options' direction='in' type='a{sv}'/>"
+    "      <arg name='response' direction='out' type='u'/>"
+    "      <arg name='results' direction='out' type='a{sv}'/>"
+    "    </method>"
+    "    <method name='SelectSources'>"
+    "      <arg name='handle' direction='in' type='o'/>"
+    "      <arg name='session_handle' direction='in' type='o'/>"
+    "      <arg name='app_id' direction='in' type='s'/>"
+    "      <arg name='options' direction='in' type='a{sv}'/>"
+    "      <arg name='response' direction='out' type='u'/>"
+    "      <arg name='results' direction='out' type='a{sv}'/>"
+    "    </method>"
+    "    <method name='Start'>"
+    "      <arg name='handle' direction='in' type='o'/>"
+    "      <arg name='session_handle' direction='in' type='o'/>"
+    "      <arg name='app_id' direction='in' type='s'/>"
+    "      <arg name='parent_window' direction='in' type='s'/>"
+    "      <arg name='options' direction='in' type='a{sv}'/>"
+    "      <arg name='response' direction='out' type='u'/>"
+    "      <arg name='results' direction='out' type='a{sv}'/>"
+    "    </method>"
+    "    <property name='AvailableSourceTypes' type='u' access='read'/>"
+    "    <property name='AvailableCursorModes' type='u' access='read'/>"
+    "    <property name='version' type='u' access='read'/>"
+    "  </interface>"
+    "  <interface name='org.freedesktop.impl.portal.Session'>"
+    "    <method name='Close'>"
+    "      <arg name='response' direction='out' type='u'/>"
+    "    </method>"
+    "    <signal name='Closed'/>"
+    "  </interface>"
     "</node>";
 
 // Request-handle bookkeeping (portal requires each request object be
 // exported so the app can await Response signals; we keep it minimal:
 // export the request path and answer synchronously).
 static GDBusConnection *portal_bus = nullptr;
-static gulong portal_export_id = 0;
+
+// ---- ScreenCast session bookkeeping -----------------------------------
+// A live ScreenCast session, bound to the object path the frontend told
+// us about. One active session per process: a second Start is refused
+// rather than silently leaving the first set of PipeWire streams running.
+struct PortalSession {
+    std::string path;
+    uint32_t sourceTypes = 0;  // requested sources (1 monitor, 2 window)
+    bool started = false;
+};
+
+// Parse the fixed leading arguments of the portal impl methods
+// (handle, app_id, parent_window, options). The frontend sends the object
+// paths as 'o', but gdbus-style convenience paths arrive as 's' - accept
+// both, and let missing children leave the pointers null.
+static void parseChildren(GVariant* parameters, char** handle, char** app_id,
+                           char** parent_window, GVariant** options) {
+    *handle = nullptr;
+    if (app_id) *app_id = nullptr;
+    if (parent_window) *parent_window = nullptr;
+    if (options) *options = nullptr;
+    GVariant* c0 = g_variant_get_child_value(parameters, 0);
+    if (g_variant_is_of_type(c0, G_VARIANT_TYPE_OBJECT_PATH) ||
+        g_variant_is_of_type(c0, G_VARIANT_TYPE_STRING)) {
+        *handle = g_variant_dup_string(c0, nullptr);
+    }
+    g_variant_unref(c0);
+    if (g_variant_n_children(parameters) > 1) {
+        GVariant* c1 = g_variant_get_child_value(parameters, 1);
+        if (app_id && g_variant_is_of_type(c1, G_VARIANT_TYPE_STRING)) {
+            *app_id = g_variant_dup_string(c1, nullptr);
+        }
+        g_variant_unref(c1);
+    }
+    if (g_variant_n_children(parameters) > 2) {
+        GVariant* c2 = g_variant_get_child_value(parameters, 2);
+        if (parent_window && g_variant_is_of_type(c2, G_VARIANT_TYPE_STRING)) {
+            *parent_window = g_variant_dup_string(c2, nullptr);
+        }
+        g_variant_unref(c2);
+    }
+    if (options && g_variant_n_children(parameters) > 3) {
+        GVariant* c3 = g_variant_get_child_value(parameters, 3);
+        if (g_variant_is_of_type(c3, G_VARIANT_TYPE("a{sv}"))) {
+            *options = g_variant_ref(c3);
+        }
+        g_variant_unref(c3);
+    }
+}
+
+static std::vector<PortalSession> g_sessions;
+
+// The session_handle argument is child 1 of every ScreenCast method. The
+// impl methods run the frontend, so a portal path arrives as "o"; anything
+// gdbus-driven arrives as "s". Accept both.
+static std::string sessionHandleOf(GVariant* parameters) {
+    std::string path;
+    if (g_variant_n_children(parameters) <= 1) return path;
+    GVariant* c1 = g_variant_get_child_value(parameters, 1);
+    if (g_variant_is_of_type(c1, G_VARIANT_TYPE_OBJECT_PATH) ||
+        g_variant_is_of_type(c1, G_VARIANT_TYPE_STRING)) {
+        path = g_variant_get_string(c1, nullptr);
+    }
+    g_variant_unref(c1);
+    return path;
+}
+
+static PortalSession* findSession(const std::string& path) {
+    for (auto& s : g_sessions) {
+        if (s.path == path) return &s;
+    }
+    return nullptr;
+}
+
+// Emit the impl Request Response signal and complete the method call with
+// the same values (the frontend listens for the signal).
+static void finishRequest(GDBusMethodInvocation* invocation, uint32_t code,
+                          GVariantBuilder* extras, const char* handle) {
+    // g_variant_builder_end returns a floating reference; g_variant_new's
+    // "@a{sv}" consumes one reference per use, so sink first and take an
+    // explicit reference for each of the two consumers.
+    GVariant* results = extras ? g_variant_ref_sink(g_variant_builder_end(extras))
+                               : g_variant_ref_sink(g_variant_new_array(
+                                     G_VARIANT_TYPE("{sv}"), nullptr, 0));
+    if (handle) {
+        g_dbus_connection_emit_signal(portal_bus, nullptr, handle,
+            "org.freedesktop.impl.portal.Request", "Response",
+            g_variant_new("(u@a{sv})", code, g_variant_ref(results)), nullptr);
+    }
+    g_dbus_method_invocation_return_value(
+        invocation, g_variant_new("(u@a{sv})", code, g_variant_ref(results)));
+    g_variant_unref(results);
+}
 
 static void handle_method_call(GDBusConnection *connection, const gchar *sender,
                                const gchar *object_path, const gchar *interface_name,
@@ -433,43 +564,172 @@ static void handle_method_call(GDBusConnection *connection, const gchar *sender,
                                GDBusMethodInvocation *invocation, gpointer user_data) {
     (void)connection; (void)sender; (void)object_path; (void)interface_name;
     (void)user_data;
-    if (g_strcmp0(method_name, "Screenshot") != 0) {
-        g_dbus_method_invocation_return_dbus_error(
-            invocation, "org.freedesktop.DBus.Error.UnknownMethod",
-            "only Screenshot is implemented");
+    // ---- ScreenCast ---------------------------------------------------
+    if (g_strcmp0(method_name, "CreateSession") == 0) {
+        gchar *h = nullptr;
+        GVariant *opts = nullptr;
+        char *aid = nullptr, *parent = nullptr;
+        parseChildren(parameters, &h, &aid, &parent, &opts);
+        if (!g_sessions.empty()) {
+            finishRequest(invocation, 2, nullptr, h);
+            g_free(h);
+            g_free(aid);
+            g_free(parent);
+            if (opts) g_variant_unref(opts);
+            return;
+        }
+        PortalSession s;
+        // The session path is the SECOND argument (session_handle); the
+        // frontend created that object and will pass it back to us here.
+        s.path = sessionHandleOf(parameters);
+        g_sessions.push_back(s);
+        GVariantBuilder b;
+        g_variant_builder_init(&b, G_VARIANT_TYPE("a{sv}"));
+        g_variant_builder_add(&b, "{sv}", "session_handle",
+                              g_variant_new_string(s.path.c_str()));
+        finishRequest(invocation, 0, &b, h);
+        g_free(h);
+        g_free(aid);
+        g_free(parent);
+        if (opts) g_variant_unref(opts);
         return;
     }
 
-    // Parse children defensively: a strict format string aborts the
-    // process on a type mismatch (gdbus sends the handle as 's' rather
-    // than 'o' for convenience), and a portal backend must answer, not
-    // die.
+    // SelectSources: (handle, session_handle, app_id, options). The
+    // session path is the SECOND child, not parent_window.
+    if (g_strcmp0(method_name, "SelectSources") == 0) {
+        gchar *h = nullptr;
+        GVariant *opts = nullptr;
+        char *aid = nullptr, *parent = nullptr;
+        parseChildren(parameters, &h, &aid, &parent, &opts);
+        std::string sessionPath = sessionHandleOf(parameters);
+        PortalSession* s = g_sessions.empty() ? nullptr : &g_sessions.front();
+        if (!s || (!sessionPath.empty() && s->path != sessionPath)) {
+            finishRequest(invocation, 2, nullptr, h);
+            g_free(h);
+            g_free(aid);
+            g_free(parent);
+            if (opts) g_variant_unref(opts);
+            return;
+        }
+        uint32_t types = 1;  // monitor by default
+        if (opts) {
+            GVariant* t = g_variant_lookup_value(opts, "types", G_VARIANT_TYPE_UINT32);
+            if (t) {
+                types = g_variant_get_uint32(t);
+                g_variant_unref(t);
+            }
+        }
+        // 1 = monitor, 2 = window. Virtual (4) is not producible here.
+        if (types != 1 && types != 2) {
+            finishRequest(invocation, 1, nullptr, h);
+            g_free(h);
+            g_free(aid);
+            g_free(parent);
+            if (opts) g_variant_unref(opts);
+            return;
+        }
+        s->sourceTypes = types;
+        finishRequest(invocation, 0, nullptr, h);
+        g_free(h);
+        g_free(aid);
+        g_free(parent);
+        if (opts) g_variant_unref(opts);
+        return;
+    }
+
+    // Start: (handle, session_handle, app_id, parent_window, options).
+    if (g_strcmp0(method_name, "Start") == 0) {
+        gchar *h = nullptr;
+        GVariant *opts = nullptr;
+        char *aid = nullptr, *parent = nullptr;
+        parseChildren(parameters, &h, &aid, &parent, &opts);
+        std::string sessionPath;
+        {
+            GVariant* c1 = g_variant_get_child_value(parameters, 1);
+            if (g_variant_is_of_type(c1, G_VARIANT_TYPE_OBJECT_PATH) ||
+                g_variant_is_of_type(c1, G_VARIANT_TYPE_STRING)) {
+                sessionPath = g_variant_get_string(c1, nullptr);
+            }
+            g_variant_unref(c1);
+        }
+        PortalSession* s = g_sessions.empty() ? nullptr : &g_sessions.front();
+        if (!s || (!sessionPath.empty() && s->path != sessionPath) ||
+            s->started || s->sourceTypes == 0) {
+            finishRequest(invocation, 2, nullptr, h);
+            g_free(h);
+            g_free(aid);
+            g_free(parent);
+            if (opts) g_variant_unref(opts);
+            return;
+        }
+        std::vector<havel_portal::ScreencastStream> streams;
+        std::string err;
+        if (!havel_portal::screencastStart(1, streams, err)) {
+            fprintf(stderr, "havel-portal: ScreenCast start failed: %s\n", err.c_str());
+            finishRequest(invocation, 2, nullptr, h);
+            g_free(h);
+            g_free(aid);
+            g_free(parent);
+            if (opts) g_variant_unref(opts);
+            return;
+        }
+        s->started = true;
+
+        fprintf(stderr, "screencast: %zu stream(s)\n", streams.size());
+        // Streams tuple array: each element is (node_id, a{sv} props).
+        // GLib cannot format "a(ua{sv})" directly - g_variant_builder_add
+        // and g_variant_new abort on a "{sv}" nested inside a tuple
+        // ("expected array GVariantBuilder", observed) - so each element
+        // goes through a nested tuple builder that is added by value.
+        GVariantBuilder sb;
+        g_variant_builder_init(&sb, G_VARIANT_TYPE("a(ua{sv})"));
+        for (const auto& st : streams) {
+            GVariantBuilder fb;
+            g_variant_builder_init(&fb, G_VARIANT_TYPE("(ua{sv})"));
+            g_variant_builder_add(&fb, "u", st.nodeId);
+            GVariantBuilder pb;
+            g_variant_builder_init(&pb, G_VARIANT_TYPE("a{sv}"));
+            g_variant_builder_add(&pb, "{sv}", "pipewire-serial",
+                                  g_variant_new_uint32(st.serial));
+            g_variant_builder_add(&pb, "{sv}", "source-type",
+                                  g_variant_new_uint32(1));  // 1 = monitor
+            g_variant_builder_add(&pb, "{sv}", "size",
+                                  g_variant_new("(uu)", st.width, st.height));
+            g_variant_builder_add(&pb, "{sv}", "position",
+                                  g_variant_new("(ii)", st.x, st.y));
+            g_variant_builder_add_value(&fb, g_variant_builder_end(&pb));
+            g_variant_builder_add_value(&sb, g_variant_builder_end(&fb));
+        }
+        // The outer builder is ended by finishRequest, not here: ending it
+        // twice hands g_variant_new an already-finished builder and aborts
+        // the process (observed live at Start).
+        GVariantBuilder results;
+        g_variant_builder_init(&results, G_VARIANT_TYPE("a{sv}"));
+        g_variant_builder_add(&results, "{sv}", "streams", g_variant_builder_end(&sb));
+        finishRequest(invocation, 0, &results, h);
+        g_free(h);
+        g_free(aid);
+        g_free(parent);
+        if (opts) g_variant_unref(opts);
+        return;
+    }
+
+    if (g_strcmp0(method_name, "Screenshot") != 0) {
+        g_dbus_method_invocation_return_dbus_error(
+            invocation, "org.freedesktop.DBus.Error.UnknownMethod",
+            "method not implemented");
+        return;
+    }
+
+    // Parsing is shared with the ScreenCast methods: the frontend sends
+    // object paths as 'o', gdbus-style convenience paths as 's', and a
+    // strict format string would abort the process on a mismatch.
     gchar *handle = nullptr, *app_id = nullptr, *window_title = nullptr;
     GVariant *options = nullptr;
-    {
-        GVariant *c0 = g_variant_get_child_value(parameters, 0);
-        GVariant *c1 = g_variant_get_child_value(parameters, 1);
-        GVariant *c2 = g_variant_get_child_value(parameters, 2);
-        GVariant *c3 = g_variant_get_child_value(parameters, 3);
-        if (g_variant_is_of_type(c0, G_VARIANT_TYPE_OBJECT_PATH) ||
-            g_variant_is_of_type(c0, G_VARIANT_TYPE_STRING)) {
-            handle = g_variant_dup_string(c0, nullptr);
-        }
-        if (g_variant_is_of_type(c1, G_VARIANT_TYPE_STRING)) {
-            app_id = g_variant_dup_string(c1, nullptr);
-        }
-        if (g_variant_is_of_type(c2, G_VARIANT_TYPE_STRING)) {
-            window_title = g_variant_dup_string(c2, nullptr);
-        }
-        if (g_variant_is_of_type(c3, G_VARIANT_TYPE("a{sv}"))) {
-            options = g_variant_ref(c3);
-        }
-        g_variant_unref(c0);
-        g_variant_unref(c1);
-        g_variant_unref(c2);
-        g_variant_unref(c3);
-    }
-    (void)app_id; (void)window_title;
+    parseChildren(parameters, &handle, &app_id, &window_title, &options);
+    (void)app_id;
+    (void)window_title;
 
     // Default target: ~/Pictures/screenshot.png, or the caller's path option.
     const gchar *path_opt = nullptr;
@@ -509,23 +769,7 @@ static void handle_method_call(GDBusConnection *connection, const gchar *sender,
     if (response_code != 0) {
         fprintf(stderr, "havel-portal: capture failed: %s\n", err);
     }
-    // Sink once: the extras are used twice ('@' consumes a reference
-    // each time), so each use takes its own reference.
-    GVariant *response_extras = g_variant_ref_sink(g_variant_builder_end(&extras_builder));
-
-    // Emit Response on the impl Request object (the frontend waits on
-    // it) and return (response, results) to the caller.
-    if (handle) {
-        g_dbus_connection_emit_signal(portal_bus, nullptr, handle,
-            "org.freedesktop.impl.portal.Request", "Response",
-            g_variant_new("(u@a{sv})", response_code,
-                          g_variant_ref(response_extras)), nullptr);
-    }
-
-    g_dbus_method_invocation_return_value(
-        invocation, g_variant_new("(u@a{sv})", response_code,
-                                  g_variant_ref(response_extras)));
-    g_variant_unref(response_extras);
+    finishRequest(invocation, response_code, &extras_builder, handle);
     g_free(path);
     g_free(handle);
     g_free(app_id);
@@ -541,10 +785,23 @@ static const GDBusInterfaceVTable portal_vtable = {
 static void on_bus_acquired(GDBusConnection *connection, const gchar *name, gpointer user_data) {
     (void)name; (void)user_data;
     portal_bus = connection;
-    portal_node_info = g_dbus_node_info_new_for_xml(portal_introspect_xml, nullptr);
-    portal_export_id = g_dbus_connection_register_object(
-        connection, PORTAL_OBJECT_PATH, portal_node_info->interfaces[0],
-        &portal_vtable, nullptr, nullptr, nullptr);
+    GDBusNodeInfo* node = g_dbus_node_info_new_for_xml(portal_introspect_xml, nullptr);
+    if (!node) {
+        fprintf(stderr, "havel-portal: introspection XML failed to parse\n");
+        return;
+    }
+    // Register EVERY interface the node declares: taking only
+    // interfaces[0] exposed Screenshot and left ScreenCast unreachable
+    // (UnknownMethod: No such interface "…impl.portal.ScreenCast",
+    // observed live).
+    for (unsigned i = 0; node->interfaces[i]; i++) {
+        guint id = g_dbus_connection_register_object(
+            connection, PORTAL_OBJECT_PATH, node->interfaces[i],
+            &portal_vtable, nullptr, nullptr, nullptr);
+        (void)id;
+    }
+    // Kept alive for the process lifetime: the registrations reference it.
+    portal_node_info = node;
 }
 
 static void on_name_acquired(GDBusConnection *connection, const gchar *name, gpointer user_data) {

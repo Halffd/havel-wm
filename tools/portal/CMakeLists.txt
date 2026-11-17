@@ -7,6 +7,8 @@
 
 set(HAVEL_PORTAL_SOURCES
     havel-portal.cpp
+    capture.cpp
+    screencast.cpp
 )
 
 # Generate the protocol glue from the wayland-protocols staging XMLs
@@ -50,11 +52,13 @@ target_link_libraries(havel-portal PRIVATE
     ${PNG_LIBRARIES}
     ${GLIB_LIBRARIES}
     ${WAYLAND_CLIENT_LIBRARIES}
+    ${PIPEWIRE_LIBRARIES}
 )
 target_include_directories(havel-portal SYSTEM PRIVATE
     ${PNG_INCLUDE_DIRS}
     ${GLIB_INCLUDE_DIRS}
     ${WAYLAND_CLIENT_INCLUDE_DIRS}
+    ${PIPEWIRE_INCLUDE_DIRS}
 )
 set_target_properties(havel-portal PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
@@ -70,7 +74,7 @@ set(PORTAL_DESKTOP_DIR ${CMAKE_INSTALL_PREFIX}/share/xdg-desktop-portal/portals)
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/havel.portal
 "[portal]
 DBusName=org.freedesktop.impl.portal.desktop.havel
-Interfaces=org.freedesktop.impl.portal.Screenshot
+Interfaces=org.freedesktop.impl.portal.Screenshot;org.freedesktop.impl.portal.ScreenCast
 UseIn=havel;Havel;havel-wm
 ")
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/havel.portal

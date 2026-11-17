@@ -19,6 +19,10 @@ pkg_check_modules(FREETYPE REQUIRED freetype2)
 pkg_check_modules(PAM REQUIRED pam)
 pkg_check_modules(PNG REQUIRED libpng)
 
+# PipeWire, for the portal backend's ScreenCast streams (declared at the
+# top level so tools/portal can use it).
+pkg_check_modules(PIPEWIRE libpipewire-0.3)
+
 # librsvg rasterizes SVG app icons (alacritty ships only an SVG; themes
 # keep their scalable icons under <theme>/scalable/apps). Optional: without
 # it the loader keeps its placeholder fallback for SVG.
