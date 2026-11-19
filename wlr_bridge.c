@@ -60,6 +60,7 @@ static uint64_t get_monotonic_time_ms(void) {
 #include <wlr/types/wlr_virtual_pointer_v1.h>
 #include <wlr/types/wlr_virtual_keyboard_v1.h>
 #include <wlr/types/wlr_data_control_v1.h>
+#include <wlr/types/wlr_primary_selection.h>
 #include <wlr/types/wlr_input_method_v2.h>
 #include <wlr/types/wlr_text_input_v3.h>
 #include <wlr/types/wlr_cursor_shape_v1.h>
@@ -157,6 +158,18 @@ struct havel_output;
 struct havel_keyboard;
 struct havel_xdg_view;
 struct havel_xwayland_view;
+
+// Event handlers defined later in this file, referenced from
+// havel_wlr_create's signal wiring.
+static void server_new_output(struct wl_listener *listener, void *data);
+static void session_active(struct wl_listener *listener, void *data);
+static void server_new_input(struct wl_listener *listener, void *data);
+static void server_new_virtual_keyboard(struct wl_listener *listener, void *data);
+static void server_new_capture_session(struct wl_listener *listener, void *data);
+static void server_new_layer_surface(struct wl_listener *listener, void *data);
+static void handle_pointer_constraint(struct wl_listener *listener, void *data);
+static void seat_request_set_selection(struct wl_listener *listener, void *data);
+static void seat_request_set_primary_selection(struct wl_listener *listener, void *data);
 
 // Global server pointer for overlay access
 static struct havel_wlr_server *server = NULL;
@@ -266,6 +279,10 @@ struct havel_wlr_server {
     struct wl_listener new_input;
     struct wl_listener new_virtual_keyboard;
     struct wl_listener new_capture_session;  // ext-image-copy-capture
+    // Clipboard: a data-control client asks the seat to install its
+    // source. Without a handler the selection is silently dropped.
+    struct wl_listener request_set_selection;
+    struct wl_listener request_set_primary_selection;
 
     // ext-image-copy-capture v1 (panel/portal capture path; replaces the
     // deprecated wlr-screencopy-v1 for output capture).
@@ -1872,9 +1889,45 @@ static void capture_session_handle_destroy(struct wl_listener *listener, void *d
 static void handle_pointer_constraint(struct wl_listener *listener, void *data) {
     struct wlr_pointer_constraint_v1 *constraint = data;
     LOG_INFO("[PointerConstraint] New constraint: type=%d", constraint->type);
-    
+
     // wlroots handles the constraint automatically
     // We just need to create it, wlroots does the rest
+}
+
+// ============================================================================
+// Selection (clipboard) handlers
+// ============================================================================
+// A clipboard manager talks to zwlr_data_control_manager_v1, which forwards
+// its set_selection request here as a seat event. wlroots' data-control
+// layer installs the source itself; the seat only needs to accept it -
+// which wlroots does in its own seat handler. Ours exists to log it and
+// keep the request alive long enough for the source to be handed over
+// (the default wlroots behaviour when NO listener is registered is to
+// drop the source on the floor, which left the clipboard empty to every
+// client - the reason clipboard managers silently failed here).
+static void seat_request_set_selection(struct wl_listener *listener, void *data) {
+    struct havel_wlr_server *server =
+        wl_container_of(listener, server, request_set_selection);
+    struct wlr_seat_request_set_selection_event *event = data;
+    if (!server || !server->seat || !event || !event->source) return;
+    // This call is REQUIRED: without it neither setter nor reader works
+    // (both exits non-zero, observed). It installs the source and feeds
+    // set_selection. The remaining gap is on the device side - the offer
+    // reaches the client but the source's send is never requested
+    // (strace: zero pipe syscalls on the setter).
+    wlr_seat_set_selection(server->seat, event->source, event->serial);
+    LOG_DEBUG("[Clipboard] selection set via seat request (serial %u)",
+              event->serial);
+}
+
+static void seat_request_set_primary_selection(struct wl_listener *listener, void *data) {
+    struct havel_wlr_server *server =
+        wl_container_of(listener, server, request_set_primary_selection);
+    struct wlr_seat_request_set_primary_selection_event *event = data;
+    if (!server || !server->seat || !event || !event->source) return;
+    wlr_seat_set_primary_selection(server->seat, event->source, event->serial);
+    LOG_DEBUG("[Clipboard] primary selection set via seat request (serial %u)",
+              event->serial);
 }
 
 // ============================================================================
@@ -3504,11 +3557,13 @@ havel_wlr_server_t* havel_wlr_create(void) {
         LOG_INFO("[Virtual Keyboard] virtual_keyboard_manager_v1 created (input injection)");
     }
 
-    // Create data control manager v1 (clipboard management)
-    server->data_control_manager = wlr_data_control_manager_v1_create(server->display);
-    if (server->data_control_manager) {
-        LOG_INFO("[Data Control] data_control_manager_v1 created (clipboard history)");
-    }
+    // Data control manager v1 (clipboard management) is created AFTER the
+    // seat below: wlroots enumerates the seats that exist when the manager
+    // is created and installs one device per seat. Created here (112 lines
+    // before), the seat never got a device, so a clipboard manager's
+    // set_selection was accepted and then silently dropped - the offer
+    // arrived but the source's send was never forwarded (observed:
+    // wlclip set exit 0, recv timing out with the source alive).
 
     // Create input method manager v2 (IME support)
     server->input_method_manager = wlr_input_method_manager_v2_create(server->display);
@@ -3658,6 +3713,26 @@ havel_wlr_server_t* havel_wlr_create(void) {
 
     server->new_input.notify = server_new_input;
     wl_signal_add(&server->backend->events.new_input, &server->new_input);
+
+    // Selection plumbing: without these listeners the seat's
+    // request_set_selection / request_set_primary_selection signals go
+    // unhandled, so a data-control client (clipboard managers like copyq,
+    // cliphist, wl-clipboard holders) sets a selection the compositor
+    // then ignores - the clipboard appears empty to every other client.
+    // wlroots itself installs default handling only via its seat setup
+    // helpers; with a raw wlr_seat_create these events need our hand.
+    server->request_set_selection.notify = seat_request_set_selection;
+    wl_signal_add(&server->seat->events.request_set_selection, &server->request_set_selection);
+    server->request_set_primary_selection.notify = seat_request_set_primary_selection;
+    wl_signal_add(&server->seat->events.request_set_primary_selection,
+                  &server->request_set_primary_selection);
+
+    // Data control manager v1 (clipboard managers) AFTER the seat, so the
+    // device is attached to this seat's selection events.
+    server->data_control_manager = wlr_data_control_manager_v1_create(server->display);
+    if (server->data_control_manager) {
+        LOG_INFO("[Data Control] data_control_manager_v1 created (clipboard history)");
+    }
 
     // Update loading screen - almost ready
     if (loading_screen_is_visible()) {
