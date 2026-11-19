@@ -114,6 +114,9 @@ public:
     const OverlayTarget& overlayTarget() const { return m_overlayTarget; }
 
     // Native server handle for C bridge
+    // Keybinding registration (called from the constructor)
+    void registerKeybindings();
+
     // Screen lock (compositor-internal, intercepts all input when locked)
     class ScreenLock* screenLock() const { return m_screenLock; }
     void lockScreen();
@@ -424,6 +427,13 @@ private:
     uint32_t m_workspaceCount = WORKSPACE_COUNT;
     std::map<std::string, std::pair<int, int>> m_monitorRules;  // output name -> x,y
     std::string m_defaultLayout = "master";
+    // Special workspaces: name/tag plus a role. "hidden" workspaces are
+    // skipped by the ordinary step keys (script/config navigation only),
+    // and an "empty-group" workspace is one the panel groups separately.
+    enum class WorkspaceRole { Normal, Hidden, EmptyGroup };
+    std::map<uint32_t, std::string> m_workspaceNames;
+    std::map<uint32_t, std::string> m_workspaceTags;
+    std::map<uint32_t, WorkspaceRole> m_workspaceRoles;
     struct ZoomCaptureRequest {
         bool pending = false;
         float cx = 0, cy = 0;
@@ -511,10 +521,26 @@ private:
     void focusFirstLastView(bool first);
     void moveViewToWorkspace(uint32_t ws);
     void moveViewToWorkspaceRelative(bool next);
-    void quit();
+    // The last workspace with no windows on it, or -1 when every
+    // workspace holds one. Used by the "move to empty" and "go to empty"
+    // keybindings.
+    int lastEmptyWorkspace() const;
+    void moveViewToLastEmptyWorkspace();
+    void switchToLastEmptyWorkspace();
 
-    // Keybinding registration
-    void registerKeybindings();
+    // Special workspaces: a workspace can carry a name/tag and a role
+    // (normal, hidden, empty-group) so scripts and the panel can address
+    // them by meaning instead of index.
+    std::string workspaceName(uint32_t id) const;
+    void setWorkspaceName(uint32_t id, const std::string& name);
+    std::string workspaceTag(uint32_t id) const;
+    void setWorkspaceTag(uint32_t id, const std::string& tag);
+    bool workspaceHidden(uint32_t id) const;
+    void setWorkspaceHidden(uint32_t id, bool hidden);
+    // The named/tagged workspace's index, or -1 when no match.
+    int workspaceByName(const std::string& name) const;
+    int workspaceByTag(const std::string& tag) const;
+    void quit();
 
     // View manipulation through C callbacks (with optional animation)
     // Note: setViewPosition and setViewOpacity are public for CompositorAPI

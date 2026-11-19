@@ -195,11 +195,20 @@ void Server::setActiveWorkspace(uint32_t id) {
 }
 
 void Server::workspaceStep(bool backwards) {
-    uint32_t next = backwards
-        ? (m_activeWorkspace + workspaceCount() - 1) % workspaceCount()
-        : (m_activeWorkspace + 1) % workspaceCount();
-    LOG_DEBUG("Workspace step: %u -> %u", m_activeWorkspace, next);
-    setActiveWorkspace(next);
+    // Skip hidden workspaces: they stay reachable by index/config, but the
+    // ordinary step keys walk only the visible ones.
+    uint32_t next = m_activeWorkspace;
+    for (uint32_t i = 0; i < workspaceCount(); ++i) {
+        next = backwards
+            ? (next + workspaceCount() - 1) % workspaceCount()
+            : (next + 1) % workspaceCount();
+        if (!workspaceHidden(next)) {
+            LOG_DEBUG("Workspace step: %u -> %u", m_activeWorkspace, next);
+            setActiveWorkspace(next);
+            return;
+        }
+    }
+    LOG_DEBUG("Workspace step: no visible target from %u", m_activeWorkspace);
 }
 
 void Server::workspaceStepTo(uint32_t target) {
@@ -1040,12 +1049,107 @@ void Server::moveViewToWorkspace(View* view, uint32_t ws) {
 
 void Server::moveViewToWorkspaceRelative(bool next) {
     auto* ws = activeWorkspace();
-    if (ws && ws->activeView()) {
-        uint32_t target = next 
-            ? (m_activeWorkspace + 1) % workspaceCount()
-            : (m_activeWorkspace + workspaceCount() - 1) % workspaceCount();
-        moveViewToWorkspace(target);
+    if (!ws || !ws->activeView()) return;
+    // Skip hidden workspaces, same rule as workspaceStep.
+    uint32_t target = m_activeWorkspace;
+    for (uint32_t i = 0; i < workspaceCount(); ++i) {
+        target = next
+            ? (target + 1) % workspaceCount()
+            : (target + workspaceCount() - 1) % workspaceCount();
+        if (!workspaceHidden(target)) {
+            moveViewToWorkspace(target);
+            return;
+        }
     }
+}
+
+// The last workspace holding no views, or -1 when every one is occupied.
+// Counts mapped views only: a workspace with unmapped leftovers is still
+// an "empty" one for navigation purposes.
+int Server::lastEmptyWorkspace() const {
+    for (int ws = (int)workspaceCount() - 1; ws >= 0; --ws) {
+        std::vector<View*> views = getViewsInWorkspace((uint32_t)ws);
+        bool occupied = false;
+        for (View* v : views) {
+            if (v && v->isMapped()) {
+                occupied = true;
+                break;
+            }
+        }
+        if (!occupied) return ws;
+    }
+    return -1;
+}
+
+void Server::moveViewToLastEmptyWorkspace() {
+    int target = lastEmptyWorkspace();
+    if (target < 0) return;
+    moveViewToWorkspace((uint32_t)target);
+}
+
+void Server::switchToLastEmptyWorkspace() {
+    int target = lastEmptyWorkspace();
+    if (target < 0) return;
+    workspaceStepTo((uint32_t)target);
+}
+
+// ---- special workspaces (names, tags, roles) ---------------------------
+std::string Server::workspaceName(uint32_t id) const {
+    auto it = m_workspaceNames.find(id);
+    return it == m_workspaceNames.end() ? "" : it->second;
+}
+
+void Server::setWorkspaceName(uint32_t id, const std::string& name) {
+    if (name.empty()) {
+        m_workspaceNames.erase(id);
+    } else {
+        m_workspaceNames[id] = name;
+    }
+}
+
+std::string Server::workspaceTag(uint32_t id) const {
+    auto it = m_workspaceTags.find(id);
+    return it == m_workspaceTags.end() ? "" : it->second;
+}
+
+void Server::setWorkspaceTag(uint32_t id, const std::string& tag) {
+    if (tag.empty()) {
+        m_workspaceTags.erase(id);
+    } else {
+        m_workspaceTags[id] = tag;
+    }
+}
+
+bool Server::workspaceHidden(uint32_t id) const {
+    auto it = m_workspaceRoles.find(id);
+    return it != m_workspaceRoles.end() && it->second == WorkspaceRole::Hidden;
+}
+
+void Server::setWorkspaceHidden(uint32_t id, bool hidden) {
+    if (hidden) {
+        m_workspaceRoles[id] = WorkspaceRole::Hidden;
+    } else {
+        auto it = m_workspaceRoles.find(id);
+        if (it != m_workspaceRoles.end() && it->second == WorkspaceRole::Hidden) {
+            m_workspaceRoles.erase(it);
+        }
+    }
+}
+
+int Server::workspaceByName(const std::string& name) const {
+    if (name.empty()) return -1;
+    for (const auto& [id, n] : m_workspaceNames) {
+        if (n == name) return (int)id;
+    }
+    return -1;
+}
+
+int Server::workspaceByTag(const std::string& tag) const {
+    if (tag.empty()) return -1;
+    for (const auto& [id, t] : m_workspaceTags) {
+        if (t == tag) return (int)id;
+    }
+    return -1;
 }
 
 void Server::quit() {
@@ -1955,6 +2059,43 @@ void Server::registerKeybindings() {
         KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, XKB_KEY_0,
         "move_to_workspace_10", [this]() { moveViewToWorkspace(9); }
     );
+
+    // Alt+End: park the focused window on the last empty workspace.
+    // Meta+End: jump to that workspace. Both are no-ops when every
+    // workspace is occupied (there is no empty one to go to).
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_ALT, XKB_KEY_End,
+        "move_to_last_empty_workspace",
+        [this]() { moveViewToLastEmptyWorkspace(); }
+    );
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, XKB_KEY_End,
+        "goto_last_empty_workspace",
+        [this]() { switchToLastEmptyWorkspace(); }
+    );
+
+    // PgUp/PgDn: step workspaces. Meta = switch view,
+    // Alt = move the focused window along.
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, XKB_KEY_Prior,
+        "workspace_prev",
+        [this]() { workspaceStep(true); }
+    );
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, XKB_KEY_Next,
+        "workspace_next",
+        [this]() { workspaceStep(false); }
+    );
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_ALT, XKB_KEY_Prior,
+        "move_window_to_prev_workspace",
+        [this]() { moveViewToWorkspaceRelative(true); }
+    );
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_ALT, XKB_KEY_Next,
+        "move_window_to_next_workspace",
+        [this]() { moveViewToWorkspaceRelative(false); }
+    );
     
     // Log all registered bindings
     m_keybindingManager.listBindings();
@@ -2284,6 +2425,97 @@ bool Server::startIPCServer(const std::string& socketPath) {
 
     m_ipcServer->registerCommand("move_to_workspace", [this](const std::string& args) -> std::string {
         return ipcMoveToWorkspace(args);
+    });
+
+    // Empty-workspace navigation (keyboard: Alt+End / Meta+End).
+    // "get" reports the target without switching, so scripts can decide.
+    m_ipcServer->registerCommand("get_last_empty_workspace", [this](const std::string& args) -> std::string {
+        int ws = lastEmptyWorkspace();
+        JsonObject r;
+        r["workspace"] = ws;
+        r["found"] = ws >= 0;
+        return m_ipcServer->jsonToString(r);
+    });
+
+    m_ipcServer->registerCommand("switch_to_last_empty_workspace", [this](const std::string& args) -> std::string {
+        int ws = lastEmptyWorkspace();
+        if (ws < 0) {
+            return m_ipcServer->createErrorResponse(-2, "no empty workspace");
+        }
+        workspaceStepTo((uint32_t)ws);
+        JsonObject r;
+        r["success"] = true;
+        r["workspace"] = ws;
+        return m_ipcServer->jsonToString(r);
+    });
+
+    // Relative workspace movement with hidden-workspace skipping.
+    m_ipcServer->registerCommand("move_window_relative", [this](const std::string& args) -> std::string {
+        std::string dir = m_ipcServer->extractJsonString(args, "direction", "next");
+        moveViewToWorkspaceRelative(dir == "prev");
+        JsonObject r;
+        r["success"] = true;
+        r["direction"] = dir;
+        return m_ipcServer->jsonToString(r);
+    });
+
+    // Special workspaces: name/tag plus the hidden role. All four are
+    // readable back, so scripts and the panel can address a workspace by
+    // meaning rather than index.
+    m_ipcServer->registerCommand("set_workspace_name", [this](const std::string& args) -> std::string {
+        int ws = m_ipcServer->extractJsonInt(args, "workspace", -1);
+        std::string name = m_ipcServer->extractJsonString(args, "name", "");
+        if (ws < 0 || (uint32_t)ws >= workspaceCount()) {
+            return m_ipcServer->createErrorResponse(-2, "Invalid workspace");
+        }
+        setWorkspaceName((uint32_t)ws, name);
+        JsonObject r;
+        r["success"] = true;
+        r["workspace"] = ws;
+        r["name"] = name;
+        return m_ipcServer->jsonToString(r);
+    });
+
+    m_ipcServer->registerCommand("set_workspace_tag", [this](const std::string& args) -> std::string {
+        int ws = m_ipcServer->extractJsonInt(args, "workspace", -1);
+        std::string tag = m_ipcServer->extractJsonString(args, "tag", "");
+        if (ws < 0 || (uint32_t)ws >= workspaceCount()) {
+            return m_ipcServer->createErrorResponse(-2, "Invalid workspace");
+        }
+        setWorkspaceTag((uint32_t)ws, tag);
+        JsonObject r;
+        r["success"] = true;
+        r["workspace"] = ws;
+        r["tag"] = tag;
+        return m_ipcServer->jsonToString(r);
+    });
+
+    m_ipcServer->registerCommand("set_workspace_hidden", [this](const std::string& args) -> std::string {
+        int ws = m_ipcServer->extractJsonInt(args, "workspace", -1);
+        bool hidden = m_ipcServer->extractJsonBool(args, "hidden", false);
+        if (ws < 0 || (uint32_t)ws >= workspaceCount()) {
+            return m_ipcServer->createErrorResponse(-2, "Invalid workspace");
+        }
+        setWorkspaceHidden((uint32_t)ws, hidden);
+        JsonObject r;
+        r["success"] = true;
+        r["workspace"] = ws;
+        r["hidden"] = hidden;
+        return m_ipcServer->jsonToString(r);
+    });
+
+    m_ipcServer->registerCommand("switch_to_workspace_named", [this](const std::string& args) -> std::string {
+        std::string name = m_ipcServer->extractJsonString(args, "name", "");
+        std::string tag = m_ipcServer->extractJsonString(args, "tag", "");
+        int ws = name.empty() ? workspaceByTag(tag) : workspaceByName(name);
+        if (ws < 0) {
+            return m_ipcServer->createErrorResponse(-2, "No workspace matches");
+        }
+        workspaceStepTo((uint32_t)ws);
+        JsonObject r;
+        r["success"] = true;
+        r["workspace"] = ws;
+        return m_ipcServer->jsonToString(r);
     });
 
     // Cursor mode: "auto" lets wlroots use a hardware cursor plane when
@@ -3052,6 +3284,11 @@ std::string Server::ipcGetWorkspaces() {
         }
         ws["window_count"] = windowIds.size();
         ws["windows"] = windowIds;
+        // Special-workspace metadata: scripts and the panel read a
+        // workspace by name/tag instead of index.
+        ws["name"] = workspaceName(i);
+        ws["tag"] = workspaceTag(i);
+        ws["hidden"] = workspaceHidden(i);
         workspaces.push_back(ws);
     }
     JsonObject result;
@@ -3061,14 +3298,22 @@ std::string Server::ipcGetWorkspaces() {
 }
 
 std::string Server::ipcWorkspaceStep(int direction) {
-    uint32_t target;
-    if (direction > 0) {
-        target = (m_activeWorkspace + 1) % workspaceCount();
-    } else {
-        target = (m_activeWorkspace == 0) ? (workspaceCount() - 1) : (m_activeWorkspace - 1);
+    // Skip hidden workspaces: the same rule the keys follow, so IPC and
+    // keyboard navigation agree.
+    uint32_t target = m_activeWorkspace;
+    for (uint32_t i = 0; i < workspaceCount(); ++i) {
+        if (direction > 0) {
+            target = (target + 1) % workspaceCount();
+        } else {
+            target = (target == 0) ? (workspaceCount() - 1) : (target - 1);
+        }
+        if (!workspaceHidden(target)) {
+            setActiveWorkspace(target);
+            return m_ipcServer->createSuccessResponse("Switched to workspace " +
+                                                       std::to_string(target));
+        }
     }
-    setActiveWorkspace(target);
-    return m_ipcServer->createSuccessResponse("Switched to workspace " + std::to_string(target));
+    return m_ipcServer->createErrorResponse(-2, "no visible workspace to switch to");
 }
 
 std::string Server::ipcMoveToWorkspace(const std::string& args) {
