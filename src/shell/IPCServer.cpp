@@ -24,6 +24,8 @@
 #include <cstdlib>
 #include <cstdio>
 #include <sys/wait.h>
+#include <signal.h>
+#include <sys/stat.h>
 #include <libgen.h>
 #include <limits.h>
 
@@ -229,24 +231,58 @@ namespace {
     // Safe execvp wrapper: forks, execs, returns PID or -1 on error
     pid_t safeExec(const std::vector<std::string>& argv) {
         if (argv.empty()) return -1;
-        
+
         std::vector<char*> cargv;
         cargv.reserve(argv.size() + 1);
         for (const auto& s : argv) cargv.push_back(const_cast<char*>(s.c_str()));
         cargv.push_back(nullptr);
-        
+
+        // Spawned tools that talk to the compositor (grim, slurp) are
+        // wayland clients and need the display name. The compositor's own
+        // environment usually has none, so grim then hangs forever and the
+        // handler blocks in waitForProcess (observed: screenshot calls
+        // timing out while standalone grim worked). Point the child at the
+        // compositor's socket before exec.
+        const char* wl = getenv("WAYLAND_DISPLAY");
+        if (!wl) {
+            static const char* kFallbacks[] = {"wayland-0", "wayland-1", nullptr};
+            const char* rt = getenv("XDG_RUNTIME_DIR");
+            for (int i = 0; kFallbacks[i]; i++) {
+                std::string probe = std::string(rt ? rt : "/tmp") + "/" + kFallbacks[i];
+                struct stat st;
+                if (stat(probe.c_str(), &st) == 0) { wl = kFallbacks[i]; break; }
+            }
+        }
+
         pid_t pid = fork();
         if (pid == 0) {
+            if (wl) setenv("WAYLAND_DISPLAY", wl, 1);
             execvp(cargv[0], cargv.data());
             _exit(127);
         }
         return pid;
     }
 
-    // Wait for process and capture output
-    int waitForProcess(pid_t pid, std::string* output = nullptr) {
+    // Wait for process and capture output.
+    // BOUNDED: an unbounded wait deadlocks the compositor - the IPC
+    // handler runs on the frame loop, and a child that never finishes
+    // (e.g. grim stuck without a display) takes the whole compositor
+    // with it. Returns -1 on timeout so the handler can answer honestly.
+    int waitForProcess(pid_t pid, std::string* output = nullptr, int timeout_ms = 15000) {
         int status;
-        waitpid(pid, &status, 0);
+        int waited = 0;
+        for (;;) {
+            pid_t r = waitpid(pid, &status, WNOHANG);
+            if (r == pid) break;
+            if (r < 0) return -1;
+            if (waited >= timeout_ms) {
+                kill(pid, SIGKILL);
+                waitpid(pid, &status, 0);
+                return -1;
+            }
+            usleep(50 * 1000);
+            waited += 50;
+        }
         if (output) {
             // Note: We can't easily capture child output with fork/exec without pipes
             // For now, we rely on the tools writing to their output files
@@ -1106,22 +1142,45 @@ std::string IPCServer::handleScreenshot(const std::string& args) {
         }
     }
     argv.push_back(path);
-    
-    pid_t pid = safeExec(argv);
-    if (pid < 0) {
-        return createError(0, -2, "Failed to execute grim");
-    }
-    
-    int status = waitForProcess(pid);
-    if (status == 0) {
-        json result;
-        result["success"] = true;
-        result["path"] = path;
-        result["message"] = "Screenshot saved";
-        return result.dump();
-    } else {
-        return createError(0, -3, "grim failed with exit code " + std::to_string(status));
-    }
+
+    // ASYNCHRONOUS on purpose. grim is a wayland client that needs a
+    // compositor frame, and this handler runs on the event loop: waiting
+    // for it here deadlocks the compositor (observed: screenshot calls
+    // blocking until the client timed out, while standalone grim worked).
+    // The worker writes the result file the caller polls.
+    const char* runtime = getenv("XDG_RUNTIME_DIR");
+    std::string resultFile = std::string(runtime ? runtime : "/tmp") +
+                             "/havel-screenshot-result.json";
+    ::unlink(resultFile.c_str());
+
+    std::string grimPath = path;
+    std::thread([argv, grimPath, resultFile]() {
+        json out;
+        pid_t pid = safeExec(argv);
+        if (pid < 0) {
+            out["success"] = false;
+            out["error"] = "Failed to execute grim";
+        } else {
+            int status = waitForProcess(pid);
+            if (status == 0) {
+                out["success"] = true;
+                out["path"] = grimPath;
+                out["message"] = "Screenshot saved";
+            } else {
+                out["success"] = false;
+                out["path"] = grimPath;
+                out["error"] = "grim failed (exit " + std::to_string(status) + ")";
+            }
+        }
+        std::ofstream f(resultFile, std::ios::trunc);
+        if (f) f << out.dump();
+    }).detach();
+
+    json ack;
+    ack["accepted"] = true;
+    ack["result_file"] = resultFile;
+    ack["message"] = "Screenshot requested; the result lands in result_file";
+    return ack.dump();
 }
 
 std::string IPCServer::handlePortalScreenshot(const std::string& args) {
@@ -1211,22 +1270,42 @@ std::string IPCServer::handleScreenshotWindow(const std::string& args) {
     }
     
     std::vector<std::string> argv = {"grim", path};
-    
-    pid_t pid = safeExec(argv);
-    if (pid < 0) {
-        return createError(0, -2, "Failed to execute grim");
-    }
-    
-    int status = waitForProcess(pid);
-    if (status == 0) {
-        json result;
-        result["success"] = true;
-        result["path"] = path;
-        result["message"] = "Window screenshot saved";
-        return result.dump();
-    } else {
-        return createError(0, -3, "grim failed with exit code " + std::to_string(status));
-    }
+
+    // Same deadlock as the full-screen path: grim needs a compositor
+    // frame and this handler runs on the event loop.
+    const char* runtime = getenv("XDG_RUNTIME_DIR");
+    std::string resultFile = std::string(runtime ? runtime : "/tmp") +
+                             "/havel-screenshot-result.json";
+    ::unlink(resultFile.c_str());
+
+    std::string grimPath = path;
+    std::thread([argv, grimPath, resultFile]() {
+        json out;
+        pid_t pid = safeExec(argv);
+        if (pid < 0) {
+            out["success"] = false;
+            out["error"] = "Failed to execute grim";
+        } else {
+            int status = waitForProcess(pid);
+            if (status == 0) {
+                out["success"] = true;
+                out["path"] = grimPath;
+                out["message"] = "Window screenshot saved";
+            } else {
+                out["success"] = false;
+                out["path"] = grimPath;
+                out["error"] = "grim failed (exit " + std::to_string(status) + ")";
+            }
+        }
+        std::ofstream f(resultFile, std::ios::trunc);
+        if (f) f << out.dump();
+    }).detach();
+
+    json ack;
+    ack["accepted"] = true;
+    ack["result_file"] = resultFile;
+    ack["message"] = "Window screenshot requested; the result lands in result_file";
+    return ack.dump();
 }
 
 std::string IPCServer::handleScreenshotRegion(const std::string& args) {
@@ -1269,22 +1348,41 @@ std::string IPCServer::handleScreenshotRegion(const std::string& args) {
         return createError(0, -2, "Geometry required for region screenshot (use slurp separately to get geometry)");
     }
     argv.push_back(path);
-    
-    pid_t pid = safeExec(argv);
-    if (pid < 0) {
-        return createError(0, -2, "Failed to execute grim");
-    }
-    
-    int status = waitForProcess(pid);
-    if (status == 0) {
-        json result;
-        result["success"] = true;
-        result["path"] = path;
-        result["message"] = "Region screenshot saved";
-        return result.dump();
-    } else {
-        return createError(0, -3, "grim failed with exit code " + std::to_string(status));
-    }
+
+    // Same deadlock as the other screenshot paths.
+    const char* runtime = getenv("XDG_RUNTIME_DIR");
+    std::string resultFile = std::string(runtime ? runtime : "/tmp") +
+                             "/havel-screenshot-result.json";
+    ::unlink(resultFile.c_str());
+
+    std::string grimPath = path;
+    std::thread([argv, grimPath, resultFile]() {
+        json out;
+        pid_t pid = safeExec(argv);
+        if (pid < 0) {
+            out["success"] = false;
+            out["error"] = "Failed to execute grim";
+        } else {
+            int status = waitForProcess(pid);
+            if (status == 0) {
+                out["success"] = true;
+                out["path"] = grimPath;
+                out["message"] = "Region screenshot saved";
+            } else {
+                out["success"] = false;
+                out["path"] = grimPath;
+                out["error"] = "grim failed (exit " + std::to_string(status) + ")";
+            }
+        }
+        std::ofstream f(resultFile, std::ios::trunc);
+        if (f) f << out.dump();
+    }).detach();
+
+    json ack;
+    ack["accepted"] = true;
+    ack["result_file"] = resultFile;
+    ack["message"] = "Region screenshot requested; the result lands in result_file";
+    return ack.dump();
 }
 
 std::string IPCServer::handleAudioRecord(const std::string& args) {

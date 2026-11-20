@@ -425,6 +425,9 @@ private:
 
     // Declarative configuration state
     uint32_t m_workspaceCount = WORKSPACE_COUNT;
+    // Re-entrancy guard for setActiveWorkspace (the shell's
+    // switchToWorkspace calls back into it).
+    bool m_switchingWorkspace = false;
     std::map<std::string, std::pair<int, int>> m_monitorRules;  // output name -> x,y
     std::string m_defaultLayout = "master";
     // Special workspaces: name/tag plus a role. "hidden" workspaces are
@@ -504,6 +507,11 @@ private:
 
     // Helper methods
     void spawnTerminal();
+    // Clipboard: show the copyq history; the entry is pasted through
+    // copyq (Alt+V).
+    void spawnClipboard();
+    // Screenshot hotkeys: 0 = full screen, 1 = window, 2 = region.
+    void screenshot(int mode);
     void spawnRofi();
     void spawnBrowser();
     void spawnFileManager();

@@ -14,6 +14,7 @@
 #include <nlohmann/json.hpp>
 #include <Logger.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
+#include <thread>
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
@@ -175,6 +176,12 @@ Workspace* Server::activeWorkspace() const {
 
 void Server::setActiveWorkspace(uint32_t id) {
     if (id >= workspaceCount()) return;
+    // Guard against re-entry: WindowManager::switchToWorkspace calls
+    // actions.switchWorkspace, which lands back here (observed: with the
+    // shell sync active, "Switching to workspace 9" printed twice and the
+    // next IPC request hit a Broken pipe).
+    if (m_switchingWorkspace) return;
+    m_switchingWorkspace = true;
 
     LOG_INFO("Switching to workspace %u", id);
 
@@ -192,6 +199,7 @@ void Server::setActiveWorkspace(uint32_t id) {
         params["workspace"] = (int)id;
         m_ipcServer->broadcastEvent(IPCServer::EventType::WorkspaceChanged, m_ipcServer->jsonToString(params));
     }
+    m_switchingWorkspace = false;
 }
 
 void Server::workspaceStep(bool backwards) {
@@ -839,6 +847,57 @@ void Server::spawnTerminal() {
             execlp("foot", "foot", (char*)NULL);
             _exit(127);
         }
+    }
+}
+
+void Server::spawnClipboard() {
+    // copyq menu is the clipboard-manager UI: it reads and writes the
+    // seat selection over wlr-data-control, so Alt+V shows the history
+    // and pasting goes through the same protocol path as Copy/Paste.
+    const char* clipboard[] = {"copyq", "cliphist", nullptr};
+    for (int i = 0; clipboard[i] != nullptr; i++) {
+        char checkPath[256];
+        snprintf(checkPath, sizeof(checkPath), "/usr/bin/%s", clipboard[i]);
+        if (access(checkPath, X_OK) != 0) continue;
+        LOG_INFO("Spawning clipboard manager: %s", clipboard[i]);
+        if (g_server_spawn) {
+            g_server_spawn(clipboard[i]);
+        } else {
+            pid_t pid = fork();
+            if (pid == 0) {
+                execlp(clipboard[i], clipboard[i], "menu", (char*)NULL);
+                _exit(127);
+            }
+        }
+        return;
+    }
+    LOG_WARN("No clipboard manager found (copyq/cliphist)");
+}
+
+void Server::screenshot(int mode) {
+    // The screenshot IPC commands shell out to grim; the same path from
+    // the keyboard. Region mode needs geometry, which only slurp can
+    // provide interactively, so it spawns that chain.
+    const char* which = "screenshot";
+    if (mode == 1) which = "screenshot_window";
+    else if (mode == 2) which = "screenshot_region";
+    LOG_INFO("Screenshot via keyboard: %s", which);
+    if (m_ipcServer) {
+        // Run the handler OFF the frame thread: grim needs a compositor
+        // frame, which the frame loop cannot produce while it is blocked
+        // in here (observed: the IPC path works, the keyboard path never
+        // wrote the file).
+        std::thread([this, mode]() {
+            // The handlers json::parse() their args, so an empty string
+            // fails validation and grim never runs; pass empty JSON
+            // object params instead ("Invalid JSON" observed).
+            std::string result;
+            const std::string params = "{}";
+            if (mode == 0) result = m_ipcServer->handleScreenshot(params);
+            else if (mode == 1) result = m_ipcServer->handleScreenshotWindow(params);
+            else result = m_ipcServer->handleScreenshotRegion(params);
+            LOG_INFO("Screenshot result: %s", result.substr(0, 120).c_str());
+        }).detach();
     }
 }
 
@@ -1946,6 +2005,42 @@ void Server::registerKeybindings() {
         "toggle_tiling", [this]() { workspaceToggleTiling(); }
     );
 
+    // Clipboard: Alt+V shows the copyq clipboard history, and Alt+V again
+    // pastes the selected entry through copyq (the clipboard manager
+    // holds the seat selection). Screenshot hotkeys take the full screen /
+    // window / region through the existing screenshot commands.
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_ALT, XKB_KEY_v,
+        "clipboard_menu", [this]() { spawnClipboard(); }
+    );
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, XKB_KEY_Print,
+        "screenshot_full", [this]() { screenshot(0); }
+    );
+    // The inet(evdev) keymap also decodes Print as 0x1008ff5f; binding
+    // only XKB_KEY_Print (0xff61) left the key dead under that keymap.
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO, 0x1008ff5f,
+        "screenshot_full_alt", [this]() { screenshot(0); }
+    );
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_ALT, XKB_KEY_Print,
+        "screenshot_window", [this]() { screenshot(1); }
+    );
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_CTRL, XKB_KEY_Print,
+        "screenshot_region", [this]() { screenshot(2); }
+    );
+    // Same alternate keysym for the window/region modifiers.
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_ALT, 0x1008ff5f,
+        "screenshot_window_alt", [this]() { screenshot(1); }
+    );
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_CTRL, 0x1008ff5f,
+        "screenshot_region_alt", [this]() { screenshot(2); }
+    );
+
     // Meta+G is owned by CustomLayoutsPlugin (grid layout): the grayscale
     // flag it toggled here was state-only — no renderer consumed it.
     // Meta+N is owned by GammaPlugin (night mode): same state-only story.
@@ -2162,7 +2257,7 @@ bool Server::startIPCServer(const std::string& socketPath) {
     static const SelfCommand kSelfCommands[] = {
         {"get_windows",            &IPCServer::handleGetWindows,       nullptr},
         {"get_focused",            &IPCServer::handleGetFocused,      nullptr},
-        {"get_workspace",          &IPCServer::handleGetWorkspace,    nullptr},
+        
         {"ping",                   &IPCServer::handlePing,            nullptr},
         {"focus",                  nullptr, &IPCServer::handleFocus},
         {"minimize",               nullptr, &IPCServer::handleMinimize},
@@ -2413,6 +2508,16 @@ bool Server::startIPCServer(const std::string& socketPath) {
     // ========================================================================
     m_ipcServer->registerCommand("get_workspaces", [this](const std::string& args) -> std::string {
         return ipcGetWorkspaces();
+    });
+
+    // get_workspace reports the compositor's own m_activeWorkspace. The
+    // shell projection's handleGetWorkspace derives it from the FOCUSED
+    // WINDOW, so it answered 0 whenever nothing was focused - every
+    // workspace switch looked like it had not happened.
+    m_ipcServer->registerCommand("get_workspace", [this](const std::string& args) -> std::string {
+        JsonObject r;
+        r["workspace"] = (int)m_activeWorkspace;
+        return m_ipcServer->jsonToString(r);
     });
 
     m_ipcServer->registerCommand("workspace_next", [this](const std::string& args) -> std::string {
