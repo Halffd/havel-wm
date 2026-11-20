@@ -1054,7 +1054,7 @@ panel = sum(1 for y in range(h//2 - 190, h//2 + 190, 4)
             if 32 <= px[x, y][0] <= 44 and 32 <= px[x, y][1] <= 44 and 45 <= px[x, y][2] <= 57)
 text = sum(1 for y in range(h//2 - 100, h//2 + 150, 2)
            for x in range(w//2 - 280, w//2 + 280, 2)
-           if px[x, y][0] > 180 and px[x, y][1] > 180)
+           if px[x, y][0] > 150 and px[x, y][1] > 150)
 print(panel, text)
 LPOLL
 )
@@ -1076,10 +1076,13 @@ im = Image.open(sys.argv[1]).convert('RGB'); px = im.load(); w, h = im.size
 panel = sum(1 for y in range(h//2 - 190, h//2 + 190, 4)
             for x in range(w//2 - 290, w//2 + 290, 4)
             if 32 <= px[x, y][0] <= 44 and 32 <= px[x, y][1] <= 44 and 45 <= px[x, y][2] <= 57)
-# text pixels (bright) inside the result area = entry names drawn
+# text pixels inside the result area = entry names drawn. The launcher
+# renders non-selected rows at 0.8 gray; antialias coverage blends many
+# core pixels below 200, so count the antialiased text too rather than
+# only the brightest glyph cores.
 text = sum(1 for y in range(h//2 - 100, h//2 + 150, 2)
            for x in range(w//2 - 280, w//2 + 280, 2)
-           if px[x, y][0] > 180 and px[x, y][1] > 180)
+           if px[x, y][0] > 150 and px[x, y][1] > 150)
 print("%d %d" % (panel, text))
 LSTATS_PY
 )
