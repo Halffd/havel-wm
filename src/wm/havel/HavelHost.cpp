@@ -240,6 +240,30 @@ static int hf_cursor_mode(HavelState* H, void*) {
     return HAVEL_OK;
 }
 
+// set_compositing(enabled): force wlroots to render the scene. When
+// disabled, wlroots may use direct scan-out for an eligible scene.
+static int hf_set_compositing(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    bool enabled = havel_toboolean(H, 0) != 0;
+    if (ctx && ctx->server) {
+        ctx->server->setCompositingEnabled(enabled);
+    }
+    havel_pushboolean(H, ctx && ctx->server ? ctx->server->compositingEnabled() : 0);
+    return HAVEL_OK;
+}
+
+// toggle_compositing(): toggle forced scene rendering and return the
+// resulting state.
+static int hf_toggle_compositing(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    bool enabled = false;
+    if (ctx && ctx->server) {
+        enabled = ctx->server->toggleCompositing();
+    }
+    havel_pushboolean(H, enabled ? 1 : 0);
+    return HAVEL_OK;
+}
+
 // lock_screen(): lock the screen (PAM-authenticated overlay that
 // intercepts all input).
 static int hf_lock_screen(HavelState* H, void*) {
@@ -572,7 +596,7 @@ static int hf_keybind(HavelState* H, void*) {
     uint32_t mods = 0, keysym = 0;
     if (!PluginConfig::parseKeybindingSpec(spec.c_str(), &mods, &keysym)) {
         LOG_WARN("[Havel] keybind: unrecognized binding spec '%s' (translated: '%s')",
-                 rawSpec, spec.c_str());
+                 rawSpec.c_str(), spec.c_str());
         havel_pushboolean(H, 0);
         return HAVEL_OK;
     }
@@ -688,6 +712,10 @@ void HavelHost::registerHostFunctions() {
     havel_pushcfunction_with_ctx(m_H, hf_plugin_config, nullptr, "plugin_config");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_cursor_mode, nullptr, "cursor_mode");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_set_compositing, nullptr, "set_compositing");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_toggle_compositing, nullptr, "toggle_compositing");
     havel_pop(m_H, 1);
     havel_pushcfunction_with_ctx(m_H, hf_lock_screen, nullptr, "lock_screen");
     havel_pop(m_H, 1);

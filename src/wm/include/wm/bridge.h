@@ -234,6 +234,10 @@ void havel_wlr_set_cursor_theme(struct havel_wlr_server *server,
                                 const char *theme, int size);
 // Force software cursors on all outputs (false = let wlroots use planes).
 void havel_wlr_set_software_cursor(struct havel_wlr_server *server, bool forced);
+// Force scene rendering on all outputs. Disabling the forced-compositing
+// lock allows wlroots to use direct scan-out when the scene is eligible.
+void havel_wlr_set_compositing(struct havel_wlr_server *server, bool enabled);
+bool havel_wlr_get_compositing(struct havel_wlr_server *server);
 // Wallpaper image (ARGB8888 CPU pixels), rendered behind all windows.
 // Pass NULL to clear back to the solid background colour.
 void havel_wlr_set_wallpaper(struct havel_wlr_server *server,

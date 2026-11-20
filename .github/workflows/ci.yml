@@ -42,3 +42,22 @@ jobs:
           ./build/test-utilities
           ./build/test-keybinding
           bash tests/runtime/run_runtime_tests.sh
+
+  void-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Void Linux test image
+        run: docker build --file ci/void-linux.Dockerfile --tag havel-wm-void-test ci
+
+      - name: Build and test on Void Linux
+        run: |
+          docker run --rm \
+            --volume "$PWD:/src" \
+            --workdir /src \
+            havel-wm-void-test \
+            bash ci/run-void-tests.sh

@@ -137,6 +137,13 @@ public:
     }
     bool softwareCursorForced() const { return m_softwareCursorForced; }
 
+    // Forced scene composition. Wayland cannot disable composition
+    // entirely, but wlroots can prevent direct scan-out. Disabling this
+    // allows direct scan-out whenever the current scene is eligible.
+    void setCompositingEnabled(bool enabled);
+    bool compositingEnabled() const { return m_compositingEnabled; }
+    bool toggleCompositing();
+
     // Wallpaper from a PNG file, rendered behind all windows. Empty path
     // clears back to the solid background colour. Returns false when the
     // file cannot be decoded.
@@ -146,6 +153,10 @@ public:
         m_nativeHandle = handle;
         if (handle && m_softwareCursorForced) {
             havel_wlr_set_software_cursor((struct havel_wlr_server*)handle, true);
+        }
+        if (handle) {
+            havel_wlr_set_compositing((struct havel_wlr_server*)handle,
+                                      m_compositingEnabled);
         }
         m_displaySettings.setApplyHandle(reinterpret_cast<havel_wlr_server_t*>(handle));
     }
@@ -396,13 +407,13 @@ private:
     OverlayRenderer* m_overlayRenderer = nullptr;  // For plugin overlay rendering
 
     void* m_nativeHandle = nullptr;
-    // Software cursors forced ON by default: bochs-drm/virtio GPUs have
-    // no usable hardware cursor plane, and wlroots' direct scanout
-    // disengages while software cursors are locked - which is what the
-    // custom render loop needs. With scanout allowed, client buffers get
-    // scanned out raw and stop updating (frozen dolphin, black alacritty
-    // - observed on DRM). IPC set_cursor_mode can still release it.
-    bool m_softwareCursorForced = true;
+    // Cursor rendering is independent from scene composition. Hardware
+    // cursor planes are preferred when the backend supports them.
+    bool m_softwareCursorForced = false;
+    // Force wlroots to render the scene instead of using direct scan-out.
+    // This is the safe default for Havel's render loop; users can release
+    // the lock at runtime to permit direct scan-out.
+    bool m_compositingEnabled = true;
     class ScreenLock* m_screenLock = nullptr;
 
     // Window placement mode (config: "cascade", "center", "pointer")

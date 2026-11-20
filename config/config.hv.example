@@ -17,6 +17,20 @@
 
 cursor_mode("auto")
 
+// ---------------------------------------------------------------------
+// Compositing
+//
+// set_compositing(true)  force wlroots to render the scene
+// set_compositing(false) permit direct scan-out when the scene is eligible
+// toggle_compositing()    toggle the state and return the new state
+//
+// Wayland still composites scenes that are not eligible for direct
+// scan-out. The built-in Meta+Shift+P keybinding uses the same toggle.
+// ---------------------------------------------------------------------
+
+set_compositing(true)
+// toggle_compositing()
+
 // Wallpaper: a PNG drawn behind every window; "" clears back to the
 // solid background colour.
 // set_wallpaper("/home/agent/pictures/wallpaper.png")

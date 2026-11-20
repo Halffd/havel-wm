@@ -21,9 +21,20 @@
 ### Renderer architecture
 
 Windows are rendered by wlroots itself via `wlr_renderer_autocreate()`
-and the `wlr_scene` API. The custom code in `src/wm/render/` is the
-GLES2 overlay path used by plugins and UI overlays (alt-tab, overview,
-launcher); there is no second window renderer.
+and the `wlr_scene` API. Select the accelerated OpenGL ES 2 window
+renderer at startup with `--renderer opengl` (aliases: `opengles`, `gles`,
+`gles2`). `--renderer vulkan` selects wlroots' Vulkan renderer, while
+`auto`/`wlroots` leave backend selection to wlroots. The command-line
+choice is applied before wlroots creates the renderer and cannot be
+changed while the compositor is running.
+
+The custom code in `src/wm/render/` is the GLES2 overlay path used by
+plugins and UI overlays (alt-tab, overview, launcher); there is no second
+window renderer.
+
+```bash
+havel-wm --renderer opengl
+```
 
 ---
 
@@ -93,6 +104,24 @@ cmake --build build
 sudo cmake --install build
 ```
 
+### Void Linux
+
+Void Linux builds are covered by the `void-linux` CI job. The same
+musl-based environment can be reproduced locally:
+
+```bash
+docker build --file ci/void-linux.Dockerfile --tag havel-wm-void-test ci
+docker run --rm \
+  --volume "$PWD:/src" \
+  --workdir /src \
+  havel-wm-void-test \
+  bash ci/run-void-tests.sh
+```
+
+The test image installs wlroots 0.20 and the native build dependencies.
+Because Void does not package nlohmann/json, the image installs a pinned,
+checksum-verified single-header release before configuring CMake.
+
 ---
 
 ## Usage
@@ -126,6 +155,7 @@ Select "Havel WM" from the Wayland session menu.
 | `Meta+Shift+1-9` | Move window to workspace |
 | `Meta+F` | Toggle fullscreen |
 | `Meta+Shift+F` | Toggle FPS overlay |
+| `Meta+Shift+P` | Toggle forced compositing (allow direct scan-out when eligible) |
 | `Ctrl+Meta+F4` | Quit compositor |
 | `Ctrl+Alt+F1-F12` | Switch VT |
 
@@ -176,6 +206,8 @@ Or from `config.hv`:
 ```havel
 set_wallpaper("/path/to/image.png")
 cursor_mode("software")  # or "auto" for hardware cursor plane
+set_compositing(true)   # false allows direct scan-out when eligible
+toggle_compositing()    # returns the resulting state
 plugin_config("alt_tab", "columns", 2)
 ```
 
@@ -206,6 +238,15 @@ echo '{"method":"screenshot","params":{"path":"~/pic.png"}}' | \
 
 # Set wallpaper (PNG behind all windows; "" clears)
 echo '{"method":"set_wallpaper","params":{"path":"/path/to/img.png"}}' | \
+  socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
+
+# Compositing control
+# Wayland still composites when the scene is ineligible; disabling the
+# forced-render lock only permits direct scan-out when wlroots can use it.
+echo '{"method":"get_compositing"}' | socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
+echo '{"method":"set_compositing","params":{"enabled":false}}' | \
+  socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
+echo '{"method":"toggle_compositing"}' | \
   socat - UNIX-CONNECT:$XDG_RUNTIME_DIR/havel-wm.sock
 
 # Cursor control (hardware plane or forced software)
@@ -268,7 +309,8 @@ Scripting surface added alongside it:
 | `get_outputs` / `get_keybindings` | monitor geometry, registered bindings |
 
 Havel host functions mirror these: `settings`, `reload_config`,
-`open_path`, `zoom`, `plugin_config`.
+`open_path`, `zoom`, `plugin_config`, `set_compositing`, and
+`toggle_compositing`.
 
 ---
 

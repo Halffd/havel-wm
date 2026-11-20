@@ -285,6 +285,11 @@ struct havel_wlr_server {
     // Balanced: lock once when turning on, unlock once when off.
     bool software_cursor_forced;
 
+    // Force scene rendering on every output. wlroots' attach-render lock
+    // disables direct scan-out while enabled; outputs created later inherit
+    // this state. This is independent from the software-cursor lock.
+    bool compositing_enabled;
+
     uint32_t active_workspace;
     struct wl_list outputs; // havel_output::link
     struct wl_list layer_surfaces; // havel_layer_surface::link (for usable-area recompute)
@@ -333,6 +338,9 @@ struct havel_output {
     bool is_primary;
     bool cursor_mode_logged;   // one-shot hardware/software cursor report
     bool cursor_software_locked;
+    // True while this output holds wlroots' attach-render lock, which
+    // forces the scene compositor to render instead of direct scan-out.
+    bool composition_locked;
     struct wl_list link;
 
     // True once an enable commit succeeded. Native DRM boots with the
@@ -2307,6 +2315,18 @@ static void output_destroy(struct wl_listener *listener, void *data) {
 static void output_try_enable(struct havel_output *output);
 static void wallpaper_fit_output(struct havel_wlr_server *server);
 
+static void output_apply_compositing_lock(struct havel_output *output) {
+    bool should_lock = output->server->compositing_enabled;
+    if (should_lock == output->composition_locked) {
+        return;
+    }
+
+    wlr_output_lock_attach_render(output->output, should_lock);
+    output->composition_locked = should_lock;
+    LOG_INFO("[Compositing] %s: forced scene rendering %s",
+             output->output->name, should_lock ? "enabled" : "disabled");
+}
+
 static void server_new_output(struct wl_listener *listener, void *data) {
     struct havel_wlr_server *server = wl_container_of(listener, server, new_output);
     struct wlr_output *wlr_output = data;
@@ -2332,6 +2352,7 @@ static void server_new_output(struct wl_listener *listener, void *data) {
     output->server = server;
     output->output = wlr_output;
     output->scene_output = wlr_scene_output_create(server->scene, wlr_output);
+    output_apply_compositing_lock(output);
     
     // Initialize per-output workspace to global active workspace
     output->active_workspace = server->active_workspace;
@@ -3202,6 +3223,7 @@ havel_wlr_server_t* havel_wlr_create(void) {
     wl_list_init(&server->layer_surfaces);
     server->active_workspace = 0;
     server->grab.mode = INTERACTIVE_NONE;  // Initialize grab state
+    server->compositing_enabled = true;
 
     LOG_DEBUG("Initializing havel_wlr_server");
 
@@ -4744,9 +4766,36 @@ void havel_wlr_set_software_cursor(struct havel_wlr_server *server, bool forced)
     server->software_cursor_forced = forced;
     struct havel_output *output;
     wl_list_for_each(output, &server->outputs, link) {
+        if (output->cursor_software_locked == forced) {
+            continue;
+        }
         wlr_output_lock_software_cursors(output->output, forced);
+        output->cursor_software_locked = forced;
     }
     LOG_INFO("[Cursor] software cursor %s", forced ? "forced" : "released");
+}
+
+// Force scene rendering on every output. Wayland compositors cannot remove
+// composition entirely, but wlroots can prevent direct scan-out: with the
+// attach-render lock enabled, the scene is always rendered. Disabling it
+// lets wlroots use direct scan-out when the current scene is eligible.
+void havel_wlr_set_compositing(struct havel_wlr_server *server, bool enabled) {
+    if (!server || enabled == server->compositing_enabled) {
+        return;
+    }
+
+    server->compositing_enabled = enabled;
+    struct havel_output *output;
+    wl_list_for_each(output, &server->outputs, link) {
+        output_apply_compositing_lock(output);
+        wlr_output_schedule_frame(output->output);
+    }
+    LOG_INFO("[Compositing] forced scene rendering %s",
+             enabled ? "enabled" : "disabled");
+}
+
+bool havel_wlr_get_compositing(struct havel_wlr_server *server) {
+    return server && server->compositing_enabled;
 }
 
 // Hide the pointer image until something sets one again (show_cursor or a

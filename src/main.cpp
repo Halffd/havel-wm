@@ -1,16 +1,11 @@
 #include <wm/wlr_bridge.h>
+#include <wm/RendererSelection.hpp>
 #include <core/LoadingScreen.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <unistd.h>
-
-typedef enum {
-    RENDERER_AUTO,
-    RENDERER_GLES2,
-    RENDERER_VULKAN,
-    RENDERER_WLROOTS
-} RendererBackend;
 
 static void print_usage(const char* prog) {
     printf("Usage: %s [OPTIONS]\n", prog);
@@ -19,16 +14,17 @@ static void print_usage(const char* prog) {
     printf("  --no-loading-screen      Disable loading screen\n");
     printf("  -r, --renderer <backend> Select wlroots renderer backend:\n");
     printf("                             auto     - Auto-detect (default)\n");
-    printf("                             gles     - Force GLES2\n");
+    printf("                             gles2    - Force OpenGL ES 2\n");
+    printf("                             opengl   - Alias for gles2\n");
     printf("                             vulkan   - Force Vulkan\n");
-    printf("                             wlroots  - Default (same as auto)\n");
+    printf("                             wlroots  - Alias for auto\n");
     printf("  -h, --help               Show this help message\n");
     printf("\nNote: wlroots handles all window rendering. Custom buffer import\n");
     printf("(SHM/DMA-BUF) is available for plugins needing texture access.\n");
     printf("\nExamples:\n");
     printf("  %s -s 'foot'             Start foot terminal on launch\n", prog);
     printf("  %s -r vulkan -s 'swaybg' Use Vulkan backend with wallpaper\n", prog);
-    printf("  %s -r gles               Force GLES2 backend\n", prog);
+    printf("  %s -r opengl             Force OpenGL ES 2 backend\n", prog);
     printf("  %s --no-loading-screen   Start without loading screen\n", prog);
 }
 
@@ -42,7 +38,7 @@ int main(int argc, char* argv[]) {
 
     const char* startup_cmd = NULL;
     bool loading_screen_enabled = true;
-    RendererBackend renderer = RENDERER_AUTO;
+    havel::RendererBackend renderer = havel::RendererBackend::Auto;
 
     // Parse command-line arguments
     for (int i = 1; i < argc; i++) {
@@ -59,15 +55,7 @@ int main(int argc, char* argv[]) {
         } else if (strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--renderer") == 0) {
             if (i + 1 < argc) {
                 i++;
-                if (strcmp(argv[i], "auto") == 0) {
-                    renderer = RENDERER_AUTO;
-                } else if (strcmp(argv[i], "gles") == 0 || strcmp(argv[i], "gles2") == 0) {
-                    renderer = RENDERER_GLES2;
-                } else if (strcmp(argv[i], "vulkan") == 0) {
-                    renderer = RENDERER_VULKAN;
-                } else if (strcmp(argv[i], "wlroots") == 0) {
-                    renderer = RENDERER_WLROOTS;
-                } else {
+                if (!havel::parseRendererBackend(argv[i], &renderer)) {
                     fprintf(stderr, "Error: Unknown renderer '%s'\n", argv[i]);
                     print_usage(argv[0]);
                     return 1;
@@ -87,33 +75,23 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // wlroots reads WLR_RENDERER when wlr_renderer_autocreate() runs inside
+    // havel_wlr_create(). Configure it before creating the server so an
+    // explicit renderer choice is actually honored.
+    const char* wlr_renderer = havel::rendererEnvironmentValue(renderer);
+    if (wlr_renderer) {
+        if (setenv("WLR_RENDERER", wlr_renderer, 1) != 0) {
+            fprintf(stderr, "Error: failed to set WLR_RENDERER=%s: %s\n",
+                    wlr_renderer, strerror(errno));
+            return 1;
+        }
+        printf("[MAIN] WLR_RENDERER=%s selected before wlroots renderer creation\n",
+               wlr_renderer);
+    }
+
     havel_wlr_server_t* server = havel_wlr_create();
     if (!server) {
         return 1;
-    }
-
-    // Configure renderer based on command-line option.
-    // wlroots picks its backend from the WLR_RENDERER env var (read by
-    // wlr_renderer_autocreate), so setting it before server creation
-    // actually selects the backend instead of just printing a line.
-    const char* wlr_renderer = NULL;
-    switch (renderer) {
-        case RENDERER_AUTO:
-        case RENDERER_WLROOTS:
-            break;  // leave unset, wlroots auto-detects
-        case RENDERER_GLES2:
-            wlr_renderer = "gles2";
-            break;
-        case RENDERER_VULKAN:
-            wlr_renderer = "vulkan";
-            break;
-    }
-    if (wlr_renderer) {
-        if (setenv("WLR_RENDERER", wlr_renderer, 1) != 0) {
-            fprintf(stderr, "[MAIN] Warning: failed to set WLR_RENDERER\n");
-        } else {
-            printf("[MAIN] WLR_RENDERER=%s for wlroots backend selection\n", wlr_renderer);
-        }
     }
 
     // Disable loading screen if requested

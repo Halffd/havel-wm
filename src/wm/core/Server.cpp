@@ -1585,6 +1585,24 @@ void Server::updateAnimations() {
 }
 
 // ============================================================================
+// Compositing Control
+// ============================================================================
+
+void Server::setCompositingEnabled(bool enabled) {
+    m_compositingEnabled = enabled;
+    if (m_nativeHandle) {
+        havel_wlr_set_compositing((struct havel_wlr_server*)m_nativeHandle, enabled);
+    }
+    LOG_INFO("[Compositing] forced scene rendering %s",
+             enabled ? "enabled" : "disabled");
+}
+
+bool Server::toggleCompositing() {
+    setCompositingEnabled(!m_compositingEnabled);
+    return m_compositingEnabled;
+}
+
+// ============================================================================
 // Effect Control (Global)
 // ============================================================================
 
@@ -1924,6 +1942,13 @@ void Server::registerKeybindings() {
             LOG_INFO("Reloading configuration...");
             m_pluginManager.reloadConfig();
         }
+    );
+
+    // Meta+Shift+P: Toggle forced scene composition. When disabled,
+    // wlroots may use direct scan-out for an eligible fullscreen scene.
+    m_keybindingManager.registerKeybinding(
+        KeybindingManager::MOD_LOGO | KeybindingManager::MOD_SHIFT, XKB_KEY_p,
+        "toggle_compositing", [this]() { toggleCompositing(); }
     );
 
     // Meta+1 through Meta+9: Direct workspace switch
@@ -2286,6 +2311,35 @@ bool Server::startIPCServer(const std::string& socketPath) {
         return ipcMoveToWorkspace(args);
     });
 
+    // Compositing: "enabled" forces wlroots to render the scene and
+    // disables direct scan-out. Disabling it permits direct scan-out when
+    // the current scene is eligible; Wayland still composites otherwise.
+    m_ipcServer->registerCommand("get_compositing", [this](const std::string& args) -> std::string {
+        (void)args;
+        JsonObject r;
+        r["success"] = true;
+        r["compositing"] = compositingEnabled();
+        return m_ipcServer->jsonToString(r);
+    });
+
+    m_ipcServer->registerCommand("set_compositing", [this](const std::string& args) -> std::string {
+        bool enabled = m_ipcServer->extractJsonBool(args, "enabled", compositingEnabled());
+        setCompositingEnabled(enabled);
+        JsonObject r;
+        r["success"] = true;
+        r["compositing"] = compositingEnabled();
+        return m_ipcServer->jsonToString(r);
+    });
+
+    m_ipcServer->registerCommand("toggle_compositing", [this](const std::string& args) -> std::string {
+        (void)args;
+        toggleCompositing();
+        JsonObject r;
+        r["success"] = true;
+        r["compositing"] = compositingEnabled();
+        return m_ipcServer->jsonToString(r);
+    });
+
     // Cursor mode: "auto" lets wlroots use a hardware cursor plane when
     // the backend has one, "software" forces the cursor to be composited
     // into the framebuffer (visible on backends that only advertise a
@@ -2565,6 +2619,7 @@ bool Server::registerHavelKeybinding(uint32_t modifiers, uint32_t keysym,
                                       const char* name, std::function<void()> callback) {
     return m_keybindingManager.registerKeybinding(modifiers, keysym, name, callback);
 }
+#endif  // HAVE_HAVEL_LANG
 
 // Re-run config.hv: drop the script-registered bindings first (register
 // refuses duplicate combos, so a plain re-run would silently disable
@@ -2600,7 +2655,6 @@ std::string Server::reloadHavelConfig() {
     return "built without the havel embed";
 #endif
 }
-#endif  // HAVE_HAVEL_LANG
 
 std::string Server::ipcSetGamma(const std::string& args) {
     float gamma = m_ipcServer->extractJsonFloat(args, "gamma", 1.0f);

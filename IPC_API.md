@@ -545,6 +545,85 @@ Get all display settings.
 
 ---
 
+## Compositing Commands
+
+Wayland compositors still composite scenes that are not eligible for
+direct scan-out. Havel's compositing state controls wlroots' forced-render
+lock: when enabled, the scene is always rendered; when disabled, wlroots
+may use direct scan-out for an eligible scene.
+
+### get_compositing
+Get the current forced-compositing state.
+
+**Request:**
+```json
+{"method":"get_compositing"}
+```
+
+**Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "success": true,
+    "compositing": true
+  }
+}
+```
+
+---
+
+### set_compositing
+Enable or disable forced scene rendering.
+
+**Parameters:**
+- `enabled` (boolean): `true` forces rendering; `false` permits direct
+  scan-out when the current scene is eligible.
+
+**Request:**
+```json
+{"method":"set_compositing","params":{"enabled":false}}
+```
+
+**Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "success": true,
+    "compositing": false
+  }
+}
+```
+
+---
+
+### toggle_compositing
+Toggle forced scene rendering and return the resulting state.
+
+**Request:**
+```json
+{"method":"toggle_compositing"}
+```
+
+**Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "success": true,
+    "compositing": false
+  }
+}
+```
+
+The built-in `Meta+Shift+P` keybinding invokes the same toggle.
+
+---
+
 ## Plugin Commands
 
 ### get_plugins

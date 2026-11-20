@@ -4,10 +4,17 @@ from the event-subscription socket so interleaved broadcasts can't
 desynchronize response matching. Also validates JSON-RPC framing."""
 
 import json
+import os
 import socket
 import sys
 
-SOCK = "/run/user/1003/havel-wm.sock"
+# Follow the compositor's socket resolution without assuming a particular
+# UID. HAVEL_IPC_SOCKET is an explicit override; otherwise use the current
+# user's XDG runtime directory (or its conventional /run/user fallback).
+SOCK = os.environ.get("HAVEL_IPC_SOCKET") or os.path.join(
+    os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}",
+    "havel-wm.sock",
+)
 
 VALID = [
     ("ping", {}),

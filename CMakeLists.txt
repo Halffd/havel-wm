@@ -30,8 +30,25 @@ else()
 endif()
 pkg_check_modules(CURL REQUIRED libcurl)
 
-# Find nlohmann/json for JSON parsing
-find_package(nlohmann_json CONFIG REQUIRED)
+# Find nlohmann/json for JSON parsing. Some distributions (including Void)
+# ship the header without the CMake package files, so provide a header-only
+# imported target when find_package cannot find the config package.
+find_package(nlohmann_json CONFIG QUIET)
+if(NOT nlohmann_json_FOUND)
+    find_path(NLOHMANN_JSON_INCLUDE_DIR
+        NAMES nlohmann/json.hpp
+        PATH_SUFFIXES include
+    )
+    if(NOT NLOHMANN_JSON_INCLUDE_DIR)
+        message(FATAL_ERROR "nlohmann/json.hpp not found")
+    endif()
+    add_library(nlohmann_json::nlohmann_json INTERFACE IMPORTED)
+    set_target_properties(nlohmann_json::nlohmann_json PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${NLOHMANN_JSON_INCLUDE_DIR}"
+    )
+    message(STATUS
+        "nlohmann_json CMake package not found; using header at ${NLOHMANN_JSON_INCLUDE_DIR}")
+endif()
 
 # OpenCV is only needed when the monorepo archives were built WITH it
 # (HAVE_OPENCV); archives rebuilt without it carry no cv:: references and
@@ -171,6 +188,7 @@ set(WM_CORE_SOURCES
     src/wm/core/Layout.cpp
     src/wm/core/Focus.cpp
     src/wm/core/Server.cpp
+    src/wm/core/RendererSelection.cpp
     src/wm/core/DisplaySettings.cpp
     src/wm/core/bridge.cpp
     src/wm/core/Animation.cpp
@@ -251,6 +269,32 @@ target_include_directories(test-keybinding PRIVATE
 )
 target_link_libraries(test-keybinding PRIVATE xkbcommon)
 
+# Keybinding manager test: shifted letter keysyms match base-letter
+# registrations when the Shift modifier is active.
+add_executable(test-keybinding-manager
+    tests/test_keybinding_manager.cpp
+    src/wm/input/KeybindingManager.cpp
+    src/utils/Logger.c
+)
+target_include_directories(test-keybinding-manager PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
+)
+target_link_libraries(test-keybinding-manager PRIVATE xkbcommon)
+
+# Renderer selection test: CLI aliases map to canonical wlroots values.
+add_executable(test-renderer-selection
+    tests/test_renderer_selection.cpp
+    src/wm/core/RendererSelection.cpp
+)
+target_include_directories(test-renderer-selection PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/wm/include
+)
+
 # App icon loader test: theme-dir resolution (hicolor size dirs), size
 # normalization to the 32x32 display size, placeholder packing.
 add_executable(test-app-icons tests/test_app_icon_loader.cpp
@@ -321,40 +365,62 @@ set_target_properties(wlr_bridge PROPERTIES
 # so it only builds when the language actually links.
 option(ENABLE_HAVEL_LANG "Embed the Havel language (config.hv, havel_run IPC)" ON)
 
-set(HAVEL_LANG_LIB "")
+set(HAVEL_EMBED_AVAILABLE OFF)
+set(HAVEL_RUNTIME_LIB "")
+set(HAVEL_COMPILER_LIB "")
+set(HAVEL_MODULES_LIB "")
 set(HAVEL_CORE_LIB "")
+set(HAVEL_LANG_LIB "")
+set(HAVEL_WAYLAND_PROTOS_LIB "")
 if(ENABLE_HAVEL_LANG)
     # HAVEL_ARCHIVE_DIR selects which monorepo build tree provides the
-    # archives. The shared build-debug is contested ground (parallel
-    # sessions flip ENABLE_QT on and off; a Qt-enabled core references
-    # services whose implementation lives in the Qt-only gui target, so
-    # core+lang alone cannot resolve). A private out-of-source tree
-    # (e.g. build-wm-embed configured with ENABLE_QT=OFF) stays stable.
+    # archives. Prefer the current split archives (runtime/compiler/modules/
+    # core); retain the old monolithic libhavel_lang.a fallback for older
+    # sibling builds. A private out-of-source tree (configured with
+    # ENABLE_QT=OFF) keeps the embedded build reproducible.
     set(HAVEL_ARCHIVE_DIR "" CACHE PATH
-        "Monorepo build dir providing libhavel_lang.a/libhavel_core.a (default: search)")
-    foreach(_cand
-            "${HAVEL_ARCHIVE_DIR}/libhavel_lang.a"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../build-debug/libhavel_lang.a"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../build-release/libhavel_lang.a"
-            "${CMAKE_CURRENT_SOURCE_DIR}/../build/libhavel_lang.a")
-        if(EXISTS "${_cand}")
-            set(HAVEL_LANG_LIB "${_cand}")
+        "Monorepo build dir providing the Havel static archives (default: search)")
+
+    set(_havel_archive_dirs "")
+    if(HAVEL_ARCHIVE_DIR)
+        list(APPEND _havel_archive_dirs "${HAVEL_ARCHIVE_DIR}")
+    else()
+        list(APPEND _havel_archive_dirs
+            "${CMAKE_CURRENT_SOURCE_DIR}/../build-debug"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../build-release"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../build")
+    endif()
+
+    foreach(_archive_dir IN LISTS _havel_archive_dirs)
+        if(EXISTS "${_archive_dir}/libhavel_runtime.a"
+                AND EXISTS "${_archive_dir}/libhavel_compiler.a"
+                AND EXISTS "${_archive_dir}/libhavel_modules.a"
+                AND EXISTS "${_archive_dir}/libhavel_core.a")
+            set(HAVEL_RUNTIME_LIB "${_archive_dir}/libhavel_runtime.a")
+            set(HAVEL_COMPILER_LIB "${_archive_dir}/libhavel_compiler.a")
+            set(HAVEL_MODULES_LIB "${_archive_dir}/libhavel_modules.a")
+            set(HAVEL_CORE_LIB "${_archive_dir}/libhavel_core.a")
+            set(HAVEL_WAYLAND_PROTOS_LIB "${_archive_dir}/libwayland-protos.a")
+            set(HAVEL_EMBED_AVAILABLE ON)
             break()
         endif()
     endforeach()
-    if(HAVEL_LANG_LIB)
-        get_filename_component(_lang_dir "${HAVEL_LANG_LIB}" DIRECTORY)
-        # libhavel_core.a carries the host-bridge implementations
-        # (ModularHostBridges) and the app-layer backends they call
-        # (IO, HotkeyManager, EventListener, DisplayManager, MouseService,
-        # KeyMap) - the lang archive references their symbols.
-        if(EXISTS "${_lang_dir}/libhavel_core.a")
-            set(HAVEL_CORE_LIB "${_lang_dir}/libhavel_core.a")
-        endif()
+
+    if(NOT HAVEL_EMBED_AVAILABLE)
+        foreach(_archive_dir IN LISTS _havel_archive_dirs)
+            if(EXISTS "${_archive_dir}/libhavel_lang.a"
+                    AND EXISTS "${_archive_dir}/libhavel_core.a")
+                set(HAVEL_LANG_LIB "${_archive_dir}/libhavel_lang.a")
+                set(HAVEL_CORE_LIB "${_archive_dir}/libhavel_core.a")
+                set(HAVEL_WAYLAND_PROTOS_LIB "${_archive_dir}/libwayland-protos.a")
+                set(HAVEL_EMBED_AVAILABLE ON)
+                break()
+            endif()
+        endforeach()
     endif()
 endif()
 
-if(HAVEL_LANG_LIB)
+if(HAVEL_EMBED_AVAILABLE)
     list(APPEND WM_CORE_SOURCES
         src/wm/havel/HavelHost.cpp
         src/wm/havel/HavelHost.hpp
@@ -398,16 +464,29 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE WLR_USE_UNSTABLE)
 # ============================================================================
 # Havel language embedding (scripts as compositor commands)
 # ============================================================================
-# Links the havel-lang static library from the sibling monorepo build.
-# The monorepo builds it LLVM-free (its LLVM TUs are excluded), so no
-# LLVM libraries are needed here. Undefined externals in the archive:
-# libc/libm/libdl/readline/X11 only.
+# Link the sibling monorepo's static archives. Current sibling builds use
+# the split runtime/compiler/modules/core layout; older builds used the
+# monolithic libhavel_lang.a plus libhavel_core.a pair.
 
-if(HAVEL_LANG_LIB)
-    message(STATUS "Havel language embedding: ${HAVEL_LANG_LIB}")
-    if(HAVEL_CORE_LIB)
+if(HAVEL_EMBED_AVAILABLE)
+    if(HAVEL_RUNTIME_LIB)
+        message(STATUS "Havel language embedding: ${HAVEL_RUNTIME_LIB}")
+        message(STATUS "Havel compiler archive: ${HAVEL_COMPILER_LIB}")
+        message(STATUS "Havel modules archive: ${HAVEL_MODULES_LIB}")
         message(STATUS "Havel host bridges: ${HAVEL_CORE_LIB}")
+        set(_havel_link_archives
+            "${HAVEL_RUNTIME_LIB}"
+            "${HAVEL_COMPILER_LIB}"
+            "${HAVEL_MODULES_LIB}"
+            "${HAVEL_CORE_LIB}")
+    else()
+        message(STATUS "Havel language embedding: ${HAVEL_LANG_LIB}")
+        message(STATUS "Havel host bridges: ${HAVEL_CORE_LIB}")
+        set(_havel_link_archives
+            "${HAVEL_LANG_LIB}"
+            "${HAVEL_CORE_LIB}")
     endif()
+
     target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_HAVEL_LANG)
     # allow-multiple-definition: libhavel_core.a carries the monorepo's
     # own havel::WindowManager (X11-based) - same class name as this WM's
@@ -418,19 +497,32 @@ if(HAVEL_LANG_LIB)
     # because the bridge code that would call the wrong instance never
     # runs: nothing in the WM calls createHostBridge().
     target_link_options(${PROJECT_NAME} PRIVATE -Wl,--allow-multiple-definition)
+    # Release sibling archives contain LLVM ThinLTO bitcode. GNU ld cannot
+    # consume those archive members; Clang's lld driver handles them through
+    # the matching LLVM plugin.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_link_options(${PROJECT_NAME} PRIVATE -fuse-ld=lld)
+    endif()
     target_include_directories(${PROJECT_NAME} PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../src/havel-lang/capi"
     )
-    # Both archives in ONE group: core's EventBridge references
-    # EventRuntime (lang archive) - separate groups left it unresolved
-    # (the lang archive was scanned before the reference existed).
+
+    # Keep all Havel archives in one group. Their dependency graph contains
+    # cycles (core's EventBridge references runtime EventRuntime, while
+    # runtime host functions reference core services), and a single-pass
+    # archive scan otherwise drops members pulled late.
+    if(EXISTS "${HAVEL_WAYLAND_PROTOS_LIB}")
+        list(APPEND _havel_link_archives "${HAVEL_WAYLAND_PROTOS_LIB}")
+    endif()
     target_link_libraries(${PROJECT_NAME} PRIVATE
         -Wl,--start-group
-        "${HAVEL_LANG_LIB}"
-        "${HAVEL_CORE_LIB}"
+        ${_havel_link_archives}
+        -Wl,--end-group
         pthread
         dl
         m
+        crypto
+        ssl
         readline
         X11
         Xrandr
@@ -438,12 +530,36 @@ if(HAVEL_LANG_LIB)
         Xext
         Xi
         Xtst
+        Xcomposite
+        Xdamage
+        Xfixes
+        SM
+        ICE
         ffi
         wayland-client
         dbus-1
         asound
-        -Wl,--end-group
+        pipewire-0.3
+        pcre2-8
+        pcre2-16
     )
+
+    # ZIP support is optional in the sibling build. Link the available
+    # implementation when the selected archives were built with it.
+    find_library(HAVEL_ZIP_LIBRARY NAMES zip minizip)
+    if(HAVEL_ZIP_LIBRARY)
+        target_link_libraries(${PROJECT_NAME} PRIVATE "${HAVEL_ZIP_LIBRARY}")
+    endif()
+
+    # The sibling's core archive uses desktop OpenGL for its rendering and
+    # capture paths. The compositor itself may otherwise build without GL.
+    find_package(OpenGL QUIET)
+    if(TARGET OpenGL::GL)
+        target_link_libraries(${PROJECT_NAME} PRIVATE OpenGL::GL)
+    else()
+        message(WARNING "OpenGL not found - Havel archive GL references may fail to link")
+    endif()
+
     # cv:: symbols only appear when the linked archives were built with
     # HAVE_OPENCV; absent that, linking opencv would be dead weight (and
     # fails outright on systems without the libs installed). Link only
@@ -468,7 +584,7 @@ if(HAVEL_LANG_LIB)
     if(LEPTONICA_FOUND)
         target_link_libraries(${PROJECT_NAME} PRIVATE leptonica)
     endif()
-    # The monorepo's lang archive embeds the ORC JIT when its tree is
+    # The monorepo's language archive embeds the ORC JIT when its tree is
     # configured with ENABLE_LLVM=ON; pulled archive members reference
     # llvm:: symbols (847 unresolved refs - observed). Mirror the
     # monorepo's own link: llvm-config --libs all + --system-libs.
@@ -489,15 +605,11 @@ if(HAVEL_LANG_LIB)
     else()
         message(STATUS "llvm-config not found - archive LLVM refs, if any, stay unresolved")
     endif()
-    # wayland client-protocol code (zxdg_output_v1_interface etc.) that
-    # the bridge layer references
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../build-debug/libwayland-protos.a")
-        target_link_libraries(${PROJECT_NAME} PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/../build-debug/libwayland-protos.a")
-    endif()
 else()
     if(ENABLE_HAVEL_LANG)
-        message(STATUS "Havel language embedding: libhavel_lang.a not found - building without script support")
+        message(STATUS
+            "Havel language embedding: compatible sibling archives not found - "
+            "building without script support")
     endif()
 endif()
 

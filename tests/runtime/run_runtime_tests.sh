@@ -9,7 +9,10 @@
 # Phases:
 #   0. unit          - compositor-free unit suites: font module (bitmap
 #                     and vector faces through the one FreeType path),
-#                     Common.h utilities, keybinding parser
+#                     Common.h utilities, keybinding parser/manager,
+#                     renderer selection
+#   0b. renderer     - --renderer opengl overrides inherited pixman before
+#                     wlroots creates the real GLES2 window renderer
 #   1. boot          - compositor starts, loading screen lifecycle, no crashes
 #   2. client        - foot round-trip: connect/map/focus/render/disconnect
 #   3. pixels        - grim captures a frame; window content must be present
@@ -137,7 +140,7 @@ echo "--- phase 0: unit tests (no compositor needed)"
 # Pure unit binaries built alongside the compositor. The font module's
 # test generates its own bitmap font at run time, so it needs nothing
 # from the environment.
-for U in "$BUILD_DIR/test-font" "$BUILD_DIR/test-utilities" "$BUILD_DIR/test-keybinding" "$BUILD_DIR/test-app-icons"; do
+for U in "$BUILD_DIR/test-font" "$BUILD_DIR/test-utilities" "$BUILD_DIR/test-keybinding" "$BUILD_DIR/test-keybinding-manager" "$BUILD_DIR/test-renderer-selection" "$BUILD_DIR/test-app-icons"; do
     NAME=$(basename "$U")
     if [ -x "$U" ]; then
         # 60s was too short on a loaded box: a run that stretched to 100
@@ -153,6 +156,15 @@ for U in "$BUILD_DIR/test-font" "$BUILD_DIR/test-utilities" "$BUILD_DIR/test-key
         skip "$NAME (not built - cmake --build build --target $NAME)"
     fi
 done
+
+# ---------------------------------------------------------------- phase 0b
+echo "--- phase 0b: renderer startup"
+if tests/runtime/renderer_smoke.sh "$BUILD_DIR/bin/havel-wm" > /tmp/havel-renderer-smoke-out.txt 2>&1; then
+    report 0 "OpenGL renderer startup ($(tail -1 /tmp/havel-renderer-smoke-out.txt))"
+else
+    report 1 "OpenGL renderer startup ($(tail -1 /tmp/havel-renderer-smoke-out.txt))"
+    cat /tmp/havel-renderer-smoke-out.txt | tail -12
+fi
 
 # ---------------------------------------------------------------- phase 1
 echo "--- phase 1: boot"
@@ -309,10 +321,16 @@ fi   # end of the terminal-client branch (phases 2+3)
 
 # ---------------------------------------------------------------- phase 4
 echo "--- phase 4: IPC probe"
-if python3 tests/runtime/ipc_probe.py > /tmp/havel-ipc-out.txt 2>&1; then
+if HAVEL_IPC_SOCKET="$SOCK" python3 tests/runtime/ipc_probe.py > /tmp/havel-ipc-out.txt 2>&1; then
     echo "PASS: IPC surface (28 valid + 6 hostile + 4 havel_run)"; PASS=$((PASS+1))
 else
     echo "FAIL: IPC probe"; cat /tmp/havel-ipc-out.txt | tail -8
+    FAIL=$((FAIL+1))
+fi
+if HAVEL_IPC_SOCKET="$SOCK" python3 tests/runtime/compositing_probe.py > /tmp/havel-compositing-out.txt 2>&1; then
+    echo "PASS: compositing IPC state round-trip"; PASS=$((PASS+1))
+else
+    echo "FAIL: compositing IPC probe"; cat /tmp/havel-compositing-out.txt | tail -8
     FAIL=$((FAIL+1))
 fi
 
@@ -333,6 +351,13 @@ if [ -x "$INJ" ]; then
     report $(wait_for_log "TRIGGERED: spawn_terminal" 20 && echo 0 || echo 1) "Meta+Return triggers spawn_terminal"
     WAYLAND_DISPLAY=wayland-0 "$INJ" +125 3 -125
     report $(wait_for_log "TRIGGERED: workspace_2" 20 && echo 0 || echo 1) "Meta+2 triggers workspace_2"
+
+    # Meta+Shift+P toggles forced scene composition. Query the real IPC
+    # state after each injection so this checks the key path, not a log line.
+    WAYLAND_DISPLAY=wayland-0 "$INJ" +125 +42 25 -42 -125
+    report $(HAVEL_IPC_SOCKET="$SOCK" python3 tests/runtime/compositing_probe.py --expect-compositing false >/tmp/havel-compositing-key-out.txt 2>&1 && echo 0 || echo 1) "Meta+Shift+P disables compositing"
+    WAYLAND_DISPLAY=wayland-0 "$INJ" +125 +42 25 -42 -125
+    report $(HAVEL_IPC_SOCKET="$SOCK" python3 tests/runtime/compositing_probe.py --expect-compositing true >/tmp/havel-compositing-key-out.txt 2>&1 && echo 0 || echo 1) "Meta+Shift+P restores compositing"
 else
     skip "injector build failed (wayland-scanner missing?)"
 fi
@@ -342,6 +367,15 @@ echo "--- phase 6: havel language-syntax hotkeys (config.hv)"
 if [ "${HAS_EMBED:-0}" -eq 0 ]; then
     skip "compositor built without the havel embed (no [Havel] line at boot)"
 else
+# The compositing host functions must drive the same compositor state as
+# the IPC commands and the built-in keybinding.
+if HAVEL_IPC_SOCKET="$SOCK" python3 tests/runtime/compositing_probe.py --via-havel >/tmp/havel-compositing-havel-out.txt 2>&1; then
+    report 0 "Havel set_compositing/toggle_compositing state round-trip"
+else
+    report 1 "Havel compositing host functions"
+    cat /tmp/havel-compositing-havel-out.txt | tail -8
+fi
+
 # The real user-facing hotkey forms through the embedded interpreter:
 # sugar (^+F2 => {...} lowers to hotkey.register) and host fn
 # (keybind("Meta+F3", fn())). Both must register and fire via injection.
@@ -1306,7 +1340,9 @@ fi
 # get_keybindings answer with real state.
 REPL_BIN="$BUILD_DIR/src/shell/repl/havel-repl"
 if [ ! -x "$REPL_BIN" ]; then
-    skip "repl phase (havel-repl not built)"
+    skip "repl evaluation (havel-repl not built)"
+elif [ "${HAS_EMBED:-0}" -eq 0 ]; then
+    skip "repl evaluation (no havel embed)"
 else
     REPL_OUT=$(printf '1 + 2\nsettings("harness_repl_k", "harness_repl_v")\nsettings("harness_repl_k")\n:quit\n' \
         | timeout 20 env HAVEL_IPC_SOCKET="$SOCK" "$REPL_BIN" 2>/dev/null | sed 's/^havel> //')
@@ -1324,8 +1360,11 @@ try:
 except Exception:
     pass
 CLEANKEY
+fi
 
-    GOUT=$(python3 - "$SOCK" <<'GOUT' 2>/dev/null
+# Output and keybinding introspection are plain IPC commands and remain
+# available in builds without the Havel language embed.
+GOUT=$(python3 - "$SOCK" <<'GOUT' 2>/dev/null
 import socket, json, sys
 s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
@@ -1333,9 +1372,9 @@ s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_outputs","params":{}
 print(s.recv(65536).decode())
 GOUT
 )
-    report $(echo "$GOUT" | grep -q '"count": *1' && echo "$GOUT" | grep -q '"width": *1280' && echo 0 || echo 1) \
-        "get_outputs reports geometry ($(echo "$GOUT" | head -c 70))"
-    GKB=$(python3 - "$SOCK" <<'GKB' 2>/dev/null
+report $(echo "$GOUT" | grep -q '"count": *1' && echo "$GOUT" | grep -q '"width": *1280' && echo 0 || echo 1) \
+    "get_outputs reports geometry ($(echo "$GOUT" | head -c 70))"
+GKB=$(python3 - "$SOCK" <<'GKB' 2>/dev/null
 import socket, json, sys
 s = socket.socket(socket.AF_UNIX); s.settimeout(30)
 s.connect(sys.argv[1])
@@ -1343,10 +1382,9 @@ s.sendall((json.dumps({"jsonrpc":"2.0","id":1,"method":"get_keybindings","params
 print(s.recv(65536).decode())
 GKB
 )
-    GKB_N=$(echo "$GKB" | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',{}).get('count',0))" 2>/dev/null)
-    report $([ "${GKB_N:-0}" -gt 5 ] && echo 0 || echo 1) \
-        "get_keybindings lists bindings (count=${GKB_N:-err})"
-fi
+GKB_N=$(echo "$GKB" | python3 -c "import sys,json; print(json.load(sys.stdin).get('result',{}).get('count',0))" 2>/dev/null)
+report $([ "${GKB_N:-0}" -gt 5 ] && echo 0 || echo 1) \
+    "get_keybindings lists bindings (count=${GKB_N:-err})"
 
 # ---------------------------------------------------------------- phase 16: declarative config
 # config.hv statements applied live: workspace_count (with window

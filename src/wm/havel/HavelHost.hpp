@@ -40,6 +40,8 @@ using havel::Server;
  *   cursor_mode("auto"|"software")
  *                           hardware cursor plane when available, or force
  *                           the software cursor
+ *   set_compositing(enabled) force scene rendering, or allow direct scan-out
+ *   toggle_compositing()     toggle forced scene rendering
  *   lock_screen()            lock the screen (PAM overlay)
  *   set_wallpaper(path)      PNG wallpaper behind all windows ("" clears)
  *   plugin_config(plugin, key, value)
