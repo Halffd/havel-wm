@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Havel Screenshot
+Comment=Screenshot Utility for Havel WM
+Exec=havel-screenshot
+Icon=camera-photo
+Terminal=false
+Type=Application
+Categories=Utility;Graphics;
+Keywords=screenshot;capture;screen;photo;camera;

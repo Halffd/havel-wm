@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Havel Text Editor
+Comment=Simple Text Editor for Havel WM
+Exec=havel-texteditor %F
+Icon=accessories-text-editor
+Terminal=false
+Type=Application
+Categories=Utility;TextEditor;
+MimeType=text/plain;
+Keywords=text;editor;code;programming;

@@ -1,0 +1,34 @@
+[Unit]
+Description=Havel Wayland Compositor
+Documentation=man:havel-wm(1)
+Conflicts=sway.service weston.service river.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/havel-wm
+Environment=WLR_NO_HARDWARE_CURSORS=1
+Restart=on-failure
+RestartSec=3
+
+# Security hardening
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=true
+LockPersonality=true
+
+ReadWritePaths=
+    ~/.config/havel-wm
+    ~/.local/share/havel
+    ~/.cache/havel
+
+[Install]
+WantedBy=graphical-session.target

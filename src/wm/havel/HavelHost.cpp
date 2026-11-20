@@ -1,0 +1,897 @@
+// HavelHost - Havel language embedded in the compositor.
+
+#include "HavelHost.hpp"
+#include <wm/Server.hpp>
+#include <wm/input/KeybindingManager.hpp>
+#include <wm/plugins/PluginConfig.hpp>
+#include <Logger.h>
+#include <havel.h>
+#include <cstdio>
+#include <cstring>
+#include <cstdlib>
+#include <string>
+#include <vector>
+
+using namespace havel;
+
+// SDK entry point that installs the real compile pipeline behind
+// ModuleCompilerHook. Defined in the embedded language archive
+// (havel-lang/compiler/core/SourceModuleCompilerHook.cpp); that SDK
+// header is not on the compositor's include path, so declare it here.
+namespace havel::compiler {
+bool registerSourceModuleCompilerHook();
+}
+
+// The compositor context passed to every host function via userdata.
+struct HavelCompositorCtx {
+    Server* server;
+};
+
+// ---------------------------------------------------------------------------
+// Helpers: stack access in host functions
+// ---------------------------------------------------------------------------
+
+static int64_t arg_int(HavelState* H, int idx) {
+    return havel_tointeger(H, idx);
+}
+
+static double arg_num(HavelState* H, int idx) {
+    return havel_tonumber(H, idx);
+}
+
+static const char* arg_str(HavelState* H, int idx) {
+    return havel_tostring(H, idx);
+}
+
+// ---------------------------------------------------------------------------
+// Host functions: compositor operations
+// ---------------------------------------------------------------------------
+// Every function: args on the stack (1-based), result pushed on return.
+// Exceptions are fine: havel_call catches and reports via last_error.
+
+static int hf_spawn(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    const char* cmd = arg_str(H, 0);
+    if (!cmd || !*cmd || !ctx || !ctx->server) {
+        havel_pushboolean(H, 0);
+        return HAVEL_OK;
+    }
+    ctx->server->spawnCommand(cmd);
+    havel_pushboolean(H, 1);
+    return HAVEL_OK;
+}
+
+static int hf_workspace(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    int64_t ws = arg_int(H, 0);
+    if (ctx && ctx->server && ws >= 0) {
+        ctx->server->workspaceStepTo((uint32_t)ws);
+    }
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_workspace_next(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    if (ctx && ctx->server) ctx->server->workspaceStep(false);
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_workspace_prev(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    if (ctx && ctx->server) ctx->server->workspaceStep(true);
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_focus(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    int64_t id = arg_int(H, 0);
+    if (ctx && ctx->server && id >= 0) {
+        ctx->server->windowManager().focusWindow((uint64_t)id);
+    }
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_close_window(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    int64_t id = arg_int(H, 0);
+    if (ctx && ctx->server && id >= 0) {
+        ctx->server->windowManager().closeWindow((uint64_t)id);
+    }
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_minimize(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    int64_t id = arg_int(H, 0);
+    if (ctx && ctx->server && id >= 0) {
+        ctx->server->windowManager().minimizeWindow((uint64_t)id);
+    }
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_maximize(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    int64_t id = arg_int(H, 0);
+    if (ctx && ctx->server && id >= 0) {
+        ctx->server->windowManager().maximizeWindow((uint64_t)id);
+    }
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_restore(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    int64_t id = arg_int(H, 0);
+    if (ctx && ctx->server && id >= 0) {
+        ctx->server->windowManager().restoreWindow((uint64_t)id);
+    }
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_move(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    int64_t id = arg_int(H, 0);
+    int64_t x = arg_int(H, 1);
+    int64_t y = arg_int(H, 2);
+    if (ctx && ctx->server && id >= 0) {
+        ctx->server->windowManager().moveWindow((uint64_t)id, (int)x, (int)y);
+    }
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_resize(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    int64_t id = arg_int(H, 0);
+    int64_t w = arg_int(H, 1);
+    int64_t h = arg_int(H, 2);
+    if (ctx && ctx->server && id >= 0) {
+        ctx->server->windowManager().resizeWindow((uint64_t)id, (int)w, (int)h);
+    }
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_set_floating(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    int64_t id = arg_int(H, 0);
+    int floating = havel_toboolean(H, 2);
+    if (ctx && ctx->server && id >= 0) {
+        ctx->server->windowManager().setFloating((uint64_t)id, floating != 0);
+    }
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_set_gamma(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    double g = arg_num(H, 0);
+    if (ctx && ctx->server) ctx->server->setGamma((float)g);
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_set_temperature(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    int64_t k = arg_int(H, 0);
+    if (ctx && ctx->server) ctx->server->setTemperature((int)k);
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_set_brightness(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    double b = arg_num(H, 0);
+    if (ctx && ctx->server) ctx->server->setBrightness((float)b);
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_notify(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    // Copy immediately: havel_tostring shares one static buffer.
+    const char* s0 = arg_str(H, 0);
+    const char* s1 = havel_gettop(H) >= 2 ? arg_str(H, 1) : nullptr;
+    std::string summary = s0 ? s0 : "";
+    std::string body = s1 ? s1 : "";
+    if (ctx && ctx->server && !summary.empty()) {
+        // Same path the IPC notify command uses
+        std::string args = "{\"summary\":\"" + summary +
+                           "\",\"body\":\"" + body + "\"}";
+        ctx->server->ipcNotify(args);
+    }
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_log(HavelState* H, void*) {
+    const char* msg = arg_str(H, 0);
+    LOG_INFO("[Havel] %s", msg ? msg : "");
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// cursor_mode("auto"|"software"): how the pointer is composited. "auto"
+// lets wlroots use a hardware cursor plane when the backend has one;
+// "software" forces the cursor into the framebuffer, which is what shows
+// up on backends that only advertise a plane and in screen captures.
+//
+//   cursor_mode("software")
+static int hf_cursor_mode(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    std::string mode = arg_str(H, 0) ? arg_str(H, 0) : "";
+    bool software = (mode == "software" || mode == "soft");
+    if (ctx && ctx->server) {
+        // Goes through the compositor's request path so it works even if
+        // the C side is not wired up yet at config.hv time.
+        ctx->server->requestSoftwareCursor(software);
+    } else {
+        LOG_WARN("[Havel] cursor_mode: no compositor context, ignored");
+    }
+    printf("[Havel] cursor_mode(%s)\n", software ? "software" : "auto");
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// set_compositing(enabled): force wlroots to render the scene. When
+// disabled, wlroots may use direct scan-out for an eligible scene.
+static int hf_set_compositing(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    bool enabled = havel_toboolean(H, 0) != 0;
+    if (ctx && ctx->server) {
+        ctx->server->setCompositingEnabled(enabled);
+    }
+    havel_pushboolean(H, ctx && ctx->server ? ctx->server->compositingEnabled() : 0);
+    return HAVEL_OK;
+}
+
+// toggle_compositing(): toggle forced scene rendering and return the
+// resulting state.
+static int hf_toggle_compositing(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    bool enabled = false;
+    if (ctx && ctx->server) {
+        enabled = ctx->server->toggleCompositing();
+    }
+    havel_pushboolean(H, enabled ? 1 : 0);
+    return HAVEL_OK;
+}
+
+// lock_screen(): lock the screen (PAM-authenticated overlay that
+// intercepts all input).
+static int hf_lock_screen(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    if (ctx && ctx->server) ctx->server->lockScreen();
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// zoom(action, output = 0): "in"|"out"|"reset"|"toggle"|"mode" on one
+// output, or "status" pushing the JSON state string.
+static int hf_zoom(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    // Copy: havel_tostring points into one static buffer (see hf_settings)
+    std::string a = arg_str(H, 0) ? arg_str(H, 0) : "";
+    int64_t output = havel_gettop(H) >= 1 ? arg_int(H, 1) : 0;
+    if (ctx && ctx->server && !a.empty()) {
+        auto* s = ctx->server;
+        if (a == "in") s->zoomIn((int)output);
+        else if (a == "out") s->zoomOut((int)output);
+        else if (a == "reset") s->zoomReset((int)output);
+        else if (a == "toggle") s->zoomToggle((int)output);
+        else if (a == "push_start") s->zoomPushStart((int)output);
+        else if (a == "push_end") s->zoomPushEnd((int)output);
+        else if (a == "mode") {
+            // zoom("mode", "lens" | 1): name or index from arg 1;
+            // no argument cycles
+            if (havel_gettop(H) >= 2) {
+                std::string ms = arg_str(H, 1) ? arg_str(H, 1) : "";
+                int mode;
+                if (ms == "lens") mode = 1;
+                else if (ms == "strip") mode = 2;
+                else if (ms == "custom") mode = 3;
+                else if (ms == "fullscreen") mode = 0;
+                else mode = (int)arg_int(H, 1);
+                s->zoomSetMode(mode);
+            } else {
+                s->zoomCycleMode();
+            }
+        }
+        else if (a == "status") {
+            std::string st = s->zoomStatusJson();
+            havel_pushstring(H, st.c_str());
+            return HAVEL_OK;
+        }
+    }
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// set_wallpaper(path): PNG wallpaper behind all windows; "" clears
+// back to the solid background colour.
+static int hf_set_wallpaper(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    std::string path = arg_str(H, 0) ? arg_str(H, 0) : "";
+    bool ok = ctx && ctx->server && ctx->server->setWallpaperFromFile(path);
+    printf("[Havel] set_wallpaper(%s) -> %s\n", path.c_str(), ok ? "ok" : "failed");
+    havel_pushboolean(H, ok ? 1 : 0);
+    return HAVEL_OK;
+}
+
+// open_path(path): open a directory in the file manager or a file with
+// its default application (xdg-open). Pushes a boolean result.
+static int hf_open_path(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    std::string path = arg_str(H, 0) ? arg_str(H, 0) : "";
+    bool ok = false;
+    if (ctx && ctx->server && !path.empty()) {
+        ok = ctx->server->openPath(path);
+    }
+    havel_pushboolean(H, ok ? 1 : 0);
+    return HAVEL_OK;
+}
+
+// settings(key) -> string (or nil when unset); settings(key, value) sets
+// and applies the setting live.
+static int hf_settings(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    // Copy immediately: havel_tostring returns a pointer into one static
+    // buffer, so a later arg_str call would alias an earlier result.
+    const char* k = arg_str(H, 0);
+    std::string key = k ? k : "";
+    if (key.empty() || !ctx || !ctx->server) {
+        havel_pushnil(H);
+        return HAVEL_OK;
+    }
+    if (havel_gettop(H) >= 2) {
+        const char* v = arg_str(H, 1);
+        std::string value = v ? v : "";
+        // settingsSet returns false when a typed key rejects the value;
+        // surface that so scripts can detect the failure.
+        havel_pushboolean(H, value.empty() ? 0 :
+            (ctx->server->settingsSet(key, value) ? 1 : 0));
+        return HAVEL_OK;
+    }
+    std::string value = ctx->server->settingsGet(key);
+    if (value.empty()) {
+        havel_pushnil(H);
+    } else {
+        havel_pushstring(H, value.c_str());
+    }
+    return HAVEL_OK;
+}
+
+// reload_config(): re-run config.hv (drops script keybindings first so
+// re-registration succeeds). Pushes true, or false + last_error on a
+// broken config.
+static int hf_reload_config(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    if (!ctx || !ctx->server) {
+        havel_pushboolean(H, 0);
+        return HAVEL_OK;
+    }
+    std::string err = ctx->server->reloadHavelConfig();
+    if (!err.empty()) {
+        printf("[Havel] reload_config failed: %s\n", err.c_str());
+        havel_pushboolean(H, 0);
+        return HAVEL_OK;
+    }
+    havel_pushboolean(H, 1);
+    return HAVEL_OK;
+}
+
+// ---------------------------------------------------------------------------
+// Declarative configuration statements (all applied live)
+// ---------------------------------------------------------------------------
+
+// gaps(px): tiling gap between and around tiled windows.
+static int hf_gaps(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    if (ctx && ctx->server) ctx->server->setGaps((int)arg_int(H, 0));
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// border_size(px): decoration border thickness.
+static int hf_border_size(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    if (ctx && ctx->server) ctx->server->setBorderWidth((int)arg_int(H, 0));
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// animations(bool): enable/disable view animations.
+static int hf_animations(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    if (ctx && ctx->server) ctx->server->setAnimationsEnabled(havel_toboolean(H, 0) != 0);
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// floating_rule(app_id): windows with this app id spawn floating.
+static int hf_floating_rule(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    const char* id = arg_str(H, 0);
+    if (ctx && ctx->server && id) ctx->server->addFloatingRule(id);
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// default_layout(name): "master" (built-in) or a custom-layouts name
+// (grid, horizontal, vertical) routed to the plugin.
+static int hf_default_layout(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    const char* name = arg_str(H, 0);
+    if (ctx && ctx->server && name) ctx->server->setDefaultLayout(name);
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// workspace_count(n): 1..10 visible workspaces. Shrinking rehomes the
+// windows of removed workspaces into the last surviving one.
+static int hf_workspace_count(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    if (ctx && ctx->server) ctx->server->setWorkspaceCount((uint32_t)arg_int(H, 0));
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// monitor_rule(name, x, y): pin an output to a layout position instead
+// of the automatic side-by-side placement.
+static int hf_monitor_rule(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    const char* name = arg_str(H, 0);
+    if (ctx && ctx->server && name)
+        ctx->server->addMonitorRule(name, (int)arg_int(H, 1), (int)arg_int(H, 2));
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// plugin_config(plugin, key, value): set a plugin setting from config.hv
+// and apply it live. Values are strings; numbers/bools are converted
+// here so `plugin_config("alt_tab", "columns", 4)` works.
+//
+//   plugin_config("alt_tab", "columns", 2)
+//   plugin_config("alt_tab", "monitor", "main")
+//   plugin_config("alt_tab", "keybinding", "Meta+Tab")
+static int hf_plugin_config(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    // Copy immediately: havel_tostring returns a shared static buffer, so
+    // holding several arg pointers at once aliases them all to the last
+    // converted value.
+    std::string plugin = arg_str(H, 0) ? arg_str(H, 0) : "";
+    std::string key = arg_str(H, 1) ? arg_str(H, 1) : "";
+    if (!ctx || !ctx->server || plugin.empty() || key.empty()) {
+        havel_pushnil(H);
+        return HAVEL_OK;
+    }
+
+    std::string value;
+    if (havel_gettop(H) >= 3) {
+        if (havel_isboolean(H, 2)) {
+            value = havel_toboolean(H, 2) ? "true" : "false";
+        } else if (havel_isnumber(H, 2)) {
+            double d = havel_tonumber(H, 2);
+            char buf[64];
+            if (d == (long long)d) snprintf(buf, sizeof buf, "%lld", (long long)d);
+            else snprintf(buf, sizeof buf, "%g", d);
+            value = buf;
+        } else {
+            const char* s = arg_str(H, 2);
+            value = s ? s : "";
+        }
+    }
+
+    PluginConfig::getInstance().setValue(plugin, key, value);
+    ctx->server->pluginManager().reloadPluginSettings(plugin);
+    printf("[Havel] plugin_config(%s, %s, %s)\n", plugin.c_str(), key.c_str(), value.c_str());
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+// io.injectKey(code, pressed): script-driven input synthesis, the
+// Wayland equivalent of the monorepo's X11 io.send. Feeds the key
+// through the seat's current keyboard - the full compositor dispatch
+// chain runs (keybindings, plugins), exactly like a real keypress.
+// Code is the evdev keycode (the handler adds 8 for xkb).
+extern "C" void havel_wlr_inject_key(struct havel_wlr_server*, uint32_t, bool);
+static int hf_inject_key(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    int64_t code = arg_int(H, 0);
+    int pressed = havel_gettop(H) >= 2 ? havel_toboolean(H, 1) : 1;
+    if (ctx && ctx->server && code >= 0) {
+        void* native = ctx->server->nativeHandle();
+        if (native) {
+            havel_wlr_inject_key((struct havel_wlr_server*)native,
+                                  (uint32_t)code, pressed != 0);
+        }
+    }
+    havel_pushnil(H);
+    return HAVEL_OK;
+}
+
+static int hf_get_workspace(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    uint32_t ws = ctx && ctx->server ? ctx->server->windowManager().getCurrentWorkspace() : 0;
+    havel_pushinteger(H, (int64_t)ws);
+    return HAVEL_OK;
+}
+
+static int hf_get_windows(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    havel_pusharray(H);
+    if (ctx && ctx->server) {
+        auto windows = ctx->server->windowManager().getAllWindows();
+        for (const auto& w : windows) {
+            // Window object: {id, app_id, title, workspace}
+            havel_pushobject(H);
+            havel_pushinteger(H, (int64_t)w.id);
+            havel_setfield(H, -2, "id");
+            havel_pushstring(H, w.appId.c_str());
+            havel_setfield(H, -2, "app_id");
+            havel_pushstring(H, w.title.c_str());
+            havel_setfield(H, -2, "title");
+            havel_pushinteger(H, (int64_t)w.workspace);
+            havel_setfield(H, -2, "workspace");
+            havel_arrayappend(H, -2);
+        }
+    }
+    return HAVEL_OK;
+}
+
+// ---------------------------------------------------------------------------
+// keybind(spec, fn): Havel-defined keybindings
+// ---------------------------------------------------------------------------
+
+// Convert a compact havel hotkey spec ("^+F1", "#Return", "!" alone)
+// into the canonical "Meta+Shift+..." form PluginConfig understands.
+static std::string hotkeySpecToBinding(const std::string& hk) {
+    std::string mods;
+    std::string key;
+    size_t i = 0;
+    for (; i < hk.size(); ++i) {
+        char c = hk[i];
+        if (c == '^') mods += "Ctrl+";
+        else if (c == '#') mods += "Meta+";
+        else if (c == '!') mods += "Alt+";
+        else if (c == '+' && i + 1 < hk.size()) mods += "Shift+";  // '+' followed by key
+        else if (c == '+' && i + 1 >= hk.size()) { key = "+"; }       // "+" alone is the key
+        else { key = hk.substr(i); break; }
+    }
+    if (key.empty()) key = hk;  // nothing consumed as modifiers
+    if (key == "->") key = "Plus";  // only "+" would've consumed by typo; guard
+    return mods + key;
+}
+
+static int hf_keybind(HavelState* H, void*) {
+    auto* ctx = (HavelCompositorCtx*)havel_getuserdata(H);
+    if (!ctx || !ctx->server) {
+        havel_pushboolean(H, 0);
+        return HAVEL_OK;
+    }
+    std::string rawSpec = arg_str(H, 0) ? arg_str(H, 0) : "";
+    int arg1type = havel_type(H, 1);
+    // Any non-nil value qualifies: closures arrive as FUNCTION_OBJ_ID
+    // values which don't satisfy the capi's TFUNCTION mapping over the
+    // bridge. The runtime decides callable-ness at callback time.
+    if (rawSpec.empty() || arg1type == HAVEL_TNIL) {
+        LOG_WARN("[Havel] keybind: needs (\"Mods+Key\", fn)");
+        havel_pushboolean(H, 0);
+        return HAVEL_OK;
+    }
+
+    // Translate havel hotkey syntax ("^+F1", "#Return", "!F1") into the
+    // binding spec ("Ctrl+Shift+F1", "Meta+Return", "Alt+F1") so both the
+    // host-function form keybind("Meta+Return", fn) and the language sugar
+    // ^+F1 => {...} land in the same table.
+    std::string spec = hotkeySpecToBinding(rawSpec);
+
+    uint32_t mods = 0, keysym = 0;
+    if (!PluginConfig::parseKeybindingSpec(spec.c_str(), &mods, &keysym)) {
+        LOG_WARN("[Havel] keybind: unrecognized binding spec '%s' (translated: '%s')",
+                 rawSpec.c_str(), spec.c_str());
+        havel_pushboolean(H, 0);
+        return HAVEL_OK;
+    }
+
+    // Pin the callable to its owning chunk BEFORE storing it: a raw
+    // FUNCTION_OBJ_ID is a chunk-relative index, and it re-resolves
+    // against whatever chunk is current when the keybinding fires. A
+    // havel_run snippet calling io.injectKey replaced the main chunk and
+    // made the stored "closure" resolve into the snippet itself - 139
+    // re-triggers, zero closure logs (observed live). pinCallableAsClosure
+    // rewrites the stack slot into a closure carrying its own chunk ref.
+    if (havel_pin_callable(H, 1) != HAVEL_OK) {
+        LOG_WARN("[Havel] keybind: argument is not a pin-able callable");
+        havel_pushboolean(H, 0);
+        return HAVEL_OK;
+    }
+
+    // Store the closure as a global so the KeybindingManager callback can
+    // retrieve + call it later: pushvalue duplicates the arg, setglobal
+    // stores the duplicate (and pops it).
+    HavelHost* host = ctx->server->havelHost();
+    std::string global = "havel_cb_" + std::to_string(++host->m_nextCallbackId);
+    havel_pushvalue(H, 1);
+    havel_setglobal(H, global.c_str());
+
+    HavelState* HH = host->state();
+    bool ok = ctx->server->registerHavelKeybinding(mods, keysym,
+        ("havel:" + std::string(spec)).c_str(),
+        [ctx, HH, global]() {
+            if (!HH) return;
+            havel_getglobal(HH, global.c_str());
+            havel_call(HH, 0, 0);
+        });
+
+    havel_pushboolean(H, ok ? 1 : 0);
+    return HAVEL_OK;
+}
+
+// ---------------------------------------------------------------------------
+// HavelHost
+// ---------------------------------------------------------------------------
+
+HavelHost::HavelHost() = default;
+
+HavelHost::~HavelHost() {
+    if (m_H) {
+        havel_close(m_H);
+        m_H = nullptr;
+    }
+}
+
+bool HavelHost::init(Server* server) {
+    if (m_initialized) return true;
+    m_server = server;
+
+    m_H = havel_newstate();
+    if (!m_H) {
+        m_lastError = "havel_newstate failed";
+        return false;
+    }
+
+    auto* ctx = new HavelCompositorCtx{server};
+    havel_setuserdata(m_H, ctx);
+
+    // The SDK-side compiler hook self-registers through a static
+    // initializer; lazy archive linking can drop that object (nothing
+    // references the TU otherwise), which makes every loadstring/eval
+    // report "no compiler available in this runtime". Reference it
+    // explicitly so the real pipeline is always the registered hook.
+    havel::compiler::registerSourceModuleCompilerHook();
+
+    registerHostFunctions();
+    m_initialized = true;
+    LOG_INFO("[Havel] Language embedded (%s)", havel_version());
+    return true;
+}
+
+void HavelHost::registerHostFunctions() {
+    havel_pushcfunction_with_ctx(m_H, hf_spawn, nullptr, "spawn");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_workspace, nullptr, "workspace");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_workspace_next, nullptr, "workspace_next");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_workspace_prev, nullptr, "workspace_prev");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_focus, nullptr, "focus");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_close_window, nullptr, "close_window");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_minimize, nullptr, "minimize");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_maximize, nullptr, "maximize");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_restore, nullptr, "restore");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_move, nullptr, "move");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_resize, nullptr, "resize");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_set_floating, nullptr, "set_floating");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_set_gamma, nullptr, "set_gamma");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_set_temperature, nullptr, "set_temperature");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_set_brightness, nullptr, "set_brightness");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_notify, nullptr, "notify");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_log, nullptr, "log");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_plugin_config, nullptr, "plugin_config");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_cursor_mode, nullptr, "cursor_mode");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_set_compositing, nullptr, "set_compositing");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_toggle_compositing, nullptr, "toggle_compositing");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_lock_screen, nullptr, "lock_screen");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_zoom, nullptr, "zoom");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_set_wallpaper, nullptr, "set_wallpaper");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_open_path, nullptr, "open_path");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_settings, nullptr, "settings");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_reload_config, nullptr, "reload_config");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_gaps, nullptr, "gaps");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_border_size, nullptr, "border_size");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_animations, nullptr, "animations");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_floating_rule, nullptr, "floating_rule");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_default_layout, nullptr, "default_layout");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_workspace_count, nullptr, "workspace_count");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_monitor_rule, nullptr, "monitor_rule");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_get_workspace, nullptr, "get_workspace");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_get_windows, nullptr, "get_windows");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_inject_key, nullptr, "io.injectKey");
+    havel_pop(m_H, 1);
+    havel_pushcfunction_with_ctx(m_H, hf_keybind, nullptr, "keybind");
+    havel_pop(m_H, 1);
+    // Language-level hotkey syntax (^+F1 => {...}, #Return => {...})
+    // lowers to calls to the global "hotkey.register". Register the same
+    // handler under that dotted name; the keymap parse inside hf_keybind
+    // normalizes the syntax sugar into the same mods+keysym form.
+    havel_pushcfunction_with_ctx(m_H, hf_keybind, nullptr, "hotkey.register");
+    havel_pop(m_H, 1);
+}
+
+bool HavelHost::runFile(const std::string& path) {
+    if (!m_initialized || !m_H) {
+        m_lastError = "not initialized";
+        return false;
+    }
+    // C-API semantics: havel_loadfile already compiles AND executes
+    // the chunk, leaving its return value on the stack. No havel_call
+    // here - the stack top is a value, not a function.
+    int status = havel_loadfile(m_H, path.c_str());
+    if (status != HAVEL_OK) {
+        m_lastError = havel_errmsg(m_H) ? havel_errmsg(m_H) : "load failed";
+        LOG_ERROR("[Havel] Failed to load %s: %s", path.c_str(), m_lastError.c_str());
+        havel_settop(m_H, 0);
+        return false;
+    }
+    havel_pop(m_H, 1);
+    LOG_INFO("[Havel] Executed %s", path.c_str());
+    return true;
+}
+
+bool HavelHost::runString(const std::string& source, const std::string& name) {
+    if (!m_initialized || !m_H) {
+        m_lastError = "not initialized";
+        return false;
+    }
+    // C-API semantics: havel_loadstring already compiles AND executes
+    // the chunk, leaving its return value on the stack. No havel_call
+    // here - the stack top is a value, not a function.
+    //
+    // Pin the config chunk around every snippet: loadstring REPLACES the
+    // VM's main chunk, and keybind()'s stored closures are chunk-relative
+    // FUNCTION_OBJ_ID indexes - without the pin they re-resolve into the
+    // snippet's own function table (a havel_run snippet calling
+    // io.injectKey re-resolved into itself and spun: 139 triggers, zero
+    // closure logs - observed live). Restoring also resets current_chunk,
+    // so triggers that fire after the snippet resolve in the pinned chunk.
+    void* pin = havel_pin_main_chunk(m_H);
+    int status = havel_loadstring(m_H, source.c_str(), name.c_str());
+    if (status != HAVEL_OK) {
+        havel_restore_chunk(m_H, pin);
+        m_lastError = havel_errmsg(m_H) ? havel_errmsg(m_H) : "load failed";
+        LOG_ERROR("[Havel] Failed to compile %s: %s", name.c_str(), m_lastError.c_str());
+        havel_settop(m_H, 0);
+        return false;
+    }
+    havel_restore_chunk(m_H, pin);
+    havel_pop(m_H, 1);
+    return true;
+}
+
+// Serialize a value on the stack for the REPL. Scalars print raw, arrays
+// recurse through havel_arraylen/getindex, aggregates we cannot enumerate
+// degrade to a placeholder instead of crashing.
+static void havelSerializeValue(HavelState* H, int idx, std::string* out, int depth);
+
+void HavelHost::serializeValue(int idx, std::string* out) {
+    havelSerializeValue(m_H, idx, out, 0);
+}
+
+static void havelSerializeValue(HavelState* H, int idx, std::string* out, int depth) {
+    if (depth > 6) {
+        *out += "...";
+        return;
+    }
+    int t = havel_type(H, idx);
+    switch (t) {
+        case HAVEL_TNIL:
+            *out += "nil";
+            break;
+        case HAVEL_TBOOLEAN:
+            *out += havel_toboolean(H, idx) ? "true" : "false";
+            break;
+        case HAVEL_TINT:
+        case HAVEL_TFLOAT:
+        case HAVEL_TNUMBER: {
+            double n = havel_tonumber(H, idx);
+            char buf[32];
+            if (n == (long long)n && n > -1e15 && n < 1e15)
+                snprintf(buf, sizeof(buf), "%lld", (long long)n);
+            else
+                snprintf(buf, sizeof(buf), "%g", n);
+            *out += buf;
+            break;
+        }
+        case HAVEL_TSTRING:
+            *out += havel_tostring(H, idx) ? havel_tostring(H, idx) : "";
+            break;
+        case HAVEL_TARRAY: {
+            *out += "[";
+            size_t len = havel_arraylen(H, idx);
+            for (size_t i = 0; i < len && i < 32; i++) {
+                if (i) *out += ", ";
+                havel_getindex(H, idx, (int)i);  // C API is 0-based
+                havelSerializeValue(H, -1, out, depth + 1);
+                havel_pop(H, 1);
+            }
+            if (len > 32) *out += ", ...";
+            *out += "]";
+            break;
+        }
+        case HAVEL_TFUNCTION:
+            *out += "<fn>";
+            break;
+        default: {
+            // Objects/tuples/sets: no key-enumeration primitive exposed,
+            // show the kind and size instead of guessing the layout.
+            size_t len = havel_rawlen(H, idx);
+            *out += "{";
+            *out += (t == HAVEL_TOBJECT ? "object" : "value");
+            char buf[32];
+            snprintf(buf, sizeof(buf), ": %zu fields}", len);
+            *out += buf;
+            break;
+        }
+    }
+}
+
+bool HavelHost::evalString(const std::string& source, std::string* result,
+                           const std::string& name) {
+    if (!m_initialized || !m_H) {
+        m_lastError = "not initialized";
+        return false;
+    }
+    void* pin = havel_pin_main_chunk(m_H);
+    int status = havel_loadstring(m_H, source.c_str(), name.c_str());
+    if (status != HAVEL_OK) {
+        havel_restore_chunk(m_H, pin);
+        m_lastError = havel_errmsg(m_H) ? havel_errmsg(m_H) : "load failed";
+        havel_settop(m_H, 0);
+        return false;
+    }
+    if (result) serializeValue(-1, result);
+    havel_pop(m_H, 1);
+    havel_restore_chunk(m_H, pin);
+    return true;
+}

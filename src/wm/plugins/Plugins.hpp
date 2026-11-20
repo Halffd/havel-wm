@@ -1,0 +1,24 @@
+#pragma once
+
+#include <wm/plugins/Plugin.hpp>
+
+namespace havel {
+
+// Plugin factory functions
+Plugin* create_scale_plugin();
+Plugin* create_wallpaper_plugin();
+Plugin* create_notifications_plugin();
+Plugin* create_custom_layouts_plugin();
+Plugin* create_window_snap_plugin();
+Plugin* create_hot_corners_plugin();
+Plugin* create_gamma_plugin();
+Plugin* create_app_launcher_plugin();
+Plugin* create_alt_tab_plugin();
+Plugin* create_overview_plugin();
+Plugin* create_server_decoration_plugin();
+Plugin* create_draw_plugin();
+Plugin* create_fps_plugin();
+Plugin* create_zoom_plugin();
+Plugin* create_workspace_info_bar();
+
+} // namespace havel

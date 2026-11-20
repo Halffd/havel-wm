@@ -1,0 +1,10 @@
+// Test comma bug in object literals
+let obj1 = { name: "test", value: 42 }
+let obj2 = { 
+    name: "test", 
+    value: 42,
+}
+let obj3 = { name: "test", value: 42, }
+
+print(obj1.name)
+print(obj2.value)

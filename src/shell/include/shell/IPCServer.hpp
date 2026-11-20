@@ -1,0 +1,184 @@
+#pragma once
+
+#include <shell/WindowManager.hpp>
+#include <nlohmann/json.hpp>
+#include <string>
+#include <functional>
+#include <vector>
+#include <unordered_map>
+#include <unordered_set>
+
+namespace havel {
+
+// JSON type aliases for convenience
+using json_t = nlohmann::json;
+using JsonObject = nlohmann::ordered_json;
+using JsonArray = nlohmann::json::array_t;
+
+/**
+ * Enhanced IPC Server - Multiple clients, JSON protocol, event subscriptions
+ *
+ * Features:
+ * - Multiple concurrent clients (panel, external tools, scripts)
+ * - Proper JSON request/response protocol
+ * - Event subscriptions (window changes, workspace changes, focus changes)
+ * - Rich command set (window management, workspace, spawn, query)
+ * - Proper error handling with JSON error responses
+ *
+ * Protocol:
+ *   Request:  {"id": 1, "method": "get_windows", "params": {...}}
+ *   Response: {"id": 1, "result": {...}} or {"id": 1, "error": {"code": -1, "message": "..."}}
+ *
+ * Events (server-pushed):
+ *   {"jsonrpc": "2.0", "method": "window_created", "params": {...}}
+ */
+class IPCServer {
+public:
+    using CommandCallback = std::function<std::string(const std::string&)>;
+    using EventHandler = std::function<void(const std::string&)>;
+
+    // Event types for subscriptions
+    enum class EventType {
+        None = 0,
+        WindowCreated,
+        WindowDestroyed,
+        WindowFocused,
+        WindowTitleChanged,
+        WindowMoved,
+        WindowResized,
+        WorkspaceChanged,
+        All  // Subscribe to all events
+    };
+
+    IPCServer(WindowManager& windowManager);
+    ~IPCServer();
+
+    // Start/stop IPC server
+    bool start(const std::string& socketPath);
+    void stop();
+    bool isRunning() const { return m_running; }
+
+    // Register command handlers
+    void registerCommand(const std::string& cmd, CommandCallback cb);
+
+    // Process pending IPC events (called from main loop)
+    void processEvents();
+
+    // Get socket path
+    const std::string& getSocketPath() const { return m_socketPath; }
+
+    // Event broadcasting
+    void broadcastEvent(EventType type, const std::string& jsonData);
+    void subscribeClient(int clientFd, EventType type);
+    void unsubscribeClient(int clientFd, EventType type);
+
+    // Get connected client count
+    size_t getClientCount() const { return m_clientFds.size(); }
+
+    // Socket fds (listen first, then clients) for wlr-bridge event-loop
+    // sources; see the notify hook below.
+    size_t collectIpcFds(int* out, size_t max) const {
+        size_t n = 0;
+        if (m_serverFd >= 0 && n < max) out[n++] = m_serverFd;
+        for (int fd : m_clientFds) {
+            if (fd >= 0 && n < max) out[n++] = fd;
+        }
+        return n;
+    }
+
+    // Command handlers (public for Server.cpp lambdas)
+    std::string handleGetWindows();
+    std::string handleGetFocused();
+    std::string handleFocus(const std::string& args);
+    std::string handleMinimize(const std::string& args);
+    std::string handleMaximize(const std::string& args);
+    std::string handleRestore(const std::string& args);
+    std::string handleClose(const std::string& args);
+    std::string handleMove(const std::string& args);
+    std::string handleResize(const std::string& args);
+    std::string handleSetFloating(const std::string& args);
+    std::string handleWorkspace(const std::string& args);
+    std::string handleGetWorkspace();
+    std::string handleSpawn(const std::string& args);
+    std::string handleQuit();
+    std::string handlePing();
+    std::string handleSubscribe(const std::string& args);
+    std::string handleUnsubscribe(const std::string& args);
+    
+    // Screenshot & Recording
+    std::string handleScreenshot(const std::string& args);
+    // Screenshot via org.freedesktop.portal.Desktop (havel-portal backend,
+    // ext-image-copy-capture): proves the portal round trip end to end.
+    std::string handlePortalScreenshot(const std::string& args);
+    std::string handleScreenshotWindow(const std::string& args);
+    std::string handleScreenshotRegion(const std::string& args);
+    std::string handleAudioRecord(const std::string& args);
+    std::string handleVideoRecord(const std::string& args);
+    std::string handleStopRecording(const std::string& args);
+    
+    // Cursor Control
+    std::string handleGetCursorPosition(const std::string& args);
+    std::string handleWarpCursor(const std::string& args);
+    std::string handleClickPointer(const std::string& args);
+
+    // Cursor control hooks: the compositor side (Server) installs these so
+    // the IPC handlers can move the real wlr_cursor.
+    void setCursorWarpCallback(std::function<bool(int,int)> cb) { m_warpCursor = std::move(cb); }
+    void setCursorVisibilityCallback(std::function<void(bool)> cb) { m_cursorVisible = std::move(cb); }
+    void setCursorThemeCallback(std::function<void(const std::string&,int)> cb) { m_cursorTheme = std::move(cb); }
+    void setCursorQueryCallback(std::function<bool(int*,int*)> cb) { m_queryCursor = std::move(cb); }
+    void setPointerClickCallback(std::function<bool(uint32_t,bool)> cb) { m_clickPointer = std::move(cb); }
+    std::string handleSetCursorTheme(const std::string& args);
+    std::string handleSetCursorSize(const std::string& args);
+    std::string handleHideCursor(const std::string& args);
+    std::string handleShowCursor(const std::string& args);
+
+    // JSON helpers (public for use in Server.cpp lambdas)
+    std::string extractJsonString(const std::string& json, const std::string& key, const std::string& defaultValue = "");
+    int extractJsonInt(const std::string& json, const std::string& key, int defaultValue = 0);
+    float extractJsonFloat(const std::string& json, const std::string& key, float defaultValue = 0.0f);
+    bool extractJsonBool(const std::string& json, const std::string& key, bool defaultValue = false);
+    std::string jsonToString(const JsonObject& obj);
+    std::string jsonToString(const JsonArray& arr);
+    std::string createSuccessResponse(const std::string& message);
+    std::string createErrorResponse(int code, const std::string& message);
+
+private:
+
+    std::function<bool(int,int)> m_warpCursor;
+    std::function<bool(int*,int*)> m_queryCursor;
+    std::function<bool(uint32_t,bool)> m_clickPointer;
+    std::function<void(bool)> m_cursorVisible;
+    std::function<void(const std::string&,int)> m_cursorTheme;
+
+    // Message processing
+    void processMessage(int clientFd, const std::string& msg);
+    std::string processJsonRequest(const std::string& json);
+    std::string createResponse(int id, const std::string& result);
+    std::string createError(int id, int code, const std::string& message);
+    std::string createEvent(const std::string& method, const std::string& params);
+
+    // Event type to string
+    static std::string eventTypeToString(EventType type);
+
+    WindowManager& m_windowManager;
+    std::string m_socketPath;
+    int m_serverFd = -1;
+    bool m_running = false;
+
+    // Multiple clients (epoll-style with simple fd list)
+    std::vector<int> m_clientFds;
+    std::vector<std::string> m_clientBuffers;  // One buffer per client
+    std::unordered_map<int, std::unordered_set<EventType>> m_clientSubscriptions;
+    // Requesting client during processMessage dispatch (subscribe/
+    // unsubscribe are per-client). Single-threaded frame loop: no race.
+    int m_dispatchingFd = -1;
+
+    struct CommandHandler {
+        std::string name;
+        CommandCallback callback;
+    };
+    std::vector<CommandHandler> m_commands;
+};
+
+} // namespace havel

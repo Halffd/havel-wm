@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Havel WM
+Comment=A lightweight Wayland compositor with modern features
+Exec=havel-wm
+Type=Application
+DesktopNames=Havel
+Icon=preferences-system-windows

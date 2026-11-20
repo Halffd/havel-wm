@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Havel File Manager
+Comment=File Manager for Havel WM
+Exec=havel-filemanager %U
+Icon=system-file-manager
+Terminal=false
+Type=Application
+Categories=System;FileTools;FileManager;
+MimeType=inode/directory;
+Keywords=file;manager;explorer;browser;

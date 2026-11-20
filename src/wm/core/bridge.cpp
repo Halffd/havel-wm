@@ -1,0 +1,477 @@
+#include <wm/bridge.h>
+#include <wm/Server.hpp>
+#include <wm/plugins/Plugin.hpp>
+#include <wm/render/OverlayRenderer.hpp>
+#include "WindowGroupManager.hpp"
+#include "../desktop/DesktopManager.hpp"
+#include <Logger.h>
+#include <xkbcommon/xkbcommon-keysyms.h>
+#include <cstdint>
+#include <unistd.h>
+#include <string>
+#include <cstdlib>
+
+// Forward declare C server type and functions
+typedef struct havel_wlr_server havel_wlr_server_t;
+
+// Forward declare wlroots types
+struct wlr_output;
+
+extern "C" {
+    void havel_wlr_set_gamma(havel_wlr_server_t* server, float gamma);
+    void havel_wlr_set_temperature(havel_wlr_server_t* server, int kelvin);
+    void havel_wlr_set_brightness(havel_wlr_server_t* server, float brightness);
+    void havel_wlr_set_zoom_for_output(havel_wlr_server_t* server, int output_index, float zoom,
+                                        float cursor_x, float cursor_y);
+    void havel_wlr_set_zoom_for_output_simple(havel_wlr_server_t* server, int output_index, float zoom);
+}
+
+extern "C" {
+
+struct havel_cpp_server {
+    havel::Server* server;
+    void* nativeHandle;  // havel_wlr_server_t* - for calling C layer functions
+};
+
+struct havel_cpp_server* havel_cpp_server_create(void) {
+    auto* cpp = new havel_cpp_server;
+    cpp->server = new havel::Server();
+    cpp->nativeHandle = nullptr;
+    
+    // Start IPC server for external tool communication
+    // HAVEL_IPC_SOCKET overrides the default name so a second compositor
+    // instance gets its own IPC (with the live-socket check in
+    // IPCServer::start, the default path would refuse a second instance
+    // instead of stealing the first one's socket).
+    const char* ipc_override = getenv("HAVEL_IPC_SOCKET");
+    const char* runtime_dir = getenv("XDG_RUNTIME_DIR");
+    std::string socket_path;
+    if (ipc_override && *ipc_override) {
+        socket_path = ipc_override;
+    } else if (runtime_dir) {
+        socket_path = std::string(runtime_dir) + "/havel-wm.sock";
+    } else {
+        // Fallback to /tmp
+        socket_path = "/tmp/havel-wm.sock";
+    }
+
+    cpp->server->startIPCServer(socket_path);
+    
+    return cpp;
+}
+
+void havel_cpp_server_destroy(struct havel_cpp_server* server) {
+    if (!server) return;
+
+    // Delete C-layer objects that were created with new
+    if (server->server) {
+        // TextInputManager: created in havel_cpp_server_init_text_input,
+        // stored typed; Server does not own it.
+        if (server->server->textInputManager()) {
+            delete server->server->textInputManager();
+        }
+
+        // WindowGroupManager / DesktopManager are process-wide singletons
+        // (getWindowGroupManager()/getDesktopManager()); their destroy
+        // helpers delete AND null the globals so late accessor calls
+        // lazily recreate instead of dangling.
+        havel::destroyWindowGroupManager();
+        havel::destroyDesktopManager();
+
+        server->server->stopIPCServer();
+        delete server->server;
+    }
+    delete server;
+}
+
+void havel_cpp_server_set_native_handle(struct havel_cpp_server* server, void* handle) {
+    if (!server) return;
+    server->nativeHandle = handle;
+    server->server->setNativeHandle(handle);
+}
+
+void havel_cpp_server_set_overlay_layer(struct havel_cpp_server* server, void* overlay_layer) {
+    if (!server) return;
+    server->server->setOverlayLayer(overlay_layer);
+}
+
+void havel_cpp_server_init_text_input(struct havel_cpp_server* server, struct wl_display* display) {
+    if (!server || !display) return;
+    
+    // Create TextInputManager and register with Server
+    auto* textInputManager = new havel::TextInputManager(display);
+    server->server->setTextInputManager(textInputManager);
+    
+    printf("[TextInput] IME support initialized\n");
+}
+
+void havel_cpp_process_ipc_events(struct havel_cpp_server* server) {
+    if (!server) return;
+    server->server->processIPCEvents();
+}
+
+// Current IPC fds (listen socket first, then connected clients) so the
+// bridge can register event-loop sources for them in havel_wlr_run -
+// IPC starts before the display loop exists.
+int havel_cpp_ipc_fds(struct havel_cpp_server* server, int* out, int max) {
+    if (!server || !server->server) return 0;
+    return server->server->collectIpcFds(out, max);
+}
+
+void* havel_cpp_on_xdg_surface_new(struct havel_cpp_server* server, void* c_view, uint32_t workspace_id, const char* appId, const char* title) {
+    if (!server || !c_view) return nullptr;
+    
+    // C++ creates and owns the View object
+    // workspace_id is passed from C so C++ owns the truth
+    auto* view = server->server->createXdgView(c_view, workspace_id, appId, title);
+    
+    // Return opaque pointer for C to store
+    return static_cast<void*>(view);
+}
+
+void havel_cpp_on_view_mapped(struct havel_cpp_server* server, void* c_view) {
+    if (!server || !c_view) return;
+    auto* view = static_cast<havel::View*>(c_view);
+    server->server->onViewMapped(view);
+}
+
+void havel_cpp_on_view_unmapped(struct havel_cpp_server* server, void* c_view) {
+    if (!server || !c_view) return;
+    auto* view = static_cast<havel::View*>(c_view);
+    server->server->onViewUnmapped(view);
+}
+
+void havel_cpp_on_view_title_changed(struct havel_cpp_server* server, void* c_view, const char* title) {
+    if (!server || !c_view || !title) return;
+    auto* view = static_cast<havel::View*>(c_view);
+    server->server->onViewTitleChanged(view, std::string(title));
+}
+
+void havel_cpp_on_view_app_id_changed(struct havel_cpp_server* server, void* c_view, const char* app_id) {
+    if (!server || !c_view || !app_id) return;
+    auto* view = static_cast<havel::View*>(c_view);
+    server->server->onViewAppIdChanged(view, std::string(app_id));
+}
+
+void havel_cpp_on_view_destroyed(struct havel_cpp_server* server, void* c_view) {
+    if (!server || !c_view) return;
+    auto* view = static_cast<havel::View*>(c_view);
+    server->server->onViewDestroyed(view);
+}
+
+bool havel_cpp_on_key(struct havel_cpp_server* server, uint32_t keycode, bool pressed, uint32_t modifiers, uint32_t keysym, char key_char, const char* utf8) {
+    if (!server) return false;
+    return server->server->handleKey(keycode, pressed, modifiers, keysym, key_char, utf8);
+}
+
+void havel_cpp_on_pointer_button(struct havel_cpp_server* server, uint32_t button, bool pressed, double x, double y) {
+    if (!server) return;
+    server->server->handlePointerButton(button, pressed, x, y);
+}
+
+// Screen lock state for the C-side seat gates (button/axis/motion).
+bool havel_cpp_is_screen_locked(struct havel_cpp_server* server) {
+    return server && server->server && server->server->isScreenLocked();
+}
+
+// Overlay consumption protocol: dispatch the press to the plugin layer
+// BEFORE the seat notify; true = a plugin handled it, C stops the event.
+bool havel_cpp_on_pointer_button_consumed(struct havel_cpp_server* server,
+                                           uint32_t button, double x, double y) {
+    if (!server || !server->server) return false;
+    return server->server->pluginManager().dispatchMouseButton(
+        button, true, (int)x, (int)y);
+}
+
+
+void havel_cpp_on_pointer_motion(struct havel_cpp_server* server, double x, double y) {
+    if (!server) return;
+    server->server->handlePointerMotion(x, y);
+}
+
+void havel_cpp_on_pointer_decoration_motion(struct havel_cpp_server* server, int x, int y) {
+    if (!server) return;
+    server->server->pluginManager().onMouseMotion(x, y);
+}
+
+void havel_cpp_on_pointer_decoration_button(struct havel_cpp_server* server, uint32_t button, bool pressed, int x, int y) {
+    if (!server) return;
+    server->server->pluginManager().onMouseButton(button, pressed, x, y);
+}
+
+void havel_cpp_on_pointer_axis(struct havel_cpp_server* server, double dx, double dy) {
+    if (!server) return;
+    // Plugins consume scrolling through onMouseButton as wheel ticks
+    // (4 = up, 5 = down), the convention wlroots/X11 use for wheel
+    // buttons. One tick per axis event keeps the grid scroll step
+    // predictable regardless of the device's delta scaling.
+    uint32_t button = 0;
+    if (dy < 0) button = 4;
+    else if (dy > 0) button = 5;
+    else if (dx < 0) button = 4;   // horizontal scroll scrolls the grid too
+    else if (dx > 0) button = 5;
+    if (!button) return;
+
+    auto& pm = server->server->pluginManager();
+    int x = (int)server->server->cursorX();
+    int y = (int)server->server->cursorY();
+    pm.onMouseButton(button, true, x, y);
+    pm.onMouseButton(button, false, x, y);
+}
+
+void havel_cpp_set_output_geometry(struct havel_cpp_server* server, uint32_t workspace_id, int x, int y, int w, int h) {
+    if (!server) return;
+    havel::Rect geom{x, y, w, h};
+    server->server->setOutputGeometry(workspace_id, geom);
+}
+
+void havel_cpp_update_animations(struct havel_cpp_server* server) {
+    if (!server) return;
+    server->server->updateAnimations();
+}
+
+// Zoom magnifier capture handshake: C frame loop <-> plugin.
+bool havel_cpp_zoom_take_request(struct havel_cpp_server* server, int output_index,
+                                  float* cx, float* cy, int* w, int* h) {
+    if (!server || !server->server) return false;
+    return server->server->zoomTakeCaptureRequest(output_index, cx, cy, w, h);
+}
+
+// Declarative monitor rule lookup: does config.hv pin this output name
+// to a position? Returns false when no rule exists.
+bool havel_cpp_monitor_rule_lookup(struct havel_cpp_server* server, const char* name,
+                                    int* x, int* y) {
+    if (!server || !server->server || !name) return false;
+    return server->server->monitorRuleFor(name, x, y);
+}
+
+void havel_cpp_zoom_feed(struct havel_cpp_server* server, int output_index,
+                          const uint32_t* pixels, int w, int h, float src_x, float src_y) {
+    if (!server || !server->server) return;
+    server->server->zoomFeedCapture(output_index, pixels, w, h, src_x, src_y);
+}
+
+// Portal capture frame: the C layer reads an ext-image-copy-capture frame
+// and hands the pixel block here. Ownership transfers; the plugin manager
+// forwards to the registered consumer, then the block is freed. Without a
+// consumer the block is released immediately - a capture session with no
+// waiting reader must not accumulate.
+void havel_cpp_portal_frame(struct havel_cpp_server* server, uint32_t* pixels, int w, int h) {
+    if (server && server->server) {
+        server->server->pluginManager().portalFrame(pixels, w, h);
+    }
+    free(pixels);
+}
+
+void havel_cpp_dispatch_output_frame(struct havel_cpp_server* server, void* output, void* sceneOutput, int width, int height, int refresh) {
+    if (!server || !output) return;
+
+    havel::OutputFrameEvent frameEvent;
+    frameEvent.output = output;
+    frameEvent.sceneOutput = sceneOutput;
+    frameEvent.width = width;
+    frameEvent.height = height;
+    frameEvent.refresh = refresh;
+
+    server->server->pluginManager().dispatchOutputFrame(frameEvent);
+}
+
+void havel_cpp_get_background_color(struct havel_cpp_server* server, float* r, float* g, float* b) {
+    if (!server) return;
+    server->server->getBackgroundColor(r, g, b);
+}
+
+void havel_cpp_draw_overlays(struct havel_cpp_server* server, int width, int height,
+                             const struct havel_overlay_target* target) {
+    if (!server || !server->server) return;
+
+    // Record which output this pass is for before plugins draw: overlays
+    // that target one monitor (Alt-Tab) read it through the plugin API.
+    if (target) {
+        server->server->setOverlayTarget(target->x, target->y, target->w, target->h,
+                                         target->index, target->primary != 0,
+                                         target->under_cursor != 0);
+    }
+
+    // Get plugin manager and render overlays with the overlay renderer
+    auto& pluginManager = server->server->pluginManager();
+    havel::OverlayRenderer* renderer = server->server->getOverlayRenderer();
+    
+    if (!renderer) {
+        // Overlay renderer not initialized - this is expected if setOverlayLayer wasn't called
+        // or if OverlayRenderer::initialize() failed
+        static int logCount = 0;
+        if (logCount++ < 5) {
+            printf("[Overlays] SKIPPED - renderer is NULL (call %d)\n", logCount);
+        }
+        return;
+    }
+    
+    static int frameCount = 0;
+    if (++frameCount % 60 == 0) {
+        printf("[Overlays] Rendering %zu plugins\n", pluginManager.plugins().size());
+    }
+
+    // Frame lifecycle: beginFrame destroys last frame's immediate-mode
+    // nodes and re-creates the tree. This was never wired (the tree
+    // accumulated every node ever drawn - an unbounded scene-graph
+    // leak: a plugin drawing 30 nodes per frame piles up 1800/sec).
+    // Plugins that redraw less often than every frame must draw into
+    // persistent trees (OverlayRenderer::createPersistentTree) or
+    // their content would blink off between draws.
+    renderer->beginFrame(width, height, target ? target->index : -1);
+
+    // Check idle auto-lock every frame
+    server->server->checkIdleLock();
+
+    // Drive the wallpaper slideshow
+    {
+        auto* dm = server->server->desktopManager();
+        if (dm) static_cast<havel::DesktopManager*>(dm)->updateSlideshow();
+    }
+
+    // Render each plugin, then force the draw target back to the frame
+    // tree. A plugin that returns early between setTargetTree(tree) and
+    // setTargetTree(nullptr) would otherwise leak its persistent tree as
+    // the target, redirecting every later plugin's draws (observed: the
+    // Alt-Tab grid landed in a stale tree and never reached the screen).
+    for (auto& plugin : pluginManager.plugins()) {
+        plugin->renderOverlay(renderer);
+        renderer->setTargetTree(nullptr);
+    }
+
+    // Screen lock renders AFTER the plugin loop (still inside the
+    // overlay frame tree, before endFrame): plugins never paint over
+    // the lock screen.
+    if (server->server->isScreenLocked()) {
+        auto* lock = server->server->screenLock();
+        if (lock) {
+            const auto& t = server->server->overlayTarget();
+            lock->render(renderer, t.x, t.y, t.w, t.h);
+        }
+    }
+    renderer->endFrame();
+
+}
+
+void havel_cpp_server_spawn(struct havel_cpp_server* server, const char* command) {
+    if (!server || !command) return;
+
+    // Parse command into argv (simple space-splitting, no shell)
+    char* cmd_copy = strdup(command);
+    if (!cmd_copy) {
+        LOG_ERROR("[Spawn] strdup failed");
+        return;
+    }
+
+    char* argv[64];
+    int argc = 0;
+    char* token = strtok(cmd_copy, " \t\n");
+    while (token && argc < 63) {
+        argv[argc++] = token;
+        token = strtok(NULL, " \t\n");
+    }
+    argv[argc] = NULL;
+
+    if (argc == 0) {
+        free(cmd_copy);
+        return;
+    }
+
+    // Fork and exec the command
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Child process - execute command directly, no shell
+        execvp(argv[0], argv);
+        _exit(1);  // execvp failed
+    } else if (pid > 0) {
+        LOG_INFO("[Spawn] Launched command: %s (PID: %d)", command, pid);
+    } else {
+        LOG_ERROR("[Spawn] Failed to fork for command: %s", command);
+    }
+    free(cmd_copy);
+}
+
+void havel_cpp_init_window_groups(struct havel_cpp_server* server) {
+    if (!server || !server->server) return;
+
+    // Use the process-wide singleton so every consumer (current and
+    // future) sees the same configured instance. Previously this
+    // created a second instance that nothing ever read back.
+    auto& groupManager = havel::getWindowGroupManager();
+
+    server->server->setWindowGroupManager(&groupManager);
+
+    // Add default window rules
+    havel::WindowRule firefoxRule;
+    firefoxRule.appId = "firefox";
+    firefoxRule.groupType = havel::GroupType::Tabbed;
+    groupManager.addWindowRule(firefoxRule);
+
+    havel::WindowRule terminalRule;
+    terminalRule.appId = "foot";
+    terminalRule.groupType = havel::GroupType::SplitH;
+    groupManager.addWindowRule(terminalRule);
+
+    LOG_INFO("[Bridge] Window group manager initialized");
+}
+
+void havel_cpp_init_desktop(struct havel_cpp_server* server) {
+    if (!server || !server->server) return;
+
+    // Use the process-wide singleton so every consumer sees the same
+    // configured instance. Previously this created a second instance
+    // that nothing read back — NASAWallpaper's getDesktopManager()
+    // lazily created a different, never-configured one instead.
+    auto& desktopManager = havel::getDesktopManager();
+    desktopManager.initialize();
+
+    server->server->setDesktopManager(&desktopManager);
+
+    // Wallpaper requests from the desktop manager (NASA wallpapers,
+    // slideshow) go to the real renderer path, same as the IPC
+    // set_wallpaper command.
+    desktopManager.setOnWallpaperChanged(
+        [srv = server->server](const std::string& path) {
+            srv->setWallpaperFromFile(path);
+        });
+
+    // Bind logout shortcut (Ctrl+Alt+Delete)
+    desktopManager.bindLogout(XKB_KEY_Delete, (1 << 0) | (1 << 2) | (1 << 3));  // Shift=bit0, Ctrl=bit2, Alt=bit3
+
+    LOG_INFO("[Bridge] Desktop manager initialized");
+}
+
+void* havel_cpp_get_scene_graph(struct havel_cpp_server* server) {
+    if (!server || !server->server) return nullptr;
+    return server->server->sceneGraph();
+}
+
+void havel_cpp_process_desktop_mouse(struct havel_cpp_server* server, int button, bool pressed, int x, int y) {
+    if (!server || !server->server) return;
+    
+    auto* desktopManager = static_cast<havel::DesktopManager*>(server->server->desktopManager());
+    if (desktopManager) {
+        desktopManager->processMouseButton(button, pressed, x, y);
+    }
+}
+
+void havel_cpp_process_desktop_motion(struct havel_cpp_server* server, int x, int y) {
+    if (!server || !server->server) return;
+    
+    auto* desktopManager = static_cast<havel::DesktopManager*>(server->server->desktopManager());
+    if (desktopManager) {
+        desktopManager->processMouseMove(x, y);
+    }
+}
+
+void havel_cpp_process_desktop_key(struct havel_cpp_server* server, uint32_t keysym, uint32_t modifiers) {
+    if (!server || !server->server) return;
+
+    auto* desktopManager = static_cast<havel::DesktopManager*>(server->server->desktopManager());
+    if (desktopManager) {
+        desktopManager->processKeyDown(keysym, modifiers);
+    }
+}
+
+} // extern "C"
